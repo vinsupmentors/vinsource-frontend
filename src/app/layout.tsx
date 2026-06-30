@@ -6,8 +6,8 @@ import { Providers } from './providers';
 const inter = Inter({ subsets: ['latin'] });
 
 export const metadata: Metadata = {
-  title: 'Enterprise HRMS',
-  description: 'Human Resource Management System',
+  title: 'Vin-Source Portal',
+  description: 'Vinsup Skill Academy — HR & Operations Portal',
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

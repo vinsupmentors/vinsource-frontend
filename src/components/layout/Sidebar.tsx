@@ -371,12 +371,10 @@ export function Sidebar() {
         )}
       >
         {/* Logo */}
-        <div className="flex items-center gap-3 px-5 py-4 border-b border-sidebar-border">
-          <div className="w-9 h-9 bg-blue-500 rounded-xl flex items-center justify-center flex-shrink-0">
-            <Building2 className="w-5 h-5 text-white" />
-          </div>
+        <div className="flex items-center gap-3 px-4 py-3 border-b border-sidebar-border">
+          <img src="/vinsup-logo.png" alt="Vinsup" className="h-9 w-auto object-contain flex-shrink-0" />
           <div className="min-w-0 flex-1">
-            <p className="text-sidebar-foreground font-bold text-sm leading-tight">Enterprise HRMS</p>
+            <p className="text-sidebar-foreground font-bold text-sm leading-tight">Vin-Source Portal</p>
             <p className="text-sidebar-foreground/50 text-xs capitalize truncate">
               {role?.replace(/_/g, ' ').toLowerCase()}
             </p>
