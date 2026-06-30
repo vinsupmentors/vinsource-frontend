@@ -31,6 +31,11 @@ export function DashboardLayout() {
     if (user?.role === 'STUDENT') navigate('/student', { replace: true });
   }, [user, navigate]);
 
+  // Employees must change their temporary password before anything else.
+  useEffect(() => {
+    if (user && user.mustChangePassword) navigate('/change-password', { replace: true });
+  }, [user, navigate]);
+
   // Employees may not reach the dashboard until onboarding is fully COMPLETED:
   // profile filled in, documents uploaded, policy agreed, documents signed,
   // original documents confirmed, and HR's final approval granted.

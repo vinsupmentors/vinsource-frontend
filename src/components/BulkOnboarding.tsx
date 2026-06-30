@@ -4,12 +4,12 @@ import api from '@/lib/api';
 
 interface BulkRow {
   firstName: string;
-  lastName: string;
+  lastName?: string;
   email: string;
   phone?: string;
   joiningDate: string;
-  departmentId: string;
-  designationId: string;
+  departmentName: string;
+  designationName: string;
 }
 
 interface ResultRow {
@@ -21,7 +21,7 @@ interface ResultRow {
 interface Dept  { id: string; name: string; }
 interface Desig { id: string; name: string; }
 
-const CSV_HEADERS = ['firstName','lastName','email','phone','joiningDate','departmentId','designationId'];
+const CSV_HEADERS = ['firstName','lastName','email','phone','joiningDate','departmentName','designationName'];
 
 function parseCSV(text: string): Record<string, string>[] {
   const [headerLine, ...rows] = text.trim().split('\n');
@@ -48,15 +48,15 @@ export default function BulkOnboarding({ onDone }: { onDone: () => void }) {
     api.get('/api/designations').then((r) => setDesigs(r.data.data || [])).catch(() => {});
   }, []);
 
-  // Download template CSV with real dept/desig IDs in comments
+  // Download template CSV with name-based columns
   const downloadTemplate = () => {
     const sampleRows = [
-      ['Priya','Sharma','priya.sharma@vinsupskillacademy.com','9876543210','2024-07-01', depts[0]?.id ?? 'DEPT_ID', desigs[0]?.id ?? 'DESIG_ID'],
-      ['Arjun','Kumar','arjun.kumar@vinsupskillacademy.com','9876543211','2024-07-01', depts[0]?.id ?? 'DEPT_ID', desigs[0]?.id ?? 'DESIG_ID'],
+      ['Priya','Sharma','priya.sharma@vinsupskillacademy.com','9876543210','2024-07-01','Sales','Skill Advisor'],
+      ['Arjun','Kumar','arjun.kumar@vinsupskillacademy.com','9876543211','2024-07-01','Production','Skill Mentor - Data Science'],
     ];
-    const deptRef  = depts.map((d)  => `# ${d.id} = ${d.name}`).join('\n');
-    const desigRef = desigs.map((d) => `# ${d.id} = ${d.name}`).join('\n');
-    const header   = `# DEPARTMENT IDs:\n${deptRef}\n\n# DESIGNATION IDs:\n${desigRef}\n\n`;
+    const deptRef  = depts.map((d)  => `# ${d.name}`).join('\n');
+    const desigRef = desigs.map((d) => `# ${d.name}`).join('\n');
+    const header   = `# Use department and designation NAMES (not IDs).\n# Existing departments:\n${deptRef}\n\n# Existing designations:\n${desigRef}\n\n`;
     const csv = CSV_HEADERS.join(',') + '\n' + sampleRows.map((r) => r.join(',')).join('\n');
     const blob = new Blob([header + csv], { type: 'text/csv' });
     const url  = URL.createObjectURL(blob);
@@ -138,20 +138,16 @@ export default function BulkOnboarding({ onDone }: { onDone: () => void }) {
                 </tr>
               </thead>
               <tbody className="divide-y divide-border">
-                {rows.map((r, i) => {
-                  const dept  = depts.find((d)  => d.id === r.departmentId);
-                  const desig = desigs.find((d) => d.id === r.designationId);
-                  return (
-                    <tr key={i} className="hover:bg-muted/40">
-                      <td className="px-3 py-2">{r.firstName} {r.lastName}</td>
-                      <td className="px-3 py-2">{r.email}</td>
-                      <td className="px-3 py-2">{r.phone || '—'}</td>
-                      <td className="px-3 py-2">{r.joiningDate}</td>
-                      <td className="px-3 py-2">{dept?.name || <span className="text-red-500">{r.departmentId}</span>}</td>
-                      <td className="px-3 py-2">{desig?.name || <span className="text-red-500">{r.designationId}</span>}</td>
-                    </tr>
-                  );
-                })}
+                {rows.map((r, i) => (
+                  <tr key={i} className="hover:bg-muted/40">
+                    <td className="px-3 py-2">{r.firstName} {r.lastName}</td>
+                    <td className="px-3 py-2">{r.email}</td>
+                    <td className="px-3 py-2">{r.phone || '—'}</td>
+                    <td className="px-3 py-2">{r.joiningDate}</td>
+                    <td className="px-3 py-2">{r.departmentName || <span className="text-red-500">—</span>}</td>
+                    <td className="px-3 py-2">{r.designationName || <span className="text-red-500">—</span>}</td>
+                  </tr>
+                ))}
               </tbody>
             </table>
           </div>

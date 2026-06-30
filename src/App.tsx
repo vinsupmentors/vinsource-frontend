@@ -32,6 +32,7 @@ import DigitalMarketingPage from './pages/DigitalMarketing';
 import CampaignDetailPage from './pages/CampaignDetail';
 import DigitalMarketingDayPage from './pages/DigitalMarketingDay';
 import OnboardingPage from './pages/Onboarding';
+import ChangePasswordPage from './pages/ChangePassword';
 import OnboardingDetailPage from './pages/OnboardingDetail';
 import ResignationPage from './pages/Resignation';
 import ExitClearancePage from './pages/ExitClearance';
@@ -94,6 +95,16 @@ export default function App() {
             element={
               <PrivateRoute>
                 <SetupPage />
+              </PrivateRoute>
+            }
+          />
+
+          {/* Force password change for first-time employees */}
+          <Route
+            path="/change-password"
+            element={
+              <PrivateRoute>
+                <ChangePasswordPage />
               </PrivateRoute>
             }
           />
