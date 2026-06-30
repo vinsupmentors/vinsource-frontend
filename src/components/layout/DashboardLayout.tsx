@@ -50,13 +50,17 @@ export function DashboardLayout() {
       .then(r => {
         if (cancelled) return;
         const data = r.data?.data as OnboardingStatus | null;
-        if (data && data.status !== 'COMPLETED') {
-          navigate('/setup');
+        // No record or not fully approved → must complete onboarding first
+        if (!data || data.status !== 'COMPLETED') {
+          navigate('/setup', { replace: true });
           return;
         }
         setOnbChecked(true);
       })
-      .catch(() => { if (!cancelled) setOnbChecked(true); });
+      .catch(() => {
+        // Any error → force setup to be safe
+        if (!cancelled) navigate('/setup', { replace: true });
+      });
     return () => { cancelled = true; };
   }, [user, navigate]);
 

@@ -87,7 +87,11 @@ export default function SetupWizard() {
     api.get('/api/onboarding/my').then(r => {
       const data = r.data.data;
       setOnboardingStatus(data);
-      if (!data) { navigate('/dashboard'); return; }
+      if (!data) {
+        // Backend will auto-create record; show the wizard
+        setLoadingStatus(false);
+        return;
+      }
       if (data.status === 'COMPLETED') { navigate('/dashboard'); return; }
       // Pre-fill name from onboarding record
       setPersonal(p => ({
@@ -102,7 +106,7 @@ export default function SetupWizard() {
           uploaded: data.uploadedDocTypes.includes(d.type),
         })));
       }
-    }).catch(() => navigate('/dashboard')).finally(() => setLoadingStatus(false));
+    }).catch(() => setLoadingStatus(false)).finally(() => setLoadingStatus(false));
   }, [token]);
 
   // ─── Navigation ─────────────────────────────────────────────────────────────
