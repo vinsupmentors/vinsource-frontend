@@ -61,8 +61,8 @@ export default function StudentPortfolio() {
   const submit = async () => {
     setSaving(true);
     try {
-      const clean = <T extends Record<string, string>>(rows: T[]) =>
-        rows.filter((r) => Object.values(r).some((v) => v.trim() !== ''));
+      const clean = <T extends object>(rows: T[]) =>
+        rows.filter((r) => Object.values(r as Record<string, unknown>).some((v) => String(v ?? '').trim() !== ''));
       const res = await api.post('/api/student-portal/portfolio', {
         summary,
         education: clean(education),
@@ -200,7 +200,7 @@ export default function StudentPortfolio() {
   );
 }
 
-function RepeatingSection<T extends Record<string, string>>({
+function RepeatingSection<T extends object>({
   title, rows, setRows, makeEmpty, fields,
 }: {
   title: string;
@@ -211,7 +211,7 @@ function RepeatingSection<T extends Record<string, string>>({
 }) {
   const update = (idx: number, key: keyof T, value: string) => {
     const next = rows.slice();
-    next[idx] = { ...next[idx], [key]: value };
+    next[idx] = { ...next[idx], [key]: value } as T;
     setRows(next);
   };
   const remove = (idx: number) => setRows(rows.length > 1 ? rows.filter((_, i) => i !== idx) : [makeEmpty()]);
@@ -235,7 +235,7 @@ function RepeatingSection<T extends Record<string, string>>({
                 f.textarea ? (
                   <textarea
                     key={String(f.key)}
-                    value={row[f.key] || ''}
+                    value={(row[f.key as keyof T] as string) || ''}
                     onChange={(e) => update(idx, f.key, e.target.value)}
                     placeholder={f.label}
                     rows={2}
@@ -244,7 +244,7 @@ function RepeatingSection<T extends Record<string, string>>({
                 ) : (
                   <input
                     key={String(f.key)}
-                    value={row[f.key] || ''}
+                    value={(row[f.key as keyof T] as string) || ''}
                     onChange={(e) => update(idx, f.key, e.target.value)}
                     placeholder={f.label}
                     className="w-full border rounded-lg px-2 py-1.5 text-sm"

@@ -47,7 +47,10 @@ export default function StudentProjects() {
   useEffect(load, []);
 
   const updateDraft = (releaseId: string, field: 'linkUrl' | 'note' | 'file', value: string | File | null) => {
-    setDrafts((d) => ({ ...d, [releaseId]: { linkUrl: '', note: '', file: null, ...d[releaseId], [field]: value } }));
+    setDrafts((d) => {
+      const prev = d[releaseId] ?? { linkUrl: '', note: '', file: null };
+      return { ...d, [releaseId]: { ...prev, [field]: value } };
+    });
   };
 
   const submit = async (release: ProjectRelease) => {
@@ -166,7 +169,8 @@ export default function StudentProjects() {
                 )}
               </div>
             );
-          })}
+          })
+        }
         </div>
       )}
     </div>
