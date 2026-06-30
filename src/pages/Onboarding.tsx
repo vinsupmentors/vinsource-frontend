@@ -2,8 +2,9 @@ import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import api from '@/lib/api';
 import { useRole } from '@/hooks/useAuth';
-import { UserPlus, ChevronRight, Plus, X, Loader2 } from 'lucide-react';
+import { UserPlus, ChevronRight, Plus, X, Loader2, Users } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import BulkOnboarding from '@/components/BulkOnboarding';
 
 interface OnboardingRequest {
   id: string;
@@ -42,6 +43,7 @@ export default function OnboardingPage() {
   const [loading, setLoading] = useState(true);
   const [statusFilter, setStatusFilter] = useState('');
   const [showForm, setShowForm] = useState(false);
+  const [showBulk, setShowBulk] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [form, setForm] = useState({
     firstName: '', lastName: '', email: '', phone: '',
@@ -93,12 +95,20 @@ export default function OnboardingPage() {
           <p className="text-muted-foreground text-sm">{total} total requests</p>
         </div>
         {isHR && (
-          <button
-            onClick={() => setShowForm(true)}
-            className="flex items-center gap-2 px-4 py-2 bg-primary text-primary-foreground rounded-lg font-medium hover:opacity-90 transition text-sm"
-          >
-            <Plus className="w-4 h-4" /> New Onboarding
-          </button>
+          <div className="flex gap-2">
+            <button
+              onClick={() => { setShowBulk(true); setShowForm(false); }}
+              className="flex items-center gap-2 px-4 py-2 border border-border rounded-lg font-medium hover:bg-accent transition text-sm"
+            >
+              <Users className="w-4 h-4" /> Bulk Onboarding
+            </button>
+            <button
+              onClick={() => { setShowForm(true); setShowBulk(false); }}
+              className="flex items-center gap-2 px-4 py-2 bg-primary text-primary-foreground rounded-lg font-medium hover:opacity-90 transition text-sm"
+            >
+              <Plus className="w-4 h-4" /> New Onboarding
+            </button>
+          </div>
         )}
       </div>
 
@@ -166,6 +176,17 @@ export default function OnboardingPage() {
               </Link>
             );
           })}
+        </div>
+      )}
+
+      {/* Bulk Onboarding Panel */}
+      {showBulk && (
+        <div className="bg-card border border-border rounded-2xl p-6">
+          <div className="flex items-center justify-between mb-5">
+            <h2 className="text-lg font-bold flex items-center gap-2"><Users className="w-5 h-5" /> Bulk Onboarding</h2>
+            <button onClick={() => setShowBulk(false)} className="text-muted-foreground hover:text-foreground"><X className="w-5 h-5" /></button>
+          </div>
+          <BulkOnboarding onDone={() => { setShowBulk(false); fetchRequests(); }} />
         </div>
       )}
 
