@@ -53,6 +53,14 @@ export default function EmployeeDetail() {
   const [salarySaving, setSalarySaving] = useState(false);
   const [salaryError, setSalaryError] = useState('');
 
+  // Employment edit state (HR / SUPER_ADMIN)
+  const [depts, setDepts] = useState<{ id: string; name: string }[]>([]);
+  const [desigs, setDesigs] = useState<{ id: string; name: string }[]>([]);
+  const [editEmp, setEditEmp] = useState(false);
+  const [editForm, setEditForm] = useState({ departmentId: '', designationId: '', role: '', status: '', joiningDate: '' });
+  const [editSaving, setEditSaving] = useState(false);
+  const [editError, setEditError] = useState('');
+
   // Attendance history for this employee
   const [attRecords, setAttRecords] = useState<AttRecord[]>([]);
   const [attLoading, setAttLoading] = useState(false);
@@ -68,6 +76,12 @@ export default function EmployeeDetail() {
   }, [id]);
 
   useEffect(() => {
+    if (!isHR) return;
+    api.get<{ data: { id: string; name: string }[] }>('/api/departments').then(r => setDepts(r.data.data || [])).catch(() => {});
+    api.get<{ data: { id: string; name: string }[] }>('/api/designations').then(r => setDesigs(r.data.data || [])).catch(() => {});
+  }, [isHR]);
+
+  useEffect(() => {
     if (tab !== 'attendance' || !id) return;
     setAttLoading(true);
     api.get<{ data: AttRecord[] }>(`/api/attendance/history?month=${attMonth}&year=${attYear}&limit=60`, {
@@ -78,6 +92,33 @@ export default function EmployeeDetail() {
       .catch(() => setAttRecords([]))
       .finally(() => setAttLoading(false));
   }, [tab, id, attMonth, attYear]);
+
+  const openEditEmp = () => {
+    setEditForm({
+      departmentId: emp?.department?.id ?? '',
+      designationId: emp?.designation?.id ?? '',
+      role: emp?.user?.role ?? 'EMPLOYEE',
+      status: emp?.status ?? 'ACTIVE',
+      joiningDate: emp?.joiningDate ? new Date(emp.joiningDate).toISOString().split('T')[0] : '',
+    });
+    setEditError('');
+    setEditEmp(true);
+  };
+
+  const saveEditEmp = async () => {
+    setEditSaving(true);
+    setEditError('');
+    try {
+      await api.put(`/api/employees/${id}`, editForm);
+      const r = await api.get<{ data: Employee }>(`/api/employees/${id}`);
+      setEmp(r.data.data);
+      setEditEmp(false);
+    } catch (e: any) {
+      setEditError(e.response?.data?.message ?? 'Failed to save changes');
+    } finally {
+      setEditSaving(false);
+    }
+  };
 
   if (loading) {
     return <div className="flex items-center justify-center h-64"><Loader2 className="w-7 h-7 animate-spin text-primary" /></div>;
@@ -183,17 +224,113 @@ export default function EmployeeDetail() {
 
           {/* Employment */}
           <div className="bg-card border rounded-xl p-5 space-y-4">
-            <h2 className="font-semibold flex items-center gap-2">
-              <Briefcase className="w-4 h-4 text-purple-500" /> Employment Details
-            </h2>
-            <InfoRow label="Employee Code" value={emp.employeeCode} mono />
-            <InfoRow label="Department" value={emp.department?.name ?? '—'} />
-            <InfoRow label="Designation" value={emp.designation?.name ?? '—'} />
-            <InfoRow label="Branch" value={emp.branch?.name ?? '—'} />
-            <InfoRow label="Joining Date" value={formatDate(emp.joiningDate)} />
-            <InfoRow label="Probation End" value={emp.probationEndDate ? formatDate(emp.probationEndDate) : '—'} />
-            {emp.manager && (
-              <InfoRow label="Reporting Manager" value={`${emp.manager.firstName} ${emp.manager.lastName}`} />
+            <div className="flex items-center justify-between">
+              <h2 className="font-semibold flex items-center gap-2">
+                <Briefcase className="w-4 h-4 text-purple-500" /> Employment Details
+              </h2>
+              {isHR && !editEmp && (
+                <button
+                  onClick={openEditEmp}
+                  className="flex items-center gap-1.5 text-xs px-3 py-1.5 border rounded-lg hover:bg-muted transition-colors"
+                >
+                  <Edit2 className="w-3.5 h-3.5" /> Edit
+                </button>
+              )}
+            </div>
+
+            {editEmp ? (
+              <div className="space-y-3">
+                <div>
+                  <label className="block text-xs text-muted-foreground mb-1">Department</label>
+                  <select
+                    value={editForm.departmentId}
+                    onChange={e => setEditForm(f => ({ ...f, departmentId: e.target.value }))}
+                    className="w-full px-3 py-2 text-sm border rounded-lg bg-background focus:outline-none focus:ring-2 focus:ring-primary/30"
+                  >
+                    <option value="">— Select Department —</option>
+                    {depts.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-xs text-muted-foreground mb-1">Designation</label>
+                  <select
+                    value={editForm.designationId}
+                    onChange={e => setEditForm(f => ({ ...f, designationId: e.target.value }))}
+                    className="w-full px-3 py-2 text-sm border rounded-lg bg-background focus:outline-none focus:ring-2 focus:ring-primary/30"
+                  >
+                    <option value="">— Select Designation —</option>
+                    {desigs.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-xs text-muted-foreground mb-1">Role</label>
+                  <select
+                    value={editForm.role}
+                    onChange={e => setEditForm(f => ({ ...f, role: e.target.value }))}
+                    className="w-full px-3 py-2 text-sm border rounded-lg bg-background focus:outline-none focus:ring-2 focus:ring-primary/30"
+                  >
+                    {['EMPLOYEE', 'MANAGER', 'HR', 'ADMIN'].map(r => (
+                      <option key={r} value={r}>{r.replace(/_/g, ' ')}</option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-xs text-muted-foreground mb-1">Status</label>
+                  <select
+                    value={editForm.status}
+                    onChange={e => setEditForm(f => ({ ...f, status: e.target.value }))}
+                    className="w-full px-3 py-2 text-sm border rounded-lg bg-background focus:outline-none focus:ring-2 focus:ring-primary/30"
+                  >
+                    {['ACTIVE', 'ON_PROBATION', 'INACTIVE', 'TERMINATED'].map(s => (
+                      <option key={s} value={s}>{s.replace(/_/g, ' ')}</option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-xs text-muted-foreground mb-1">Joining Date</label>
+                  <input
+                    type="date"
+                    value={editForm.joiningDate}
+                    onChange={e => setEditForm(f => ({ ...f, joiningDate: e.target.value }))}
+                    className="w-full px-3 py-2 text-sm border rounded-lg bg-background focus:outline-none focus:ring-2 focus:ring-primary/30"
+                  />
+                </div>
+
+                {editError && <p className="text-xs text-red-500">{editError}</p>}
+
+                <div className="flex gap-2 pt-1">
+                  <button
+                    onClick={() => setEditEmp(false)}
+                    className="flex items-center gap-1.5 px-3 py-1.5 text-xs border rounded-lg hover:bg-muted transition-colors"
+                  >
+                    <X className="w-3.5 h-3.5" /> Cancel
+                  </button>
+                  <button
+                    onClick={saveEditEmp}
+                    disabled={editSaving}
+                    className="flex items-center gap-1.5 px-4 py-1.5 text-xs bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-60"
+                  >
+                    {editSaving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Check className="w-3.5 h-3.5" />}
+                    Save Changes
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <div className="space-y-4">
+                <InfoRow label="Employee Code" value={emp.employeeCode} mono />
+                <InfoRow label="Department" value={emp.department?.name ?? '—'} />
+                <InfoRow label="Designation" value={emp.designation?.name ?? '—'} />
+                <InfoRow label="Branch" value={emp.branch?.name ?? '—'} />
+                <InfoRow label="Joining Date" value={formatDate(emp.joiningDate)} />
+                <InfoRow label="Probation End" value={emp.probationEndDate ? formatDate(emp.probationEndDate) : '—'} />
+                {emp.manager && (
+                  <InfoRow label="Reporting Manager" value={`${emp.manager.firstName} ${emp.manager.lastName}`} />
+                )}
+              </div>
             )}
           </div>
 
