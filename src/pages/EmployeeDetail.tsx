@@ -5,7 +5,8 @@ import { Employee } from '@/types';
 import { formatDate, formatCurrency, getInitials } from '@/lib/utils';
 import {
   ArrowLeft, Mail, Phone, Building2, Briefcase, Calendar, CreditCard,
-  MapPin, User, Shield, Loader2, AlertCircle, FileText, DollarSign, Clock, Edit2, Check, X
+  MapPin, User, Shield, Loader2, AlertCircle, FileText, DollarSign, Clock, Edit2, Check, X,
+  KeyRound, Eye, EyeOff, RefreshCw,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useRole } from '@/hooks/useAuth';
@@ -53,6 +54,14 @@ export default function EmployeeDetail() {
   const [salarySaving, setSalarySaving] = useState(false);
   const [salaryError, setSalaryError] = useState('');
 
+  // Reset password state (HR only)
+  const [resetPwdOpen, setResetPwdOpen] = useState(false);
+  const [resetPwdNew, setResetPwdNew] = useState('');
+  const [resetPwdShow, setResetPwdShow] = useState(false);
+  const [resetPwdSaving, setResetPwdSaving] = useState(false);
+  const [resetPwdDone, setResetPwdDone] = useState(false);
+  const [resetPwdError, setResetPwdError] = useState('');
+
   // Employment edit state (HR / SUPER_ADMIN)
   const [depts, setDepts] = useState<{ id: string; name: string }[]>([]);
   const [desigs, setDesigs] = useState<{ id: string; name: string }[]>([]);
@@ -92,6 +101,34 @@ export default function EmployeeDetail() {
       .catch(() => setAttRecords([]))
       .finally(() => setAttLoading(false));
   }, [tab, id, attMonth, attYear]);
+
+  const generatePwd = () => {
+    const chars = 'ABCDEFGHJKMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789';
+    const rand = Array.from({ length: 7 }, () => chars[Math.floor(Math.random() * chars.length)]).join('');
+    return `Vinsup@${rand}`;
+  };
+
+  const openResetPwd = () => {
+    setResetPwdNew(generatePwd());
+    setResetPwdShow(false);
+    setResetPwdDone(false);
+    setResetPwdError('');
+    setResetPwdOpen(true);
+  };
+
+  const doResetPassword = async () => {
+    if (!resetPwdNew || resetPwdNew.length < 6) { setResetPwdError('Password must be at least 6 characters'); return; }
+    setResetPwdSaving(true);
+    setResetPwdError('');
+    try {
+      await api.put('/api/auth/reset-password', { userId: emp?.userId, newPassword: resetPwdNew });
+      setResetPwdDone(true);
+    } catch (e: any) {
+      setResetPwdError(e.response?.data?.message ?? 'Failed to reset password');
+    } finally {
+      setResetPwdSaving(false);
+    }
+  };
 
   const openEditEmp = () => {
     setEditForm({
@@ -169,7 +206,15 @@ export default function EmployeeDetail() {
                 {emp.designation?.name ?? '—'} · {emp.department?.name ?? '—'}
               </p>
             </div>
-            <div className="ml-auto pb-1">
+            <div className="ml-auto pb-1 flex items-center gap-2">
+              {isHR && (
+                <button
+                  onClick={openResetPwd}
+                  className="flex items-center gap-1.5 text-xs px-3 py-1.5 border rounded-lg hover:bg-muted transition-colors text-muted-foreground hover:text-foreground"
+                >
+                  <KeyRound className="w-3.5 h-3.5" /> Reset Password
+                </button>
+              )}
               <span className={cn(
                 'text-xs font-medium px-3 py-1 rounded-full',
                 emp.status === 'ACTIVE'
@@ -606,6 +651,101 @@ export default function EmployeeDetail() {
                 })}
               </tbody>
             </table>
+          </div>
+        </div>
+      )}
+
+      {/* ── Reset Password Modal ── */}
+      {resetPwdOpen && (
+        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+          <div className="bg-card border rounded-2xl w-full max-w-md shadow-xl">
+            <div className="flex items-center justify-between px-6 py-4 border-b">
+              <h2 className="font-semibold flex items-center gap-2">
+                <KeyRound className="w-4 h-4 text-amber-500" /> Reset Password
+              </h2>
+              <button onClick={() => setResetPwdOpen(false)}><X className="w-5 h-5 text-muted-foreground" /></button>
+            </div>
+
+            <div className="p-6 space-y-4">
+              {resetPwdDone ? (
+                <div className="text-center space-y-3 py-4">
+                  <div className="w-12 h-12 bg-green-100 rounded-full flex items-center justify-center mx-auto">
+                    <Check className="w-6 h-6 text-green-600" />
+                  </div>
+                  <p className="font-semibold">Password Reset Successfully</p>
+                  <p className="text-sm text-muted-foreground">
+                    New credentials have been emailed to <strong>{emp?.user?.email}</strong>.<br />
+                    Nancy must change her password on next login.
+                  </p>
+                  <button
+                    onClick={() => setResetPwdOpen(false)}
+                    className="mt-2 px-5 py-2 bg-primary text-primary-foreground rounded-xl text-sm font-medium hover:opacity-90"
+                  >
+                    Done
+                  </button>
+                </div>
+              ) : (
+                <>
+                  <p className="text-sm text-muted-foreground">
+                    Set a new temporary password for <strong>{fullName}</strong>. An email with the new credentials will be sent to <strong>{emp?.user?.email}</strong> automatically.
+                  </p>
+
+                  <div>
+                    <label className="block text-xs font-medium text-muted-foreground mb-1.5">New Password</label>
+                    <div className="flex gap-2">
+                      <div className="relative flex-1">
+                        <input
+                          type={resetPwdShow ? 'text' : 'password'}
+                          value={resetPwdNew}
+                          onChange={e => setResetPwdNew(e.target.value)}
+                          className="w-full px-3 py-2 pr-10 text-sm border rounded-lg bg-background focus:outline-none focus:ring-2 focus:ring-primary/30 font-mono"
+                          placeholder="Enter new password"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => setResetPwdShow(s => !s)}
+                          className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                        >
+                          {resetPwdShow ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                        </button>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => setResetPwdNew(generatePwd())}
+                        className="flex items-center gap-1.5 px-3 py-2 text-xs border rounded-lg hover:bg-muted transition-colors"
+                        title="Generate new password"
+                      >
+                        <RefreshCw className="w-3.5 h-3.5" /> Generate
+                      </button>
+                    </div>
+                    <p className="text-[11px] text-muted-foreground mt-1">Employee will be forced to change this on next login.</p>
+                  </div>
+
+                  {resetPwdError && (
+                    <p className="text-xs text-red-500 flex items-center gap-1.5">
+                      <AlertCircle className="w-3.5 h-3.5" /> {resetPwdError}
+                    </p>
+                  )}
+
+                  <div className="flex gap-2 pt-1">
+                    <button
+                      onClick={() => setResetPwdOpen(false)}
+                      className="flex-1 px-4 py-2 text-sm border rounded-xl hover:bg-muted transition-colors"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      onClick={doResetPassword}
+                      disabled={resetPwdSaving || !resetPwdNew}
+                      className="flex-1 flex items-center justify-center gap-2 px-4 py-2 text-sm bg-amber-500 text-white rounded-xl hover:bg-amber-600 transition-colors disabled:opacity-60"
+                    >
+                      {resetPwdSaving ? <Loader2 className="w-4 h-4 animate-spin" /> : <KeyRound className="w-4 h-4" />}
+                      Reset & Send Email
+                    </button>
+                  </div>
+                </>
+              )}
+            </div>
           </div>
         </div>
       )}
