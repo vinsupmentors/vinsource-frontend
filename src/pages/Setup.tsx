@@ -81,31 +81,111 @@ export default function SetupWizard() {
     policyAgreed: false, documentsSigned: false, originalDocsConfirmed: false, signatureName: '',
   });
 
-  // Prefill from onboarding record
+  // Prefill from onboarding record + employee profile; resume from correct step
   useEffect(() => {
     if (!token) { navigate('/login'); return; }
-    api.get('/api/onboarding/my').then(r => {
-      const data = r.data.data;
+
+    Promise.all([
+      api.get('/api/onboarding/my'),
+      api.get('/api/employees/me').catch(() => ({ data: { data: null } })),
+    ]).then(([onbRes, empRes]) => {
+      const data = onbRes.data.data;
+      const emp  = empRes.data.data;
+
       setOnboardingStatus(data);
-      if (!data) {
-        // Backend will auto-create record; show the wizard
-        setLoadingStatus(false);
-        return;
-      }
+
+      if (!data) { setLoadingStatus(false); return; }
       if (data.status === 'COMPLETED') { navigate('/dashboard'); return; }
-      // Pre-fill name from onboarding record
+
+      // ── Pre-fill personal ──────────────────────────────────────────────────
       setPersonal(p => ({
         ...p,
-        firstName: data.firstName || '',
-        lastName: data.lastName || '',
+        firstName:     emp?.firstName    || data.firstName || '',
+        lastName:      emp?.lastName     || data.lastName  || '',
+        middleName:    emp?.middleName   || '',
+        dateOfBirth:   emp?.dateOfBirth  ? emp.dateOfBirth.substring(0, 10) : '',
+        gender:        emp?.gender       || '',
+        bloodGroup:    emp?.bloodGroup   || '',
+        maritalStatus: emp?.maritalStatus || '',
+        phone:         emp?.phone        || data.phone || '',
       }));
-      // Mark already-uploaded docs
+
+      // ── Pre-fill address ───────────────────────────────────────────────────
+      if (emp?.address) {
+        setAddress({
+          currentAddress:   emp.address.current   || '',
+          permanentAddress: emp.address.permanent || '',
+          city:             emp.address.city       || '',
+          state:            emp.address.state      || '',
+          country:          emp.address.country    || 'India',
+          pincode:          emp.address.pincode    || '',
+        });
+      }
+
+      // ── Pre-fill emergency contact ─────────────────────────────────────────
+      if (emp?.emergencyContacts?.[0]) {
+        const ec = emp.emergencyContacts[0];
+        setEmergency({
+          emergencyName:         ec.name         || '',
+          emergencyRelationship: ec.relationship || '',
+          emergencyPhone:        ec.phone        || '',
+          emergencyEmail:        ec.email        || '',
+        });
+      }
+
+      // ── Pre-fill bank ──────────────────────────────────────────────────────
+      if (emp?.bankDetails?.[0]) {
+        const bk = emp.bankDetails[0];
+        setBank({
+          bankName:      bk.bankName      || '',
+          accountNumber: bk.accountNumber || '',
+          ifscCode:      bk.ifscCode      || '',
+          accountType:   bk.accountType   || 'SAVINGS',
+        });
+      }
+
+      // ── Pre-fill education ─────────────────────────────────────────────────
+      if (emp?.education?.length) {
+        setEducation(emp.education.map((e: any) => ({
+          degree:       e.degree       || '',
+          institution:  e.institution  || '',
+          fieldOfStudy: e.fieldOfStudy || '',
+          startYear:    e.startYear    ? String(e.startYear) : '',
+          endYear:      e.endYear      ? String(e.endYear)   : '',
+          grade:        e.grade        || '',
+        })));
+      }
+
+      // ── Pre-fill experience ────────────────────────────────────────────────
+      if (emp?.experience?.length) {
+        setExperience(emp.experience.map((e: any) => ({
+          company:     e.company     || '',
+          designation: e.designation || '',
+          startDate:   e.startDate   ? e.startDate.substring(0, 10) : '',
+          endDate:     e.endDate     ? e.endDate.substring(0, 10)   : '',
+          isCurrent:   e.isCurrent   || false,
+          description: e.description || '',
+        })));
+      }
+
+      // ── Mark already-uploaded docs ─────────────────────────────────────────
       if (data.uploadedDocTypes?.length) {
         setDocs(prev => prev.map(d => ({
           ...d,
           uploaded: data.uploadedDocTypes.includes(d.type),
         })));
       }
+
+      // ── Resume from correct step ───────────────────────────────────────────
+      // If profile was previously saved (steps 1-5 complete), jump to documents.
+      // If all required docs are uploaded, jump straight to acknowledgements.
+      if (data.profileCompletedAt) {
+        const requiredTypes = ['AADHAAR', 'PAN', 'RESUME', 'MARKSHEET_10', 'MARKSHEET_12', 'DEGREE', 'OTHER'];
+        const allDocsUploaded = requiredTypes.every((t: string) => data.uploadedDocTypes?.includes(t));
+        setStep(allDocsUploaded ? 7 : 6);
+      }
+      // status === 'ACCOUNT_CREATED' with no profileCompletedAt → stay at step 1
+
     }).catch(() => setLoadingStatus(false)).finally(() => setLoadingStatus(false));
   }, [token]);
 
@@ -160,7 +240,7 @@ export default function SetupWizard() {
       form.append('file', file);
       form.append('type', docType);
       form.append('name', file.name);
-      await api.post('/api/documents/upload', form, { headers: { 'Content-Type': 'multipart/form-data' } });
+      await api.post('/api/documents/upload', form, { headers: { 'Content-Type': undefined } });
       setDocs(prev => prev.map(d => d.type === docType ? { ...d, uploaded: true, file } : d));
     } catch (e: any) {
       alert(e?.response?.data?.message || 'Upload failed');
