@@ -186,7 +186,7 @@ export default function OnboardingDetailPage() {
               </button>
             </>
           )}
-          {data.status === 'AWAITING_APPROVAL' && (
+          {(data.status === 'AWAITING_APPROVAL' || data.status === 'PROFILE_COMPLETE') && (
             <>
               <button onClick={() => { setRemarks(''); setModal('final-approve'); }} className="flex items-center gap-2 px-4 py-2.5 bg-green-600 text-white rounded-xl text-sm font-medium hover:bg-green-700 transition">
                 <CheckCircle className="w-4 h-4" /> Final Approve — Activate
