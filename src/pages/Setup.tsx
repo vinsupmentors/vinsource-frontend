@@ -2,7 +2,8 @@ import { useEffect, useState, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useSelector } from 'react-redux';
 import { RootState } from '@/store';
-import api from '@/lib/api';
+import api, { BASE_URL } from '@/lib/api';
+import axios from 'axios';
 import {
   User, MapPin, PhoneCall, GraduationCap, Briefcase,
   FileUp, CheckCircle, Loader2, Plus, Trash2, Upload, AlertTriangle,
@@ -240,10 +241,17 @@ export default function SetupWizard() {
       form.append('file', file);
       form.append('type', docType);
       form.append('name', file.name);
-      await api.post('/api/documents/upload', form, { headers: { 'Content-Type': undefined } });
+      // Use raw axios (not the api instance) so the api instance's default
+      // Content-Type: application/json does NOT override the multipart boundary.
+      // The browser will automatically set Content-Type: multipart/form-data; boundary=...
+      const token = localStorage.getItem('hrms_token');
+      await axios.post(`${BASE_URL}/api/documents/upload`, form, {
+        headers: { Authorization: `Bearer ${token}` },
+        withCredentials: true,
+      });
       setDocs(prev => prev.map(d => d.type === docType ? { ...d, uploaded: true, file } : d));
     } catch (e: any) {
-      alert(e?.response?.data?.message || 'Upload failed');
+      alert((e as any)?.response?.data?.message || 'Upload failed');
     } finally { setUploadingDoc(null); }
   };
 
