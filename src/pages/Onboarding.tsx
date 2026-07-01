@@ -19,15 +19,21 @@ interface OnboardingRequest {
 }
 
 const STATUS_STYLE: Record<string, string> = {
-  PENDING:        'bg-yellow-100 text-yellow-700',
-  HR_APPROVED:    'bg-blue-100 text-blue-700',
-  DOCUMENTS_SENT: 'bg-purple-100 text-purple-700',
-  COMPLETED:      'bg-green-100 text-green-700',
-  REJECTED:       'bg-red-100 text-red-700',
+  ACCOUNT_CREATED:    'bg-gray-100 text-gray-500',
+  PROFILE_COMPLETE:   'bg-blue-100 text-blue-700',
+  PENDING:            'bg-yellow-100 text-yellow-700',
+  AWAITING_APPROVAL:  'bg-orange-100 text-orange-700',
+  HR_APPROVED:        'bg-blue-100 text-blue-700',
+  DOCUMENTS_SENT:     'bg-purple-100 text-purple-700',
+  COMPLETED:          'bg-green-100 text-green-700',
+  REJECTED:           'bg-red-100 text-red-700',
 };
 
 const STATUS_LABEL: Record<string, string> = {
-  PENDING:        'Pending',
+  ACCOUNT_CREATED: 'Not Started',
+  PROFILE_COMPLETE: 'In Progress',
+  PENDING:        'Pending Review',
+  AWAITING_APPROVAL: 'Awaiting Approval',
   HR_APPROVED:    'Approved',
   DOCUMENTS_SENT: 'Awaiting Signature',
   COMPLETED:      'Completed',
@@ -132,7 +138,7 @@ export default function OnboardingPage() {
 
       {/* Status Filter */}
       <div className="flex gap-2 flex-wrap">
-        {['', 'PENDING', 'DOCUMENTS_SENT', 'COMPLETED', 'REJECTED'].map((s) => (
+        {['', 'ACCOUNT_CREATED', 'PENDING', 'DOCUMENTS_SENT', 'COMPLETED', 'REJECTED'].map((s) => (
           <button
             key={s}
             onClick={() => setStatusFilter(s)}

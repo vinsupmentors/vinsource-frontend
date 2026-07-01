@@ -6,7 +6,7 @@ import { getInitials, formatDate } from '@/lib/utils';
 import { useRole } from '@/hooks/useAuth';
 import {
   Search, Plus, Filter, Loader2, AlertCircle, ChevronLeft, ChevronRight,
-  Eye, Mail, Users, X, Check,
+  Eye, Mail, Users, X, Check, UserCheck,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
@@ -473,10 +473,26 @@ export default function Employees() {
 
   useEffect(() => { fetchEmployees(); }, [fetchEmployees]);
 
+  const [confirmingId, setConfirmingId] = useState<string | null>(null);
+
   const handleCreated = (pw: string) => {
     setShowAddModal(false);
     setTempPassword(pw);
     fetchEmployees();
+  };
+
+  const handleConfirm = async (emp: Employee, e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (!confirm(`Confirm ${emp.firstName} ${emp.lastName} as a permanent employee?\n\nThis will:\n• Change status from Probation → Active\n• Auto-allocate Casual Leave for ${new Date().getFullYear()}`)) return;
+    setConfirmingId(emp.id);
+    try {
+      await api.put(`/api/employees/${emp.id}/confirm`, {});
+      fetchEmployees();
+    } catch (err: any) {
+      alert(err.response?.data?.message ?? 'Failed to confirm employee');
+    } finally {
+      setConfirmingId(null);
+    }
   };
 
   return (
@@ -535,6 +551,19 @@ export default function Employees() {
             <option value="ON_NOTICE">On Notice</option>
             <option value="TERMINATED">Terminated</option>
           </select>
+          {can('HR') && (
+            <button
+              onClick={() => { setStatusFilter(statusFilter === 'ON_PROBATION' ? '' : 'ON_PROBATION'); setPage(1); }}
+              className={cn(
+                'flex items-center gap-1.5 px-3 py-2 text-sm rounded-lg border transition-colors',
+                statusFilter === 'ON_PROBATION'
+                  ? 'bg-blue-600 text-white border-blue-600'
+                  : 'hover:bg-blue-50 text-blue-700 border-blue-200'
+              )}
+            >
+              <UserCheck className="w-3.5 h-3.5" /> Probation
+            </button>
+          )}
         </div>
       </div>
 
@@ -586,17 +615,30 @@ export default function Employees() {
                 <span className="text-[10px] text-muted-foreground bg-muted px-2 py-0.5 rounded-md font-mono">
                   {emp.employeeCode}
                 </span>
-                <div className="ml-auto flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                  {emp.user?.email && (
-                    <button onClick={(e) => { e.stopPropagation(); window.location.href = `mailto:${emp.user?.email}`; }}
-                      className="p-1.5 rounded-lg hover:bg-muted" title="Email">
-                      <Mail className="w-3.5 h-3.5 text-muted-foreground" />
+                <div className="ml-auto flex items-center gap-1">
+                  {emp.status === 'ON_PROBATION' && can('HR') && (
+                    <button
+                      onClick={(e) => handleConfirm(emp, e)}
+                      disabled={confirmingId === emp.id}
+                      className="flex items-center gap-1 px-2 py-1 text-[10px] font-medium rounded-md bg-green-50 text-green-700 hover:bg-green-100 border border-green-200 transition-colors"
+                      title="Confirm as permanent"
+                    >
+                      {confirmingId === emp.id ? <Loader2 className="w-3 h-3 animate-spin" /> : <UserCheck className="w-3 h-3" />}
+                      Confirm
                     </button>
                   )}
-                  <button onClick={(e) => { e.stopPropagation(); navigate(`/employees/${emp.id}`); }}
-                    className="p-1.5 rounded-lg hover:bg-muted" title="View profile">
-                    <Eye className="w-3.5 h-3.5 text-muted-foreground" />
-                  </button>
+                  <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                    {emp.user?.email && (
+                      <button onClick={(e) => { e.stopPropagation(); window.location.href = `mailto:${emp.user?.email}`; }}
+                        className="p-1.5 rounded-lg hover:bg-muted" title="Email">
+                        <Mail className="w-3.5 h-3.5 text-muted-foreground" />
+                      </button>
+                    )}
+                    <button onClick={(e) => { e.stopPropagation(); navigate(`/employees/${emp.id}`); }}
+                      className="p-1.5 rounded-lg hover:bg-muted" title="View profile">
+                      <Eye className="w-3.5 h-3.5 text-muted-foreground" />
+                    </button>
+                  </div>
                 </div>
               </div>
             </div>

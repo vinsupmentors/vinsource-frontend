@@ -52,6 +52,7 @@ const navItems: NavItem[] = [
   { label: 'Resignation',    to: '/resignation',    icon: DoorOpen },
   { label: 'Org Setup',      to: '/org-setup',      icon: Building2,     minRole: 'HR' },
   { label: 'Reports',        to: '/reports',        icon: BarChart2,     minRole: 'HR' },
+  { label: 'Emp. Report',    to: '/employees/report', icon: BarChart2,   minRole: 'HR' },
 ];
 
 interface ModuleChild {

@@ -4,7 +4,7 @@ import { cn } from '@/lib/utils';
 import { ModuleName, AccessLevel } from '@/types';
 import {
   KeyRound, Building2, Users, Loader2, AlertCircle, CheckCircle2,
-  X, ShieldCheck, ShieldOff, ChevronRight,
+  X, ShieldCheck, ShieldOff, ChevronRight, CalendarDays, Plus, Trash2,
 } from 'lucide-react';
 
 const MODULES: { key: ModuleName; label: string }[] = [
@@ -52,21 +52,46 @@ interface DirectoryEntry {
   effectiveAccess: Partial<Record<ModuleName, AccessLevel>>;
 }
 
-type Tab = 'directory' | 'departments';
+type Tab = 'directory' | 'departments' | 'leave-types';
+
+const LEAVE_TYPE_OPTIONS = [
+  { value: 'CASUAL', label: 'Casual Leave' },
+  { value: 'SICK', label: 'Sick Leave' },
+  { value: 'EARNED', label: 'Earned Leave' },
+  { value: 'COMPENSATORY', label: 'Comp Off (Compensatory)' },
+  { value: 'MATERNITY', label: 'Maternity Leave' },
+  { value: 'PATERNITY', label: 'Paternity Leave' },
+  { value: 'LOSS_OF_PAY', label: 'Loss of Pay' },
+  { value: 'UNPAID', label: 'Unpaid Leave' },
+];
+
+interface CompanyLeaveType {
+  id: string; type: string; name: string;
+  maxDaysPerYear: number; isPaid: boolean;
+  carryForward: boolean; encashable: boolean; isActive: boolean;
+}
 
 export default function MasterControlPage() {
   const [tab, setTab] = useState<Tab>('directory');
   const [departments, setDepartments] = useState<DeptDefault[]>([]);
   const [directory, setDirectory] = useState<DirectoryEntry[]>([]);
+  const [leaveTypes, setLeaveTypes] = useState<CompanyLeaveType[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
   const [savingKey, setSavingKey] = useState<string | null>(null);
   const [editingEmployee, setEditingEmployee] = useState<DirectoryEntry | null>(null);
   const [search, setSearch] = useState('');
+  const [ltForm, setLtForm] = useState({ type: '', name: '', maxDaysPerYear: 12, isPaid: true, carryForward: false });
+  const [ltSaving, setLtSaving] = useState(false);
 
   const flash = (msg: string) => { setSuccess(msg); setTimeout(() => setSuccess(''), 3000); };
   const fail = (e: any, fallback: string) => setError(e.response?.data?.message ?? fallback);
+
+  const fetchLeaveTypes = useCallback(async () => {
+    const res = await api.get('/api/leave/types/all');
+    setLeaveTypes(res.data.data ?? []);
+  }, []);
 
   const fetchAll = useCallback(async () => {
     const [deptRes, dirRes] = await Promise.all([
@@ -79,10 +104,10 @@ export default function MasterControlPage() {
 
   useEffect(() => {
     setLoading(true);
-    fetchAll()
+    Promise.all([fetchAll(), fetchLeaveTypes()])
       .catch((e) => fail(e, 'Failed to load Master Control data'))
       .finally(() => setLoading(false));
-  }, [fetchAll]);
+  }, [fetchAll, fetchLeaveTypes]);
 
   const setDeptDefault = async (departmentId: string, module: ModuleName, accessLevel: AccessLevel) => {
     const key = `${departmentId}:${module}`;
@@ -131,6 +156,29 @@ export default function MasterControlPage() {
     finally { setSavingKey(null); }
   };
 
+  const addLeaveType = async () => {
+    if (!ltForm.type || !ltForm.name) { setError('Select a leave type and enter a name'); return; }
+    setLtSaving(true); setError('');
+    try {
+      await api.post('/api/leave/types', ltForm);
+      await fetchLeaveTypes();
+      setLtForm({ type: '', name: '', maxDaysPerYear: 12, isPaid: true, carryForward: false });
+      flash('Leave type added');
+    } catch (e: any) { fail(e, 'Failed to add leave type'); }
+    finally { setLtSaving(false); }
+  };
+
+  const removeLeaveType = async (id: string, name: string) => {
+    if (!confirm(`Remove "${name}"? Employees won't be able to apply for this leave going forward.`)) return;
+    setSavingKey(id);
+    try {
+      await api.delete(`/api/leave/types/${id}`);
+      await fetchLeaveTypes();
+      flash('Leave type removed');
+    } catch (e: any) { fail(e, 'Failed to remove leave type'); }
+    finally { setSavingKey(null); }
+  };
+
   const filteredDirectory = directory.filter((e) => {
     if (!search.trim()) return true;
     const q = search.toLowerCase();
@@ -172,16 +220,20 @@ export default function MasterControlPage() {
 
       {/* Tabs */}
       <div className="flex gap-1 border-b">
-        {(['directory', 'departments'] as Tab[]).map((t) => (
+        {([
+          { key: 'directory', label: `Employee Access (${directory.length})` },
+          { key: 'departments', label: `Department Defaults (${departments.length})` },
+          { key: 'leave-types', label: `Leave Types (${leaveTypes.filter(l => l.isActive).length})` },
+        ] as { key: Tab; label: string }[]).map((t) => (
           <button
-            key={t}
-            onClick={() => setTab(t)}
+            key={t.key}
+            onClick={() => setTab(t.key)}
             className={cn(
-              'px-4 py-2.5 text-sm font-medium capitalize border-b-2 -mb-px transition-colors',
-              tab === t ? 'border-primary text-primary' : 'border-transparent text-muted-foreground hover:text-foreground'
+              'px-4 py-2.5 text-sm font-medium border-b-2 -mb-px transition-colors',
+              tab === t.key ? 'border-primary text-primary' : 'border-transparent text-muted-foreground hover:text-foreground'
             )}
           >
-            {t === 'directory' ? `Employee Access (${directory.length})` : `Department Defaults (${departments.length})`}
+            {t.label}
           </button>
         ))}
       </div>
@@ -351,6 +403,114 @@ export default function MasterControlPage() {
             <div className="px-6 py-4 border-t flex justify-end">
               <button onClick={() => setEditingEmployee(null)} className="px-4 py-2 text-sm border rounded-xl hover:bg-muted">Done</button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Leave Types Tab ── */}
+      {tab === 'leave-types' && (
+        <div className="space-y-6">
+          {/* Add new */}
+          <div className="bg-card border rounded-2xl p-5 space-y-4">
+            <h3 className="font-semibold flex items-center gap-2 text-sm"><Plus className="w-4 h-4 text-primary" /> Add Leave Type</h3>
+            <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+              <div>
+                <label className="text-xs text-muted-foreground mb-1 block">Leave Type *</label>
+                <select
+                  value={ltForm.type}
+                  onChange={e => {
+                    const opt = LEAVE_TYPE_OPTIONS.find(o => o.value === e.target.value);
+                    setLtForm(f => ({ ...f, type: e.target.value, name: opt?.label ?? f.name }));
+                  }}
+                  className="w-full px-3 py-2 text-sm border rounded-lg bg-background"
+                >
+                  <option value="">Select...</option>
+                  {LEAVE_TYPE_OPTIONS.filter(o => !leaveTypes.find(lt => lt.type === o.value && lt.isActive)).map(o => (
+                    <option key={o.value} value={o.value}>{o.label}</option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="text-xs text-muted-foreground mb-1 block">Display Name *</label>
+                <input
+                  value={ltForm.name}
+                  onChange={e => setLtForm(f => ({ ...f, name: e.target.value }))}
+                  placeholder="e.g. Comp Off"
+                  className="w-full px-3 py-2 text-sm border rounded-lg bg-background"
+                />
+              </div>
+              <div>
+                <label className="text-xs text-muted-foreground mb-1 block">Max Days / Year</label>
+                <input
+                  type="number" min={1} max={365}
+                  value={ltForm.maxDaysPerYear}
+                  onChange={e => setLtForm(f => ({ ...f, maxDaysPerYear: Number(e.target.value) }))}
+                  className="w-full px-3 py-2 text-sm border rounded-lg bg-background"
+                />
+              </div>
+              <div className="flex items-end gap-2">
+                <label className="flex items-center gap-2 text-sm cursor-pointer pb-2">
+                  <input type="checkbox" checked={ltForm.isPaid} onChange={e => setLtForm(f => ({ ...f, isPaid: e.target.checked }))} />
+                  Paid
+                </label>
+                <label className="flex items-center gap-2 text-sm cursor-pointer pb-2">
+                  <input type="checkbox" checked={ltForm.carryForward} onChange={e => setLtForm(f => ({ ...f, carryForward: e.target.checked }))} />
+                  Carry Fwd
+                </label>
+              </div>
+            </div>
+            <button
+              onClick={addLeaveType}
+              disabled={ltSaving || !ltForm.type || !ltForm.name}
+              className="flex items-center gap-2 px-4 py-2 bg-primary text-primary-foreground rounded-xl text-sm font-medium hover:opacity-90 disabled:opacity-50"
+            >
+              {ltSaving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Plus className="w-4 h-4" />}
+              Add Leave Type
+            </button>
+          </div>
+
+          {/* Existing types */}
+          <div className="bg-card border rounded-2xl overflow-hidden">
+            <div className="px-5 py-4 border-b flex items-center gap-2">
+              <CalendarDays className="w-4 h-4 text-muted-foreground" />
+              <span className="font-semibold text-sm">Active Leave Types</span>
+            </div>
+            {leaveTypes.filter(l => l.isActive).length === 0 ? (
+              <div className="py-10 text-center text-sm text-muted-foreground">No leave types configured yet. Add Casual Leave and Comp Off to get started.</div>
+            ) : (
+              <table className="w-full text-sm">
+                <thead className="bg-muted/40">
+                  <tr>
+                    <th className="px-5 py-3 text-left font-medium text-muted-foreground">Name</th>
+                    <th className="px-5 py-3 text-left font-medium text-muted-foreground">Type</th>
+                    <th className="px-5 py-3 text-left font-medium text-muted-foreground">Max Days</th>
+                    <th className="px-5 py-3 text-left font-medium text-muted-foreground">Paid</th>
+                    <th className="px-5 py-3 text-left font-medium text-muted-foreground">Carry Fwd</th>
+                    <th className="px-5 py-3"></th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y">
+                  {leaveTypes.filter(l => l.isActive).map(lt => (
+                    <tr key={lt.id} className="hover:bg-muted/20">
+                      <td className="px-5 py-3 font-medium">{lt.name}</td>
+                      <td className="px-5 py-3 text-muted-foreground">{lt.type}</td>
+                      <td className="px-5 py-3">{lt.maxDaysPerYear}</td>
+                      <td className="px-5 py-3">{lt.isPaid ? <span className="text-green-600">Yes</span> : <span className="text-red-500">No</span>}</td>
+                      <td className="px-5 py-3">{lt.carryForward ? 'Yes' : 'No'}</td>
+                      <td className="px-5 py-3">
+                        <button
+                          onClick={() => removeLeaveType(lt.id, lt.name)}
+                          disabled={savingKey === lt.id}
+                          className="p-1.5 rounded-lg hover:bg-red-50 hover:text-red-600 text-muted-foreground transition"
+                        >
+                          {savingKey === lt.id ? <Loader2 className="w-4 h-4 animate-spin" /> : <Trash2 className="w-4 h-4" />}
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
           </div>
         </div>
       )}
