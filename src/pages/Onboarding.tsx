@@ -40,12 +40,15 @@ export default function OnboardingPage() {
 
   const [requests, setRequests] = useState<OnboardingRequest[]>([]);
   const [total, setTotal] = useState(0);
+  const [page, setPage] = useState(1);
   const [loading, setLoading] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [statusFilter, setStatusFilter] = useState('');
   const [showForm, setShowForm] = useState(false);
   const [showBulk, setShowBulk] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [reinitiating, setReinitiating] = useState<string | null>(null);
+  const PAGE_SIZE = 20;
   const [form, setForm] = useState({
     firstName: '', lastName: '', email: '', phone: '',
     joiningDate: '', departmentId: '', designationId: '', managerId: '',
@@ -53,19 +56,22 @@ export default function OnboardingPage() {
   const [departments, setDepartments] = useState<{ id: string; name: string }[]>([]);
   const [designations, setDesignations] = useState<{ id: string; name: string }[]>([]);
 
-  const fetchRequests = async () => {
-    setLoading(true);
+  const fetchRequests = async (pageNum = 1, append = false) => {
+    append ? setLoadingMore(true) : setLoading(true);
     try {
       const params = new URLSearchParams();
       if (statusFilter) params.append('status', statusFilter);
+      params.append('page', String(pageNum));
+      params.append('limit', String(PAGE_SIZE));
       const { data } = await api.get(`/api/onboarding?${params}`);
-      setRequests(data.data);
+      setRequests(prev => append ? [...prev, ...data.data] : data.data);
       setTotal(data.meta?.total || 0);
+      setPage(pageNum);
     } catch (e) { console.error(e); }
-    finally { setLoading(false); }
+    finally { append ? setLoadingMore(false) : setLoading(false); }
   };
 
-  useEffect(() => { fetchRequests(); }, [statusFilter]);
+  useEffect(() => { fetchRequests(1); }, [statusFilter]);
 
   useEffect(() => {
     api.get('/api/departments').then(r => setDepartments(r.data.data || [])).catch(() => {});
@@ -77,7 +83,7 @@ export default function OnboardingPage() {
     setReinitiating(id);
     try {
       await api.put(`/api/onboarding/${id}/reinitiate`);
-      fetchRequests();
+      fetchRequests(1);
     } catch (e: any) {
       alert(e?.response?.data?.message || 'Failed to re-initiate onboarding');
     } finally { setReinitiating(null); }
@@ -90,7 +96,7 @@ export default function OnboardingPage() {
       await api.post('/api/onboarding', form);
       setShowForm(false);
       setForm({ firstName: '', lastName: '', email: '', phone: '', joiningDate: '', departmentId: '', designationId: '', managerId: '' });
-      fetchRequests();
+      fetchRequests(1);
     } catch (e: any) {
       alert(e?.response?.data?.message || 'Failed to create onboarding request');
     } finally { setSubmitting(false); }
@@ -203,6 +209,20 @@ export default function OnboardingPage() {
         </div>
       )}
 
+      {/* Load More */}
+      {requests.length < total && !loading && (
+        <div className="flex justify-center pt-2">
+          <button
+            onClick={() => fetchRequests(page + 1, true)}
+            disabled={loadingMore}
+            className="flex items-center gap-2 px-6 py-2.5 border rounded-xl text-sm font-medium hover:bg-accent transition disabled:opacity-50"
+          >
+            {loadingMore ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
+            Load More ({requests.length} of {total})
+          </button>
+        </div>
+      )}
+
       {/* Bulk Onboarding Panel */}
       {showBulk && (
         <div className="bg-card border border-border rounded-2xl p-6">
@@ -210,7 +230,7 @@ export default function OnboardingPage() {
             <h2 className="text-lg font-bold flex items-center gap-2"><Users className="w-5 h-5" /> Bulk Onboarding</h2>
             <button onClick={() => setShowBulk(false)} className="text-muted-foreground hover:text-foreground"><X className="w-5 h-5" /></button>
           </div>
-          <BulkOnboarding onDone={() => { setShowBulk(false); fetchRequests(); }} />
+          <BulkOnboarding onDone={() => { setShowBulk(false); fetchRequests(1); }} />
         </div>
       )}
 
