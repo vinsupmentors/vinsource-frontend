@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import api from '@/lib/api';
 import { useRole } from '@/hooks/useAuth';
-import { UserPlus, ChevronRight, Plus, X, Loader2, Users } from 'lucide-react';
+import { UserPlus, ChevronRight, Plus, X, Loader2, Users, RefreshCw } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import BulkOnboarding from '@/components/BulkOnboarding';
 
@@ -45,6 +45,7 @@ export default function OnboardingPage() {
   const [showForm, setShowForm] = useState(false);
   const [showBulk, setShowBulk] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const [reinitiating, setReinitiating] = useState<string | null>(null);
   const [form, setForm] = useState({
     firstName: '', lastName: '', email: '', phone: '',
     joiningDate: '', departmentId: '', designationId: '', managerId: '',
@@ -70,6 +71,17 @@ export default function OnboardingPage() {
     api.get('/api/departments').then(r => setDepartments(r.data.data || [])).catch(() => {});
     api.get('/api/designations').then(r => setDesignations(r.data.data || [])).catch(() => {});
   }, []);
+
+  const handleReinitiate = async (id: string, name: string) => {
+    if (!confirm(`Re-initiate onboarding for ${name}?\n\nThis will:\n• Reset their progress to the start\n• Clear partial profile data\n• Send fresh login credentials to their email`)) return;
+    setReinitiating(id);
+    try {
+      await api.put(`/api/onboarding/${id}/reinitiate`);
+      fetchRequests();
+    } catch (e: any) {
+      alert(e?.response?.data?.message || 'Failed to re-initiate onboarding');
+    } finally { setReinitiating(null); }
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -143,37 +155,49 @@ export default function OnboardingPage() {
           {requests.map((r) => {
             const signed = r.documents.filter(d => d.status === 'SIGNED').length;
             const total = r.documents.length;
+            const canReinitiate = isHR && r.status !== 'COMPLETED';
             return (
-              <Link
-                key={r.id}
-                to={`/onboarding/${r.id}`}
-                className="flex items-center justify-between p-4 bg-card border border-border rounded-xl hover:border-primary/50 transition group"
-              >
-                <div className="flex items-center gap-4">
-                  <div className="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center text-primary font-bold text-sm">
+              <div key={r.id} className="flex items-center justify-between p-4 bg-card border border-border rounded-xl hover:border-primary/50 transition group">
+                <Link to={`/onboarding/${r.id}`} className="flex items-center gap-4 flex-1 min-w-0">
+                  <div className="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center text-primary font-bold text-sm flex-shrink-0">
                     {r.firstName[0]}{r.lastName[0]}
                   </div>
-                  <div>
+                  <div className="min-w-0">
                     <p className="font-semibold">{r.firstName} {r.lastName}</p>
                     <p className="text-sm text-muted-foreground">{r.email}</p>
                     <p className="text-xs text-muted-foreground">
                       Joining: {new Date(r.joiningDate).toLocaleDateString()}
                     </p>
                   </div>
-                </div>
-                <div className="flex items-center gap-4">
+                </Link>
+                <div className="flex items-center gap-3 flex-shrink-0">
                   {total > 0 && (
                     <div className="text-right hidden sm:block">
                       <p className="text-xs text-muted-foreground">Documents</p>
                       <p className="text-sm font-medium">{signed}/{total} signed</p>
                     </div>
                   )}
-                  <span className={cn('px-2.5 py-1 rounded-full text-xs font-medium', STATUS_STYLE[r.status])}>
+                  <span className={cn('px-2.5 py-1 rounded-full text-xs font-medium', STATUS_STYLE[r.status] || 'bg-gray-100 text-gray-700')}>
                     {STATUS_LABEL[r.status] || r.status}
                   </span>
-                  <ChevronRight className="w-4 h-4 text-muted-foreground group-hover:text-primary transition" />
+                  {canReinitiate && (
+                    <button
+                      onClick={() => handleReinitiate(r.id, `${r.firstName} ${r.lastName}`)}
+                      disabled={reinitiating === r.id}
+                      title="Re-initiate onboarding"
+                      className="flex items-center gap-1 px-2.5 py-1.5 text-xs border border-amber-300 text-amber-700 rounded-lg hover:bg-amber-50 transition disabled:opacity-50"
+                    >
+                      {reinitiating === r.id
+                        ? <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                        : <RefreshCw className="w-3.5 h-3.5" />}
+                      Re-initiate
+                    </button>
+                  )}
+                  <Link to={`/onboarding/${r.id}`}>
+                    <ChevronRight className="w-4 h-4 text-muted-foreground group-hover:text-primary transition" />
+                  </Link>
                 </div>
-              </Link>
+              </div>
             );
           })}
         </div>
