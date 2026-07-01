@@ -213,7 +213,8 @@ export default function SetupWizard() {
       await api.put('/api/onboarding/my/profile', {
         ...personal, ...address, ...emergency, ...bank,
         education: education.filter(e => e.institution),
-        experience: experience.filter(e => e.company),
+        // Only send experience entries that have both company AND a valid start date
+        experience: experience.filter(e => e.company && e.startDate),
       });
     } catch (e: any) {
       alert(e?.response?.data?.message || 'Failed to save profile');
@@ -533,12 +534,28 @@ function StepExperience({ experience, setExperience }: any) {
   const add = () => setExperience((p: Experience[]) => [...p, { company: '', designation: '', startDate: '', endDate: '', isCurrent: false, description: '' }]);
   const remove = (i: number) => setExperience((p: Experience[]) => p.filter((_, idx) => idx !== i));
 
+  // Entries that have company but missing startDate — warn before save
+  const incomplete = experience.filter((e: Experience) => e.company && !e.startDate);
+
   return (
     <div className="space-y-5">
       <h2 className="text-lg font-bold flex items-center gap-2"><Briefcase className="w-5 h-5 text-blue-600" /> Work Experience</h2>
       <p className="text-sm text-gray-500">Skip if you are a fresher</p>
+
+      {incomplete.length > 0 && (
+        <div className="flex items-start gap-2 p-3 bg-amber-50 border border-amber-200 rounded-lg text-sm text-amber-800">
+          <AlertTriangle className="w-4 h-4 mt-0.5 flex-shrink-0" />
+          <span>Please fill in the <strong>Start Date</strong> for each experience entry, or remove incomplete entries before continuing.</span>
+        </div>
+      )}
+
       {experience.map((exp: Experience, i: number) => (
-        <div key={i} className="border border-gray-200 dark:border-gray-700 rounded-xl p-4 space-y-3">
+        <div key={i} className={cn(
+          "border rounded-xl p-4 space-y-3",
+          exp.company && !exp.startDate
+            ? "border-amber-300 bg-amber-50/50 dark:bg-amber-950/20"
+            : "border-gray-200 dark:border-gray-700"
+        )}>
           <div className="flex items-center justify-between">
             <p className="font-medium text-sm">{exp.company || `Experience ${i + 1}`}</p>
             <button onClick={() => remove(i)} className="text-red-500 hover:text-red-700"><Trash2 className="w-4 h-4" /></button>
@@ -548,7 +565,9 @@ function StepExperience({ experience, setExperience }: any) {
             <Field label="Designation"><input className={inputCls} value={exp.designation} onChange={e => update(i, 'designation', e.target.value)} /></Field>
           </div>
           <div className="grid grid-cols-2 gap-3">
-            <Field label="From"><input type="date" className={inputCls} value={exp.startDate} onChange={e => update(i, 'startDate', e.target.value)} /></Field>
+            <Field label="From" required>
+              <input type="date" className={cn(inputCls, exp.company && !exp.startDate && 'border-amber-400 focus:ring-amber-300')} value={exp.startDate} onChange={e => update(i, 'startDate', e.target.value)} />
+            </Field>
             <Field label="To">
               <input type="date" className={inputCls} value={exp.endDate} onChange={e => update(i, 'endDate', e.target.value)} disabled={exp.isCurrent} />
             </Field>
