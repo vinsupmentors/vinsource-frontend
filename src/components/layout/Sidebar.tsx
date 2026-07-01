@@ -169,7 +169,8 @@ export function Sidebar() {
   const visible = navItems.filter((item) => {
     if (item.minRole && !can(item.minRole)) return false;
     if (item.hideFor && role && item.hideFor.includes(role as Role)) return false;
-    if (item.trainersOnly && !user?.isTrainer) return false;
+    // "My Training" shows if the user is assigned as a trainer OR has Production module access
+    if (item.trainersOnly && !user?.isTrainer && !modules['PRODUCTION_TRAINING']) return false;
     return true;
   });
 
