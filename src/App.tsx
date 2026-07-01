@@ -188,7 +188,7 @@ export default function App() {
             <Route path="resignation" element={<ResignationPage />} />
             <Route path="exit-clearance/:id" element={<ExitClearancePage />} />
             <Route path="my-training" element={<MyTrainingPage />} />
-            <Route path="org-chart" element={<OrgChartPage />} />
+            {/* Org Chart locked — <Route path="org-chart" element={<OrgChartPage />} /> */}
           </Route>
 
           {/* Fallback */}

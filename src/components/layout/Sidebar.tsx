@@ -48,7 +48,7 @@ const navItems: NavItem[] = [
   { label: 'Helpdesk',       to: '/helpdesk',       icon: HelpCircle },
   { label: 'Onboarding',     to: '/onboarding',     icon: UserPlus,      minRole: 'MANAGER' },
   { label: 'My Training',    to: '/my-training',    icon: Presentation, trainersOnly: true },
-  { label: 'Org Chart',      to: '/org-chart',      icon: Network },
+  // { label: 'Org Chart',      to: '/org-chart',      icon: Network },  // hidden — locked
   { label: 'Resignation',    to: '/resignation',    icon: DoorOpen },
   { label: 'Org Setup',      to: '/org-setup',      icon: Building2,     minRole: 'HR' },
   { label: 'Reports',        to: '/reports',        icon: BarChart2,     minRole: 'HR' },
