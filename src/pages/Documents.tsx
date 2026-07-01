@@ -243,7 +243,7 @@ export default function DocumentsPage() {
                       <p className="text-xs text-muted-foreground truncate">{doc.name}</p>
                       <p className="text-[10px] text-muted-foreground/60">Uploaded {formatDate(doc.uploadedAt)}</p>
                     </div>
-                    <a href={`${BACKEND}${doc.fileUrl}`} target="_blank" rel="noopener noreferrer"
+                    <a href={doc.fileUrl.startsWith('http') ? doc.fileUrl : `${BACKEND}${doc.fileUrl}`} target="_blank" rel="noopener noreferrer"
                       className="p-1.5 rounded-lg hover:bg-muted text-muted-foreground hover:text-foreground transition-colors">
                       <Eye className="w-3.5 h-3.5" />
                     </a>
@@ -317,7 +317,7 @@ export default function DocumentsPage() {
                         {doc ? (
                           <>
                             <div className="flex-1 flex items-center gap-2 min-w-0">
-                              <a href={`${BACKEND}${doc.fileUrl}`} target="_blank" rel="noopener noreferrer"
+                              <a href={doc.fileUrl.startsWith('http') ? doc.fileUrl : `${BACKEND}${doc.fileUrl}`} target="_blank" rel="noopener noreferrer"
                                 className="flex items-center gap-1.5 text-xs text-blue-600 hover:underline truncate">
                                 <Eye className="w-3 h-3 flex-shrink-0" />
                                 <span className="truncate">{doc.name}</span>

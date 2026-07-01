@@ -289,7 +289,7 @@ export default function OnboardingDetailPage() {
                         <p className="text-sm font-medium">{doc.name}</p>
                         <p className="text-xs text-muted-foreground">{doc.type} · {new Date(doc.uploadedAt).toLocaleDateString()}</p>
                       </div>
-                      <a href={`${BASE_URL}/uploads/documents/${doc.fileKey.split('/').pop()}`} target="_blank" rel="noreferrer"
+                      <a href={doc.fileUrl?.startsWith('http') ? doc.fileUrl : `${BASE_URL}${doc.fileUrl || `/uploads/documents/${doc.fileKey.split('/').pop()}`}`} target="_blank" rel="noreferrer"
                         className="flex items-center gap-1.5 px-3 py-1.5 text-sm bg-muted rounded-lg hover:bg-accent transition">
                         <Eye className="w-3.5 h-3.5" /> View
                       </a>
