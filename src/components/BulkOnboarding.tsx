@@ -8,6 +8,7 @@ interface BulkRow {
   email: string;
   phone?: string;
   joiningDate: string;
+  role?: string;
   departmentName: string;
   designationName: string;
 }
@@ -21,7 +22,8 @@ interface ResultRow {
 interface Dept  { id: string; name: string; }
 interface Desig { id: string; name: string; }
 
-const CSV_HEADERS = ['firstName','lastName','email','phone','joiningDate','departmentName','designationName'];
+const CSV_HEADERS = ['firstName','lastName','email','phone','joiningDate','role','departmentName','designationName'];
+const VALID_ROLES = ['EMPLOYEE','MANAGER','HR','ADMIN'];
 
 function parseCSV(text: string): Record<string, string>[] {
   const [headerLine, ...rows] = text.trim().split('\n');
@@ -51,12 +53,12 @@ export default function BulkOnboarding({ onDone }: { onDone: () => void }) {
   // Download template CSV with name-based columns
   const downloadTemplate = () => {
     const sampleRows = [
-      ['Priya','Sharma','priya.sharma@vinsupskillacademy.com','9876543210','2024-07-01','Sales','Skill Advisor'],
-      ['Arjun','Kumar','arjun.kumar@vinsupskillacademy.com','9876543211','2024-07-01','Production','Skill Mentor - Data Science'],
+      ['Priya','Sharma','priya.sharma@vinsupskillacademy.com','9876543210','2024-07-01','EMPLOYEE','Sales','Skill Advisor'],
+      ['Arjun','Kumar','arjun.kumar@vinsupskillacademy.com','9876543211','2024-07-01','MANAGER','Production','Skill Mentor - Data Science'],
     ];
     const deptRef  = depts.map((d)  => `# ${d.name}`).join('\n');
     const desigRef = desigs.map((d) => `# ${d.name}`).join('\n');
-    const header   = `# Use department and designation NAMES (not IDs).\n# Existing departments:\n${deptRef}\n\n# Existing designations:\n${desigRef}\n\n`;
+    const header   = `# Use department and designation NAMES (not IDs).\n# Role options: EMPLOYEE, MANAGER, HR, ADMIN (default: EMPLOYEE)\n# Existing departments:\n${deptRef}\n\n# Existing designations:\n${desigRef}\n\n`;
     const csv = CSV_HEADERS.join(',') + '\n' + sampleRows.map((r) => r.join(',')).join('\n');
     const blob = new Blob([header + csv], { type: 'text/csv' });
     const url  = URL.createObjectURL(blob);
@@ -132,7 +134,7 @@ export default function BulkOnboarding({ onDone }: { onDone: () => void }) {
             <table className="w-full text-xs">
               <thead className="bg-muted">
                 <tr>
-                  {['Name','Email','Phone','Joining Date','Department','Designation'].map((h) => (
+                  {['Name','Email','Phone','Joining Date','Role','Department','Designation'].map((h) => (
                     <th key={h} className="px-3 py-2 text-left font-medium text-muted-foreground">{h}</th>
                   ))}
                 </tr>
@@ -144,6 +146,11 @@ export default function BulkOnboarding({ onDone }: { onDone: () => void }) {
                     <td className="px-3 py-2">{r.email}</td>
                     <td className="px-3 py-2">{r.phone || '—'}</td>
                     <td className="px-3 py-2">{r.joiningDate}</td>
+                    <td className="px-3 py-2">
+                      {r.role && VALID_ROLES.includes(r.role.toUpperCase())
+                        ? <span className="px-1.5 py-0.5 bg-blue-100 text-blue-700 rounded text-[10px] font-medium">{r.role.toUpperCase()}</span>
+                        : <span className="px-1.5 py-0.5 bg-muted rounded text-[10px]">EMPLOYEE</span>}
+                    </td>
                     <td className="px-3 py-2">{r.departmentName || <span className="text-red-500">—</span>}</td>
                     <td className="px-3 py-2">{r.designationName || <span className="text-red-500">—</span>}</td>
                   </tr>

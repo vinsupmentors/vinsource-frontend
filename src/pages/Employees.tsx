@@ -62,6 +62,7 @@ function AddEmployeeModal({ onClose, onCreated }: { onClose: () => void; onCreat
   const [form, setForm] = useState({
     firstName: '', lastName: '', email: '', phone: '',
     gender: '', dateOfBirth: '', joiningDate: '',
+    employeeCode: '',
     role: 'EMPLOYEE',
     departmentId: '', designationId: '', branchId: '', managerId: '',
     netSalary: '',
@@ -235,6 +236,12 @@ function AddEmployeeModal({ onClose, onCreated }: { onClose: () => void; onCreat
             <div>
               <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-3">Employment Details</p>
               <div className="grid grid-cols-2 gap-3">
+                <Field
+                  label="Employee Code (blank = auto, e.g. V7066)"
+                  value={form.employeeCode}
+                  onChange={set('employeeCode')}
+                  placeholder="Auto-generated if left blank"
+                />
                 <Field label="Joining Date *" type="date" value={form.joiningDate} onChange={set('joiningDate')} />
                 <div>
                   <label className="block text-xs text-muted-foreground mb-1.5">Probation Status</label>
