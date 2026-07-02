@@ -138,7 +138,7 @@ export default function OnboardingPage() {
 
       {/* Status Filter */}
       <div className="flex gap-2 flex-wrap">
-        {['', 'ACCOUNT_CREATED', 'PENDING', 'DOCUMENTS_SENT', 'COMPLETED', 'REJECTED'].map((s) => (
+        {['', 'PENDING', 'ACCOUNT_CREATED', 'PROFILE_COMPLETE', 'AWAITING_APPROVAL', 'COMPLETED', 'REJECTED'].map((s) => (
           <button
             key={s}
             onClick={() => setStatusFilter(s)}
