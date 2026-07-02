@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import api from '@/lib/api';
 import { useRole } from '@/hooks/useAuth';
-import { UserPlus, ChevronRight, Plus, X, Loader2, Users, RefreshCw } from 'lucide-react';
+import { UserPlus, ChevronRight, Plus, X, Loader2, Users, RefreshCw, Pencil, Trash2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import BulkOnboarding from '@/components/BulkOnboarding';
 
@@ -14,6 +14,9 @@ interface OnboardingRequest {
   phone?: string;
   joiningDate: string;
   status: string;
+  departmentId?: string | null;
+  designationId?: string | null;
+  employeeId?: string | null;
   documents: { id: string; status: string }[];
   createdAt: string;
 }
@@ -41,7 +44,7 @@ const STATUS_LABEL: Record<string, string> = {
 };
 
 export default function OnboardingPage() {
-  const { can } = useRole();
+  const { can, isSuperAdmin } = useRole();
   const isHR = can('HR');
 
   const [requests, setRequests] = useState<OnboardingRequest[]>([]);
@@ -54,6 +57,8 @@ export default function OnboardingPage() {
   const [showBulk, setShowBulk] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [reinitiating, setReinitiating] = useState<string | null>(null);
+  const [editing, setEditing] = useState<OnboardingRequest | null>(null);
+  const [deleting, setDeleting] = useState<string | null>(null);
   const PAGE_SIZE = 20;
   const [form, setForm] = useState({
     firstName: '', lastName: '', email: '', phone: '',
@@ -99,13 +104,49 @@ export default function OnboardingPage() {
     e.preventDefault();
     setSubmitting(true);
     try {
-      await api.post('/api/onboarding', form);
+      if (editing) {
+        await api.put(`/api/onboarding/${editing.id}`, form);
+      } else {
+        await api.post('/api/onboarding', form);
+      }
       setShowForm(false);
+      setEditing(null);
       setForm({ firstName: '', lastName: '', email: '', phone: '', joiningDate: '', departmentId: '', designationId: '', managerId: '' });
       fetchRequests(1);
     } catch (e: any) {
-      alert(e?.response?.data?.message || 'Failed to create onboarding request');
+      alert(e?.response?.data?.message || `Failed to ${editing ? 'update' : 'create'} onboarding request`);
     } finally { setSubmitting(false); }
+  };
+
+  const openEdit = (r: OnboardingRequest) => {
+    setEditing(r);
+    setForm({
+      firstName: r.firstName || '',
+      lastName: r.lastName || '',
+      email: r.email || '',
+      phone: r.phone || '',
+      joiningDate: r.joiningDate ? r.joiningDate.slice(0, 10) : '',
+      departmentId: r.departmentId || '',
+      designationId: r.designationId || '',
+      managerId: '',
+    });
+    setShowBulk(false);
+    setShowForm(true);
+  };
+
+  const handleDelete = async (r: OnboardingRequest) => {
+    const warning = r.employeeId
+      ? `Delete onboarding request for ${r.firstName} ${r.lastName}?\n\nTheir employee account will NOT be deleted — manage that from the Employees page.`
+      : `Delete onboarding request for ${r.firstName} ${r.lastName}?\n\nThis cannot be undone.`;
+    if (!confirm(warning)) return;
+    setDeleting(r.id);
+    try {
+      const { data } = await api.delete(`/api/onboarding/${r.id}`);
+      if (data?.message) alert(data.message);
+      fetchRequests(1);
+    } catch (e: any) {
+      alert(e?.response?.data?.message || 'Failed to delete onboarding request');
+    } finally { setDeleting(null); }
   };
 
   return (
@@ -127,7 +168,11 @@ export default function OnboardingPage() {
               <Users className="w-4 h-4" /> Bulk Onboarding
             </button>
             <button
-              onClick={() => { setShowForm(true); setShowBulk(false); }}
+              onClick={() => {
+                setEditing(null);
+                setForm({ firstName: '', lastName: '', email: '', phone: '', joiningDate: '', departmentId: '', designationId: '', managerId: '' });
+                setShowForm(true); setShowBulk(false);
+              }}
               className="flex items-center gap-2 px-4 py-2 bg-primary text-primary-foreground rounded-lg font-medium hover:opacity-90 transition text-sm"
             >
               <Plus className="w-4 h-4" /> New Onboarding
@@ -205,6 +250,28 @@ export default function OnboardingPage() {
                       Re-initiate
                     </button>
                   )}
+                  {isHR && (
+                    <button
+                      onClick={() => openEdit(r)}
+                      title="Edit details"
+                      className="flex items-center gap-1 px-2.5 py-1.5 text-xs border border-blue-300 text-blue-700 rounded-lg hover:bg-blue-50 transition"
+                    >
+                      <Pencil className="w-3.5 h-3.5" /> Edit
+                    </button>
+                  )}
+                  {isSuperAdmin && (
+                    <button
+                      onClick={() => handleDelete(r)}
+                      disabled={deleting === r.id}
+                      title="Delete onboarding request"
+                      className="flex items-center gap-1 px-2.5 py-1.5 text-xs border border-red-300 text-red-600 rounded-lg hover:bg-red-50 transition disabled:opacity-50"
+                    >
+                      {deleting === r.id
+                        ? <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                        : <Trash2 className="w-3.5 h-3.5" />}
+                      Delete
+                    </button>
+                  )}
                   <Link to={`/onboarding/${r.id}`}>
                     <ChevronRight className="w-4 h-4 text-muted-foreground group-hover:text-primary transition" />
                   </Link>
@@ -245,8 +312,8 @@ export default function OnboardingPage() {
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
           <div className="bg-card rounded-2xl shadow-xl w-full max-w-lg">
             <div className="flex items-center justify-between p-6 border-b border-border">
-              <h2 className="text-lg font-bold">New Onboarding Request</h2>
-              <button onClick={() => setShowForm(false)} className="text-muted-foreground hover:text-foreground">
+              <h2 className="text-lg font-bold">{editing ? `Edit — ${editing.firstName} ${editing.lastName}` : 'New Onboarding Request'}</h2>
+              <button onClick={() => { setShowForm(false); setEditing(null); }} className="text-muted-foreground hover:text-foreground">
                 <X className="w-5 h-5" />
               </button>
             </div>
@@ -271,8 +338,12 @@ export default function OnboardingPage() {
                 <label className="text-sm font-medium mb-1 block">Email *</label>
                 <input
                   type="email" value={form.email} onChange={e => setForm(f => ({ ...f, email: e.target.value }))}
-                  required className="w-full px-3 py-2 border border-border rounded-lg text-sm bg-background"
+                  required disabled={Boolean(editing?.employeeId)}
+                  className="w-full px-3 py-2 border border-border rounded-lg text-sm bg-background disabled:opacity-60"
                 />
+                {editing?.employeeId && (
+                  <p className="text-[11px] text-muted-foreground mt-1">Email is the login — it can't be changed after the account is created.</p>
+                )}
               </div>
               <div className="grid grid-cols-2 gap-4">
                 <div>
@@ -313,12 +384,12 @@ export default function OnboardingPage() {
                 </div>
               </div>
               <div className="flex gap-3 pt-2">
-                <button type="button" onClick={() => setShowForm(false)} className="flex-1 px-4 py-2 border border-border rounded-lg text-sm font-medium hover:bg-accent transition">
+                <button type="button" onClick={() => { setShowForm(false); setEditing(null); }} className="flex-1 px-4 py-2 border border-border rounded-lg text-sm font-medium hover:bg-accent transition">
                   Cancel
                 </button>
                 <button type="submit" disabled={submitting} className="flex-1 px-4 py-2 bg-primary text-primary-foreground rounded-lg text-sm font-medium hover:opacity-90 transition flex items-center justify-center gap-2">
                   {submitting && <Loader2 className="w-4 h-4 animate-spin" />}
-                  Create Request
+                  {editing ? 'Save Changes' : 'Create Request'}
                 </button>
               </div>
             </form>
