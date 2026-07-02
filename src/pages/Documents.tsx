@@ -247,31 +247,39 @@ export default function DocumentsPage() {
                       className="p-1.5 rounded-lg hover:bg-muted text-muted-foreground hover:text-foreground transition-colors">
                       <Eye className="w-3.5 h-3.5" />
                     </a>
-                    <button onClick={() => handleDelete(doc.id)}
-                      className="p-1.5 rounded-lg hover:bg-red-50 text-muted-foreground hover:text-red-500 transition-colors">
-                      <Trash2 className="w-3.5 h-3.5" />
-                    </button>
+                    {!doc.isVerified && (
+                      <button onClick={() => handleDelete(doc.id)}
+                        className="p-1.5 rounded-lg hover:bg-red-50 text-muted-foreground hover:text-red-500 transition-colors">
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    )}
                   </div>
                 ) : (
                   <p className="text-xs text-muted-foreground">Not uploaded yet</p>
                 )}
 
-                <div>
-                  <input
-                    ref={el => { fileRefs.current[type] = el; }}
-                    type="file" accept=".pdf,.jpg,.jpeg,.png,.doc,.docx" className="hidden"
-                    onChange={e => {
-                      const f = e.target.files?.[0];
-                      if (f) handleUpload(type as DocType, f);
-                      e.target.value = '';
-                    }}
-                  />
-                  <button onClick={() => fileRefs.current[type]?.click()} disabled={isUploading}
-                    className="w-full flex items-center justify-center gap-2 py-2 text-xs font-medium border border-dashed rounded-lg hover:bg-muted transition-colors disabled:opacity-50">
-                    {isUploading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Upload className="w-3.5 h-3.5" />}
-                    {doc ? 'Replace' : 'Upload'} {label}
-                  </button>
-                </div>
+                {doc?.isVerified ? (
+                  <p className="flex items-center justify-center gap-1.5 py-2 text-[11px] text-green-700 bg-green-50 dark:bg-green-950/30 border border-green-200 rounded-lg">
+                    <ShieldCheck className="w-3.5 h-3.5" /> Verified by HR — locked. Contact HR for corrections.
+                  </p>
+                ) : (
+                  <div>
+                    <input
+                      ref={el => { fileRefs.current[type] = el; }}
+                      type="file" accept=".pdf,.jpg,.jpeg,.png,.doc,.docx" className="hidden"
+                      onChange={e => {
+                        const f = e.target.files?.[0];
+                        if (f) handleUpload(type as DocType, f);
+                        e.target.value = '';
+                      }}
+                    />
+                    <button onClick={() => fileRefs.current[type]?.click()} disabled={isUploading}
+                      className="w-full flex items-center justify-center gap-2 py-2 text-xs font-medium border border-dashed rounded-lg hover:bg-muted transition-colors disabled:opacity-50">
+                      {isUploading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Upload className="w-3.5 h-3.5" />}
+                      {doc ? 'Replace' : 'Upload'} {label}
+                    </button>
+                  </div>
+                )}
               </div>
             );
           })}
