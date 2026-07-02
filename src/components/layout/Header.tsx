@@ -5,7 +5,8 @@ import { RootState, AppDispatch } from '@/store';
 import { fetchNotifications, markAllRead } from '@/store/slices/notificationSlice';
 import { logout } from '@/store/slices/authSlice';
 import { useAuth } from '@/hooks/useAuth';
-import { Bell, Sun, Moon, Search, ChevronDown, CheckCheck, Settings, User, Lock, LogOut, Menu } from 'lucide-react';
+import { Bell, Sun, Moon, Search, ChevronDown, CheckCheck, Settings, User, Lock, LogOut, Menu, Camera, Loader2 } from 'lucide-react';
+import api from '@/lib/api';
 import { cn, timeAgo, getInitials } from '@/lib/utils';
 import ChangePasswordModal from '@/components/ChangePasswordModal';
 import { useSidebarContext } from './SidebarContext';
@@ -20,8 +21,32 @@ export function Header() {
   const [showNotif, setShowNotif] = useState(false);
   const [showUser, setShowUser] = useState(false);
   const [showChangePw, setShowChangePw] = useState(false);
+  const [uploadingPhoto, setUploadingPhoto] = useState(false);
+  const [photoOverride, setPhotoOverride] = useState<string | null>(null);
   const notifRef = useRef<HTMLDivElement>(null);
   const userRef = useRef<HTMLDivElement>(null);
+  const photoInputRef = useRef<HTMLInputElement>(null);
+
+  const handlePhotoFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+    if (file.size > 5 * 1024 * 1024) { alert('Image must be under 5 MB'); return; }
+    setUploadingPhoto(true);
+    try {
+      const fd = new FormData();
+      fd.append('photo', file);
+      const { data } = await api.post('/api/employees/me/photo', fd, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+      });
+      setPhotoOverride(data?.data?.profilePhoto || null);
+      setShowUser(false);
+    } catch (err: any) {
+      alert(err?.response?.data?.message || 'Photo upload failed');
+    } finally {
+      setUploadingPhoto(false);
+    }
+  };
 
   useEffect(() => { dispatch(fetchNotifications()); }, [dispatch]);
 
@@ -151,9 +176,17 @@ export function Header() {
             onClick={() => { setShowUser((v) => !v); setShowNotif(false); }}
             className="flex items-center gap-2 px-2 py-1.5 rounded-lg hover:bg-muted transition-colors"
           >
-            <div className="w-8 h-8 bg-primary rounded-full flex items-center justify-center text-primary-foreground text-xs font-bold">
-              {getInitials(fullName)}
-            </div>
+            {(photoOverride || (emp as any)?.profilePhoto) ? (
+              <img
+                src={photoOverride || (emp as any).profilePhoto}
+                alt=""
+                className="w-8 h-8 rounded-full object-cover border border-border"
+              />
+            ) : (
+              <div className="w-8 h-8 bg-primary rounded-full flex items-center justify-center text-primary-foreground text-xs font-bold">
+                {getInitials(fullName)}
+              </div>
+            )}
             <div className="hidden sm:block text-left">
               <p className="text-sm font-medium leading-tight">{fullName}</p>
               <p className="text-[10px] text-muted-foreground capitalize">
@@ -169,6 +202,16 @@ export function Header() {
                 className="flex items-center gap-3 px-4 py-2.5 text-sm hover:bg-muted transition-colors">
                 <User className="w-4 h-4 text-muted-foreground" /> My Profile
               </Link>
+              <button
+                onClick={() => photoInputRef.current?.click()}
+                disabled={uploadingPhoto}
+                className="w-full flex items-center gap-3 px-4 py-2.5 text-sm hover:bg-muted transition-colors text-left disabled:opacity-60"
+              >
+                {uploadingPhoto
+                  ? <Loader2 className="w-4 h-4 text-muted-foreground animate-spin" />
+                  : <Camera className="w-4 h-4 text-muted-foreground" />}
+                {uploadingPhoto ? 'Uploading…' : 'Upload Photo'}
+              </button>
               <button
                 onClick={() => { setShowUser(false); setShowChangePw(true); }}
                 className="w-full flex items-center gap-3 px-4 py-2.5 text-sm hover:bg-muted transition-colors text-left"
@@ -190,6 +233,9 @@ export function Header() {
           )}
         </div>
       </div>
+
+      {/* Hidden file input for profile photo */}
+      <input ref={photoInputRef} type="file" accept="image/jpeg,image/png,image/webp" className="hidden" onChange={handlePhotoFile} />
 
       {/* Change Password Modal */}
       {showChangePw && <ChangePasswordModal onClose={() => setShowChangePw(false)} />}
