@@ -12,6 +12,7 @@ import DashboardPage from './pages/Dashboard';
 import EmployeesPage from './pages/Employees';
 import EmployeeDetailPage from './pages/EmployeeDetail';
 import EmployeeReportPage from './pages/EmployeeReport';
+import EmployeeMappingPage from './pages/EmployeeMapping';
 import AttendancePage from './pages/Attendance';
 import LeavePage from './pages/Leave';
 import PayrollPage from './pages/Payroll';
@@ -162,8 +163,9 @@ export default function App() {
             <Route index element={<Navigate to="/dashboard" replace />} />
             <Route path="dashboard" element={<DashboardPage />} />
             <Route path="employees" element={<EmployeesPage />} />
-            <Route path="employees/:id" element={<EmployeeDetailPage />} />
             <Route path="employees/report" element={<EmployeeReportPage />} />
+            <Route path="employees/mapping" element={<EmployeeMappingPage />} />
+            <Route path="employees/:id" element={<EmployeeDetailPage />} />
             <Route path="attendance" element={<AttendancePage />} />
             <Route path="leave" element={<LeavePage />} />
             <Route path="payroll" element={<PayrollPage />} />

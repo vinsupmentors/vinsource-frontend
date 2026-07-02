@@ -6,7 +6,7 @@ import { formatDate, formatCurrency, getInitials } from '@/lib/utils';
 import {
   ArrowLeft, Mail, Phone, Building2, Briefcase, Calendar, CreditCard,
   MapPin, User, Shield, Loader2, AlertCircle, FileText, DollarSign, Clock, Edit2, Check, X,
-  KeyRound, Eye, EyeOff, RefreshCw,
+  KeyRound, Eye, EyeOff, RefreshCw, Trash2, Hash,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useRole } from '@/hooks/useAuth';
@@ -40,7 +40,7 @@ function formatTime(iso?: string) {
 export default function EmployeeDetail() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
-  const { isHR } = useRole();
+  const { isHR, isSuperAdmin } = useRole();
   const [emp, setEmp] = useState<Employee | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -61,6 +61,16 @@ export default function EmployeeDetail() {
   const [resetPwdSaving, setResetPwdSaving] = useState(false);
   const [resetPwdDone, setResetPwdDone] = useState(false);
   const [resetPwdError, setResetPwdError] = useState('');
+
+  // Delete state (SUPER_ADMIN only)
+  const [deleteConfirm, setDeleteConfirm] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+
+  // Edit employee code (SUPER_ADMIN only)
+  const [editCodeOpen, setEditCodeOpen] = useState(false);
+  const [newCode, setNewCode] = useState('');
+  const [codeSaving, setCodeSaving] = useState(false);
+  const [codeError, setCodeError] = useState('');
 
   // Employment edit state (HR / SUPER_ADMIN)
   const [depts, setDepts] = useState<{ id: string; name: string }[]>([]);
@@ -127,6 +137,40 @@ export default function EmployeeDetail() {
       setResetPwdError(e.response?.data?.message ?? 'Failed to reset password');
     } finally {
       setResetPwdSaving(false);
+    }
+  };
+
+  const handleDelete = async () => {
+    if (!emp) return;
+    setDeleting(true);
+    try {
+      await api.delete(`/api/employees/${id}`);
+      navigate('/employees');
+    } catch (e: any) {
+      alert(e?.response?.data?.message || 'Failed to terminate employee');
+      setDeleting(false);
+      setDeleteConfirm(false);
+    }
+  };
+
+  const openEditCode = () => {
+    setNewCode(emp?.employeeCode ?? '');
+    setCodeError('');
+    setEditCodeOpen(true);
+  };
+
+  const saveEmpCode = async () => {
+    if (!newCode.trim()) return;
+    setCodeSaving(true);
+    setCodeError('');
+    try {
+      const r = await api.patch(`/api/employees/${id}/empcode`, { employeeCode: newCode.trim().toUpperCase() });
+      setEmp(prev => prev ? { ...prev, employeeCode: r.data.data.employeeCode } : prev);
+      setEditCodeOpen(false);
+    } catch (e: any) {
+      setCodeError(e?.response?.data?.message || 'Failed to update employee code');
+    } finally {
+      setCodeSaving(false);
     }
   };
 
@@ -207,12 +251,28 @@ export default function EmployeeDetail() {
               </p>
             </div>
             <div className="ml-auto pb-1 flex items-center gap-2">
+              {isSuperAdmin && (
+                <button
+                  onClick={openEditCode}
+                  className="flex items-center gap-1.5 text-xs px-3 py-1.5 border rounded-lg hover:bg-muted transition-colors text-muted-foreground hover:text-foreground"
+                >
+                  <Hash className="w-3.5 h-3.5" /> Edit Code
+                </button>
+              )}
               {isHR && (
                 <button
                   onClick={openResetPwd}
                   className="flex items-center gap-1.5 text-xs px-3 py-1.5 border rounded-lg hover:bg-muted transition-colors text-muted-foreground hover:text-foreground"
                 >
                   <KeyRound className="w-3.5 h-3.5" /> Reset Password
+                </button>
+              )}
+              {isSuperAdmin && (
+                <button
+                  onClick={() => setDeleteConfirm(true)}
+                  className="flex items-center gap-1.5 text-xs px-3 py-1.5 border border-red-200 rounded-lg text-red-600 hover:bg-red-50 transition-colors"
+                >
+                  <Trash2 className="w-3.5 h-3.5" /> Terminate
                 </button>
               )}
               <span className={cn(
@@ -745,6 +805,84 @@ export default function EmployeeDetail() {
                   </div>
                 </>
               )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Edit Employee Code Modal (SUPER_ADMIN) ── */}
+      {editCodeOpen && (
+        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+          <div className="bg-card border rounded-2xl w-full max-w-sm shadow-xl">
+            <div className="flex items-center justify-between px-6 py-4 border-b">
+              <h2 className="font-semibold flex items-center gap-2">
+                <Hash className="w-4 h-4 text-blue-500" /> Edit Employee Code
+              </h2>
+              <button onClick={() => setEditCodeOpen(false)}><X className="w-5 h-5 text-muted-foreground" /></button>
+            </div>
+            <div className="p-6 space-y-4">
+              <p className="text-sm text-muted-foreground">
+                Current: <span className="font-mono font-semibold text-foreground">{emp?.employeeCode}</span>
+              </p>
+              <div>
+                <label className="text-sm font-medium block mb-1.5">New Employee Code</label>
+                <input
+                  value={newCode}
+                  onChange={e => setNewCode(e.target.value.toUpperCase())}
+                  placeholder="e.g. V7009"
+                  className="w-full px-3 py-2 border rounded-lg text-sm font-mono bg-background focus:outline-none focus:ring-2 focus:ring-primary/30"
+                />
+                <p className="text-[11px] text-muted-foreground mt-1">Format: V7001 … V7065 (must be unique)</p>
+              </div>
+              {codeError && <p className="text-xs text-red-500 flex items-center gap-1.5"><AlertCircle className="w-3.5 h-3.5" />{codeError}</p>}
+              <div className="flex gap-2 pt-1">
+                <button onClick={() => setEditCodeOpen(false)} className="flex-1 px-4 py-2 text-sm border rounded-xl hover:bg-muted transition-colors">Cancel</button>
+                <button
+                  onClick={saveEmpCode}
+                  disabled={codeSaving || !newCode.trim()}
+                  className="flex-1 flex items-center justify-center gap-2 px-4 py-2 text-sm bg-primary text-primary-foreground rounded-xl hover:opacity-90 transition-colors disabled:opacity-60"
+                >
+                  {codeSaving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />}
+                  Save
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Terminate / Delete Confirmation Modal (SUPER_ADMIN) ── */}
+      {deleteConfirm && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+          <div className="bg-card border rounded-2xl w-full max-w-sm shadow-xl">
+            <div className="p-6 space-y-4">
+              <div className="w-12 h-12 bg-red-100 rounded-full flex items-center justify-center mx-auto">
+                <Trash2 className="w-6 h-6 text-red-600" />
+              </div>
+              <div className="text-center">
+                <h2 className="font-semibold text-lg">Terminate Employee?</h2>
+                <p className="text-sm text-muted-foreground mt-1">
+                  <strong>{emp?.firstName} {emp?.lastName}</strong> will be marked as <span className="text-red-600 font-medium">TERMINATED</span> and their login will be disabled.
+                </p>
+                <p className="text-xs text-muted-foreground mt-2">This can be undone by updating their status back to ACTIVE.</p>
+              </div>
+              <div className="flex gap-2 pt-1">
+                <button
+                  onClick={() => setDeleteConfirm(false)}
+                  disabled={deleting}
+                  className="flex-1 px-4 py-2 text-sm border rounded-xl hover:bg-muted transition-colors disabled:opacity-60"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleDelete}
+                  disabled={deleting}
+                  className="flex-1 flex items-center justify-center gap-2 px-4 py-2 text-sm bg-red-600 text-white rounded-xl hover:bg-red-700 transition-colors disabled:opacity-60"
+                >
+                  {deleting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Trash2 className="w-4 h-4" />}
+                  Yes, Terminate
+                </button>
+              </div>
             </div>
           </div>
         </div>
