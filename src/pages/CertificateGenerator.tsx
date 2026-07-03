@@ -40,20 +40,44 @@ const EMPTY_FORM: Record<string, string> = {
 
 const fmtD = (d?: string) => (d ? new Date(d).toLocaleDateString('en-IN', { day: '2-digit', month: 'long', year: 'numeric' }) : '____');
 
+// ─── VINSUP INFOTECH logo — real image if present, faithful CSS version otherwise ──
+
+function InfotechLogo({ height = 66 }: { height?: number }) {
+  const [imgOk, setImgOk] = useState(true);
+  if (imgOk) {
+    return (
+      <img
+        src="/certificates/infotech-logo.png"
+        onError={() => setImgOk(false)}
+        alt="Vinsup Infotech Pvt Ltd"
+        style={{ height, margin: '0 auto', display: 'block' }}
+      />
+    );
+  }
+  // CSS recreation: tri-colour V mark + blue VINSUP + INFOTECH PVT LTD
+  return (
+    <div style={{ display: 'inline-block', textAlign: 'center', fontFamily: 'Arial, sans-serif' }}>
+      <div style={{ fontSize: 34, fontWeight: 900, letterSpacing: 1, lineHeight: 1 }}>
+        <span style={{ color: '#e11d48' }}>▼</span>
+        <span style={{ color: '#1e3a8a' }}>VINSUP</span>
+      </div>
+      <div style={{ fontSize: 15, fontWeight: 800, letterSpacing: 3.5, color: '#111', marginTop: 2 }}>
+        INFOTECH PVT LTD
+      </div>
+    </div>
+  );
+}
+
 // ─── Letterhead (VINSUP INFOTECH letters) ────────────────────────────────────
 
 function Letterhead() {
   return (
     <div style={{ textAlign: 'center' }}>
-      <img
-        src="/certificates/infotech-logo.png"
-        onError={(e) => { (e.target as HTMLImageElement).src = '/vinsup-logo.png'; }}
-        alt="Vinsup Infotech"
-        style={{ height: 64, margin: '0 auto', display: 'block' }}
-      />
-      <div style={{ borderTop: '3px solid #111', margin: '10px 24px 6px' }} />
-      <p style={{ fontSize: 12, margin: 0 }}>148, Gopalasamy Kovil St, Ganapathy, Coimbatore, Tamil Nadu - 641006</p>
-      <p style={{ fontSize: 12, margin: '2px 0 0' }}><b>EMail:</b> hrvinsup@gmail.com &nbsp; ☎ 8870060607</p>
+      <InfotechLogo />
+      <div style={{ borderTop: '4px solid #111', margin: '12px 12px 2px' }} />
+      <div style={{ borderTop: '1.5px solid #111', margin: '0 12px 8px' }} />
+      <p style={{ fontSize: 12.5, margin: 0, fontWeight: 500 }}>148, Gopalasamy Kovil St, Ganapathy, Coimbatore, Tamil Nadu - 641006</p>
+      <p style={{ fontSize: 12.5, margin: '2px 0 0' }}><b>EMail:</b> hrvinsup@gmail.com &nbsp;&nbsp;<span style={{ color: '#dc2626' }}>☎</span> 8870060607</p>
     </div>
   );
 }
@@ -79,18 +103,18 @@ function BonafideTemplate({ f }: { f: Record<string, string> }) {
       <p style={{ textAlign: 'right', fontSize: 13, marginTop: 28 }}>{fmtD(f.issueDate)}</p>
       <h2 style={{ textAlign: 'center', fontSize: 16, letterSpacing: 1, margin: '18px 0 22px' }}>BONAFIDE CERTIFICATE</h2>
       <h3 style={{ textAlign: 'center', fontSize: 14.5, letterSpacing: 0.5, marginBottom: 30 }}>TO WHOMSOEVER IT MAY CONCERN</h3>
-      <p style={{ fontSize: 13.5, lineHeight: 1.9, textAlign: 'justify' }}>
+      <p style={{ fontSize: 14, lineHeight: 2.05, textAlign: 'justify' }}>
         This is to certify that <b>{f.studentName || 'Name'}</b>, {f.relation} <b>{f.fatherName || 'Father name'}</b>, is a bonafide
         student of Vinsup Skill Academy and is currently enrolled in the <b>{f.course || 'course'}</b>.
       </p>
-      <p style={{ fontSize: 13.5, lineHeight: 1.9, textAlign: 'justify' }}>
+      <p style={{ fontSize: 14, lineHeight: 2.05, textAlign: 'justify' }}>
         The student joined the course on {f.course || '—'} and is pursuing the training program with us during the academic
         period <b>{fmtD(f.fromDate)}</b> to <b>{fmtD(f.toDate)}</b>.
       </p>
-      <p style={{ fontSize: 13.5, lineHeight: 1.9, textAlign: 'justify' }}>
+      <p style={{ fontSize: 14, lineHeight: 2.05, textAlign: 'justify' }}>
         This certificate is issued at the request of the student for {f.purpose || 'submission to the concerned authorities'}.
       </p>
-      <p style={{ fontSize: 13.5, lineHeight: 1.9 }}>We wish {pronoun} all the best in future endeavors.</p>
+      <p style={{ fontSize: 14, lineHeight: 2.05 }}>We wish {pronoun} all the best in future endeavors.</p>
       <SignBlock date={f.issueDate} />
     </div>
   );
@@ -104,21 +128,21 @@ function ODJoiningTemplate({ f }: { f: Record<string, string> }) {
       <Letterhead />
       <h3 style={{ textAlign: 'center', fontSize: 14.5, letterSpacing: 0.5, margin: '30px 0 18px' }}>TO WHOMSOEVER IT MAY CONCERN</h3>
       <h2 style={{ textAlign: 'center', fontSize: 15, letterSpacing: 1, marginBottom: 26 }}>INTERNSHIP JOINING LETTER</h2>
-      <p style={{ fontSize: 13.5, lineHeight: 2, textAlign: 'justify' }}>
+      <p style={{ fontSize: 14, lineHeight: 2.05, textAlign: 'justify' }}>
         This is to respectfully inform you that <b>{f.studentName || 'Name'}</b>, a student of <b>{f.collegeName || 'College Name'}{f.className ? `, ${f.className}` : ''}</b>,
         is currently doing an internship at our organization, VINSUP INFOTECH PVT LTD, for the period <b>{fmtD(f.fromDate)}</b> to <b>{fmtD(f.toDate)}</b>.
       </p>
-      <p style={{ fontSize: 13.5, lineHeight: 2, textAlign: 'justify' }}>
+      <p style={{ fontSize: 14, lineHeight: 2.05, textAlign: 'justify' }}>
         During the above-mentioned period, {pronoun} has been actively involved in various assigned tasks and projects as part of {possessive} internship,
         gaining practical exposure and industry-relevant knowledge aligned with {possessive} academic curriculum.
       </p>
-      <p style={{ fontSize: 13.5, lineHeight: 2, textAlign: 'justify' }}>
+      <p style={{ fontSize: 14, lineHeight: 2.05, textAlign: 'justify' }}>
         In view of the above, we humbly request you to kindly consider the mentioned duration as On-Duty (OD) for the student.
       </p>
-      <p style={{ fontSize: 13.5, lineHeight: 2, textAlign: 'justify' }}>
+      <p style={{ fontSize: 14, lineHeight: 2.05, textAlign: 'justify' }}>
         Should you require any further information or clarification, please feel free to contact us. We shall be glad to assist you.
       </p>
-      <p style={{ fontSize: 13.5, lineHeight: 2 }}>Thank you for your time, support, and kind consideration.</p>
+      <p style={{ fontSize: 14, lineHeight: 2.05 }}>Thank you for your time, support, and kind consideration.</p>
       <SignBlock date={f.issueDate} />
     </div>
   );
@@ -128,11 +152,7 @@ function InternshipCompletionTemplate({ f, short }: { f: Record<string, string>;
   return (
     <div className="cert-a4" style={{ fontFamily: 'Arial, sans-serif', color: '#222' }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-        <img
-          src="/certificates/infotech-logo.png"
-          onError={(e) => { (e.target as HTMLImageElement).src = '/vinsup-logo.png'; }}
-          alt="Vinsup Infotech" style={{ height: 56 }}
-        />
+        <InfotechLogo height={56} />
         <div style={{ fontSize: 10.5, textAlign: 'left', maxWidth: 240 }}>
           <p style={{ margin: 0 }}><b>Phone</b> : 8870060607</p>
           <p style={{ margin: 0 }}><b>Email</b> : hrvinsup@gmail.com</p>
