@@ -555,7 +555,8 @@ export default function Employees() {
             <option value="ACTIVE">Active</option>
             <option value="INACTIVE">Inactive</option>
             <option value="ON_PROBATION">On Probation</option>
-            <option value="ON_NOTICE">On Notice</option>
+            <option value="RESIGNED">On Notice / Resigned</option>
+            <option value="ON_LEAVE">On Leave</option>
             <option value="TERMINATED">Terminated</option>
           </select>
           {can('HR') && (
