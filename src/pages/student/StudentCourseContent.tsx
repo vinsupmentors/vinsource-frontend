@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import api, { BASE_URL } from '@/lib/api';
-import { Loader2, CheckCircle2, Circle, BookOpen, FileText, Link2, PlayCircle, Download } from 'lucide-react';
+import { Loader2, CheckCircle2, Circle, BookOpen, FileText, Link2, PlayCircle, Download, Lock } from 'lucide-react';
 
 interface MaterialRow {
   id: string;
@@ -19,6 +19,7 @@ interface ModuleRow {
   topics?: string;
   covered: boolean;
   materials?: MaterialRow[];
+  lockedMaterialsCount?: number;
 }
 
 interface CourseBlock {
@@ -116,6 +117,11 @@ export default function StudentCourseContent() {
                       <div className="flex flex-wrap gap-2 mt-2">
                         {m.materials.map((mat) => <MaterialChip key={mat.id} m={mat} />)}
                       </div>
+                    )}
+                    {!!m.lockedMaterialsCount && (
+                      <p className="inline-flex items-center gap-1.5 text-[11px] text-muted-foreground bg-muted rounded-full px-2.5 py-1 mt-2">
+                        <Lock className="w-3 h-3" /> {m.lockedMaterialsCount} material{m.lockedMaterialsCount > 1 ? 's' : ''} — unlocks when this module is covered in class
+                      </p>
                     )}
                   </div>
                 </div>
