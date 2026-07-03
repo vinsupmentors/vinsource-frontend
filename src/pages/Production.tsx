@@ -361,6 +361,7 @@ function CoursesTab({ courses, canEdit, setError, refresh }: {
   const [expanded, setExpanded] = useState<string | null>(null);
   const [showAddModule, setShowAddModule] = useState<string | null>(null);
   const [editingModule, setEditingModule] = useState<AcademyModule | null>(null);
+  const [materialsFor, setMaterialsFor] = useState<AcademyCourse | null>(null);
 
   const toggleActive = async (course: AcademyCourse) => {
     try {
@@ -406,6 +407,9 @@ function CoursesTab({ courses, canEdit, setError, refresh }: {
                   <button onClick={() => setShowAddModule(c.id)} className="text-xs px-2 py-1 border rounded-lg hover:bg-muted/50 flex items-center gap-1">
                     <Plus className="w-3 h-3" /> Add Module
                   </button>
+                  <button onClick={() => setMaterialsFor(c)} className="text-xs px-2 py-1 border rounded-lg hover:bg-muted/50 flex items-center gap-1">
+                    <BookOpen className="w-3 h-3" /> Materials
+                  </button>
                 </div>
               )}
               {c.modules.length === 0 ? (
@@ -444,7 +448,118 @@ function CoursesTab({ courses, canEdit, setError, refresh }: {
       {editingModule && (
         <EditModuleModal module={editingModule} onClose={() => setEditingModule(null)} setError={setError} onSaved={() => { setEditingModule(null); refresh(); }} />
       )}
+      {materialsFor && (
+        <CourseMaterialsModal course={materialsFor} onClose={() => setMaterialsFor(null)} setError={setError} />
+      )}
     </div>
+  );
+}
+
+// ── COURSE MATERIALS ─────────────────────────────────────────────────────────
+type CourseMaterialRow = {
+  id: string; moduleId?: string | null; title: string; type: 'FILE' | 'LINK' | 'VIDEO'; url: string; notes?: string | null;
+  module?: { id: string; order: number; title: string } | null;
+};
+
+function CourseMaterialsModal({ course, onClose, setError }: {
+  course: AcademyCourse; onClose: () => void; setError: (s: string) => void;
+}) {
+  const [materials, setMaterials] = useState<CourseMaterialRow[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [title, setTitle] = useState('');
+  const [moduleId, setModuleId] = useState('');
+  const [link, setLink] = useState('');
+  const [file, setFile] = useState<File | null>(null);
+
+  const load = () => {
+    api.get(`/api/production/courses/${course.id}/materials`)
+      .then((r) => setMaterials(r.data.data || []))
+      .catch(() => {})
+      .finally(() => setLoading(false));
+  };
+  useEffect(load, [course.id]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const add = async () => {
+    if (!title.trim()) { setError('Material title is required'); return; }
+    if (!file && !link.trim()) { setError('Choose a file or paste a link'); return; }
+    setSaving(true);
+    setError('');
+    try {
+      const fd = new FormData();
+      fd.append('title', title);
+      if (moduleId) fd.append('moduleId', moduleId);
+      if (file) fd.append('file', file);
+      else {
+        fd.append('url', link.trim());
+        fd.append('type', /youtube\.com|youtu\.be|vimeo\.com|drive\.google\.com\/.*video/i.test(link) ? 'VIDEO' : 'LINK');
+      }
+      await api.post(`/api/production/courses/${course.id}/materials`, fd, { headers: { 'Content-Type': 'multipart/form-data' } });
+      setTitle(''); setLink(''); setFile(null); setModuleId('');
+      load();
+    } catch (err) { setError(errMsg(err, 'Failed to add material')); } finally { setSaving(false); }
+  };
+
+  const remove = async (m: CourseMaterialRow) => {
+    if (!confirm(`Remove "${m.title}"?`)) return;
+    try { await api.delete(`/api/production/materials/${m.id}`); load(); }
+    catch (err) { setError(errMsg(err, 'Failed to remove material')); }
+  };
+
+  return (
+    <Modal title={`Study Materials — ${course.name}`} onClose={onClose}>
+      <div className="space-y-4 max-h-[65vh] overflow-y-auto pr-1">
+        <p className="text-xs text-muted-foreground">
+          Everything added here is visible to enrolled students <b>from day one</b> in their Course Content page.
+        </p>
+
+        {/* Add form */}
+        <div className="border rounded-lg p-3 space-y-2 bg-muted/10">
+          <input className="w-full px-3 py-2 border rounded-lg text-sm" placeholder="Title * (e.g. Module 1 — Slides)" value={title} onChange={(e) => setTitle(e.target.value)} />
+          <select className="w-full px-3 py-2 border rounded-lg text-sm" value={moduleId} onChange={(e) => setModuleId(e.target.value)}>
+            <option value="">General (whole course)</option>
+            {course.modules.map((m) => <option key={m.id} value={m.id}>Module {m.order} — {m.title}</option>)}
+          </select>
+          <div className="flex items-center gap-2">
+            <input type="file" className="text-xs flex-1"
+              accept=".pdf,.doc,.docx,.ppt,.pptx,.xls,.xlsx,.csv,.txt,.md,.jpg,.jpeg,.png,.webp,.zip"
+              onChange={(e) => { setFile(e.target.files?.[0] || null); if (e.target.files?.[0]) setLink(''); }} />
+            <span className="text-[11px] text-muted-foreground">or</span>
+            <input className="flex-1 px-3 py-2 border rounded-lg text-sm" placeholder="https:// link (doc / video)" value={link}
+              onChange={(e) => { setLink(e.target.value); if (e.target.value) setFile(null); }} />
+          </div>
+          <button onClick={add} disabled={saving} className="w-full py-2 text-sm font-medium bg-primary text-primary-foreground rounded-lg hover:opacity-90 disabled:opacity-50">
+            {saving ? 'Adding…' : 'Add Material'}
+          </button>
+        </div>
+
+        {/* List */}
+        {loading ? (
+          <p className="text-sm text-muted-foreground text-center py-4">Loading…</p>
+        ) : materials.length === 0 ? (
+          <p className="text-sm text-muted-foreground text-center py-4">No materials yet.</p>
+        ) : (
+          <div className="divide-y border rounded-lg">
+            {materials.map((m) => (
+              <div key={m.id} className="flex items-center gap-3 px-3 py-2">
+                <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${m.type === 'FILE' ? 'bg-blue-100 text-blue-700' : m.type === 'VIDEO' ? 'bg-red-100 text-red-700' : 'bg-emerald-100 text-emerald-700'}`}>
+                  {m.type}
+                </span>
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-medium truncate">{m.title}</p>
+                  <p className="text-[11px] text-muted-foreground">{m.module ? `Module ${m.module.order} — ${m.module.title}` : 'General'}</p>
+                </div>
+                <a href={fileUrl(m.url)} target="_blank" rel="noreferrer" className="text-xs text-blue-600 hover:underline">Open</a>
+                <button onClick={() => remove(m)} className="text-xs text-red-500 hover:underline">Remove</button>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+      <div className="flex justify-end pt-3">
+        <button onClick={onClose} className="px-4 py-2 text-sm border rounded-lg hover:bg-muted/50">Close</button>
+      </div>
+    </Modal>
   );
 }
 
