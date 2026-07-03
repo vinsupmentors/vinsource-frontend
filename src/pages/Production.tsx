@@ -35,7 +35,7 @@ type DeliveryMode = 'ONLINE' | 'OFFLINE' | 'HYBRID';
 
 type TrainerAssignment = { id: string; trainerId: string; trainer: EmployeeLite };
 type BatchCourseSchedule = {
-  id: string; batchId: string; courseId: string; timing: BatchTiming; dayPattern: DayPattern;
+  id: string; code?: string | null; batchId: string; courseId: string; timing: BatchTiming; dayPattern: DayPattern;
   mode: DeliveryMode; startDate: string; endDate?: string | null; capacity?: number | null;
   course: { id: string; name: string }; trainers: TrainerAssignment[]; _count?: { enrollments: number };
 };
@@ -620,7 +620,18 @@ function BatchesTab({ batches, employees, canEdit, setError, refresh }: {
                 b.schedules.map((s) => (
                   <div key={s.id} className="border rounded-lg p-3 bg-white space-y-2">
                     <div className="flex items-center justify-between flex-wrap gap-2">
-                      <p className="font-medium text-sm">{s.course.name}</p>
+                      <p className="font-medium text-sm flex items-center gap-2">
+                        {s.course.name}
+                        {s.code && (
+                          <span
+                            title="Sub-batch code — use this when adding students"
+                            className="font-mono text-[11px] font-semibold bg-indigo-50 text-indigo-700 border border-indigo-200 rounded px-1.5 py-0.5 cursor-copy"
+                            onClick={() => navigator.clipboard?.writeText(s.code!)}
+                          >
+                            {s.code}
+                          </span>
+                        )}
+                      </p>
                       <div className="text-xs text-muted-foreground flex items-center gap-3">
                         <span>{s.timing}</span>
                         <span>{DAY_PATTERNS.find((d) => d.value === s.dayPattern)?.label}</span>
@@ -1659,14 +1670,28 @@ function AddStudentModal({ onClose, setError, onSaved }: { onClose: () => void; 
   const [batches, setBatches] = useState<Batch[]>([]);
   const [batchId, setBatchId] = useState('');
   const [scheduleId, setScheduleId] = useState('');
+  const [subBatchCode, setSubBatchCode] = useState('');
   const [saving, setSaving] = useState(false);
 
   useEffect(() => { api.get('/api/production/batches').then((res) => setBatches(res.data.data)).catch(() => setBatches([])); }, []);
 
   const selectedBatch = batches.find((b) => b.id === batchId);
 
+  // Typing a sub-batch code auto-selects the matching batch + course
+  const applySubBatchCode = (raw: string) => {
+    const code = raw.toUpperCase();
+    setSubBatchCode(code);
+    for (const b of batches) {
+      const match = b.schedules.find((s) => (s.code || '').toUpperCase() === code.trim());
+      if (match) { setBatchId(b.id); setScheduleId(match.id); return; }
+    }
+    setScheduleId('');
+  };
+
+  const codeValid = !subBatchCode.trim() || Boolean(scheduleId);
+
   const submit = async () => {
-    if (!studentCode || !email || !scheduleId) { setError('Student ID, email, batch, and course are required'); return; }
+    if (!studentCode || !email || !scheduleId) { setError('Student ID, email, and a sub-batch (code or selection) are required'); return; }
     setSaving(true);
     setError('');
     try {
@@ -1680,13 +1705,31 @@ function AddStudentModal({ onClose, setError, onSaved }: { onClose: () => void; 
       <div className="space-y-3">
         <input className="w-full px-3 py-2 border rounded-lg text-sm" placeholder="Student ID *" value={studentCode} onChange={(e) => setStudentCode(e.target.value)} />
         <input className="w-full px-3 py-2 border rounded-lg text-sm" placeholder="Email *" type="email" value={email} onChange={(e) => setEmail(e.target.value)} />
-        <select className="w-full px-3 py-2 border rounded-lg text-sm" value={batchId} onChange={(e) => { setBatchId(e.target.value); setScheduleId(''); }}>
-          <option value="">Select Batch *</option>
+
+        <div>
+          <input
+            className={`w-full px-3 py-2 border rounded-lg text-sm font-mono ${subBatchCode && !codeValid ? 'border-red-400' : subBatchCode && scheduleId ? 'border-green-400' : ''}`}
+            placeholder="Sub-Batch Code (e.g. B14-DA-EVE)"
+            value={subBatchCode}
+            onChange={(e) => applySubBatchCode(e.target.value)}
+          />
+          {subBatchCode && scheduleId && selectedBatch && (
+            <p className="text-[11px] text-green-600 mt-1">
+              ✓ {selectedBatch.code} — {selectedBatch.schedules.find((s) => s.id === scheduleId)?.course.name} ({selectedBatch.schedules.find((s) => s.id === scheduleId)?.timing})
+            </p>
+          )}
+          {subBatchCode.trim() && !scheduleId && <p className="text-[11px] text-red-500 mt-1">No sub-batch found with this code</p>}
+        </div>
+
+        <p className="text-center text-[11px] text-muted-foreground">— or pick manually —</p>
+
+        <select className="w-full px-3 py-2 border rounded-lg text-sm" value={batchId} onChange={(e) => { setBatchId(e.target.value); setScheduleId(''); setSubBatchCode(''); }}>
+          <option value="">Select Batch</option>
           {batches.map((b) => <option key={b.id} value={b.id}>{b.code}</option>)}
         </select>
-        <select className="w-full px-3 py-2 border rounded-lg text-sm" value={scheduleId} onChange={(e) => setScheduleId(e.target.value)} disabled={!selectedBatch}>
-          <option value="">Select Course *</option>
-          {selectedBatch?.schedules.map((s) => <option key={s.id} value={s.id}>{s.course.name} ({s.timing})</option>)}
+        <select className="w-full px-3 py-2 border rounded-lg text-sm" value={scheduleId} onChange={(e) => { setScheduleId(e.target.value); setSubBatchCode(''); }} disabled={!selectedBatch}>
+          <option value="">Select Course</option>
+          {selectedBatch?.schedules.map((s) => <option key={s.id} value={s.id}>{s.code ? `${s.code} — ` : ''}{s.course.name} ({s.timing})</option>)}
         </select>
         <p className="text-xs text-muted-foreground">
           The student will fill in their own name, phone, photo, and other details when they log in for the first time.
