@@ -1568,8 +1568,10 @@ function BulkUploadStudentsModal({ batches, courses, onClose, setError, onSaved 
   const [results, setResults] = useState<BulkResult[] | null>(null);
 
   const downloadTemplate = () => {
+    const exampleCode = batches.flatMap((b) => b.schedules).find((s) => s.code)?.code || 'B15-UUGD-MOR';
     const ws = XLSX.utils.json_to_sheet([
-      { studentCode: '', firstName: 'John', lastName: 'Doe', phone: '9876543210', email: 'john@example.com', track: 'JRP', batch: batches[0]?.code || 'Batch 1', course: '' },
+      { studentCode: '', firstName: 'John', lastName: 'Doe', phone: '9876543210', email: 'john@example.com', track: 'JRP', subBatchCode: exampleCode, batch: '', course: '' },
+      { studentCode: '', firstName: 'Jane', lastName: 'S', phone: '9876543211', email: 'jane@example.com', track: 'PAP', subBatchCode: '', batch: batches[0]?.code || 'Batch 1', course: courses[0]?.name || '' },
     ]);
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, 'Students');
@@ -1612,10 +1614,10 @@ function BulkUploadStudentsModal({ batches, courses, onClose, setError, onSaved 
     <Modal title="Bulk Upload Students" onClose={onClose}>
       <div className="space-y-3 max-h-[65vh] overflow-y-auto pr-1">
         <p className="text-xs text-muted-foreground">
-          Upload an Excel/CSV file with columns: <code>studentCode, firstName, lastName, phone, email, track, batch, course</code>.
-          <code>studentCode</code> is optional — leave it blank to auto-generate one, or set it to assign your own (it must be unique).
-          The <code>batch</code> column should match an existing batch name (e.g. "Batch 14"). <code>course</code> is only
-          needed if that batch has more than one sub-batch.
+          Upload an Excel/CSV file with columns: <code>studentCode, firstName, lastName, phone, email, track, subBatchCode, batch, course</code>.
+          <b>Easiest mapping:</b> fill <code>subBatchCode</code> with the sub-batch's code (the purple chip on Batches &amp; Schedules,
+          e.g. <code>B15-UUGD-MOR</code>) — then <code>batch</code>/<code>course</code> can stay empty. Leave <code>studentCode</code> blank
+          to auto-generate. <code>track</code> is JRP, IOP, or PAP. Students with a real <code>email</code> receive their login credentials automatically.
         </p>
         <button onClick={downloadTemplate} className="text-xs px-3 py-2 border rounded-lg hover:bg-muted/50 flex items-center gap-1">
           <Download className="w-3 h-3" /> Download template
@@ -1628,6 +1630,31 @@ function BulkUploadStudentsModal({ batches, courses, onClose, setError, onSaved 
         />
         {fileName && !results && (
           <p className="text-xs text-muted-foreground">{fileName} — {rows.length} row{rows.length === 1 ? '' : 's'} parsed.</p>
+        )}
+        {rows.length > 0 && !results && (
+          <div className="border rounded-lg max-h-44 overflow-auto">
+            <table className="w-full text-[11px]">
+              <thead className="bg-muted/40 text-left sticky top-0">
+                <tr>
+                  {['Name', 'Phone', 'Email', 'Track', 'Sub-Batch / Batch'].map((h) => <th key={h} className="px-2 py-1 whitespace-nowrap">{h}</th>)}
+                </tr>
+              </thead>
+              <tbody className="divide-y">
+                {rows.slice(0, 10).map((r: any, i) => (
+                  <tr key={i}>
+                    <td className="px-2 py-1 whitespace-nowrap">{String(r.firstName || '')} {String(r.lastName || '')}</td>
+                    <td className="px-2 py-1">{String(r.phone || '') || <span className="text-red-500">missing</span>}</td>
+                    <td className="px-2 py-1">{String(r.email || '') || '—'}</td>
+                    <td className="px-2 py-1">{String(r.track || 'JRP')}</td>
+                    <td className="px-2 py-1 font-mono">{String(r.subBatchCode || r.subBatch || '') || [String(r.batch || r.batchCode || ''), String(r.course || '')].filter(Boolean).join(' / ') || '—'}</td>
+                  </tr>
+                ))}
+                {rows.length > 10 && (
+                  <tr><td colSpan={5} className="px-2 py-1 text-muted-foreground">…and {rows.length - 10} more</td></tr>
+                )}
+              </tbody>
+            </table>
+          </div>
         )}
         {courses.length > 0 && (
           <p className="text-xs text-muted-foreground">Known courses: {courses.map((c) => c.name).join(', ')}</p>
