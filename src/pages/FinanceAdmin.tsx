@@ -41,6 +41,12 @@ interface ReportData {
   entries: Expense[]; totalAmount: number; count: number;
   byCategory: ReportBreakdownRow[]; byPaymentMode: ReportBreakdownRow[]; byVendor: ReportBreakdownRow[]; byUser: ReportBreakdownRow[];
 }
+interface BudgetAllocationRow {
+  id: string; amount: number; notes?: string | null; allocatedDate: string;
+  employee?: EmployeeLite | null; allocatedBy?: EmployeeLite | null; employeeId?: string;
+}
+interface BudgetSummaryRow { employeeId: string; employee: EmployeeLite; allocated: number; spent: number; balance: number; }
+interface MyBudget { allocated: number; spent: number; balance: number; allocations: BudgetAllocationRow[]; }
 
 const STATUSES: ExpenseStatus[] = ['PENDING', 'APPROVED', 'REJECTED', 'PAID'];
 const STATUS_COLOR: Record<ExpenseStatus, string> = {
@@ -58,8 +64,8 @@ const EXPENSE_CATEGORIES = [
 ];
 const BACKEND_URL = (import.meta as unknown as { env: Record<string, string> }).env?.VITE_API_URL || 'http://localhost:5000';
 
-type Tab = 'register' | 'ledger' | 'funds' | 'vendors' | 'recurring' | 'summary' | 'report';
-const VALID_TABS: Tab[] = ['register', 'ledger', 'funds', 'vendors', 'recurring', 'summary', 'report'];
+type Tab = 'register' | 'ledger' | 'funds' | 'vendors' | 'recurring' | 'summary' | 'report' | 'budgets';
+const VALID_TABS: Tab[] = ['register', 'ledger', 'funds', 'vendors', 'recurring', 'summary', 'report', 'budgets'];
 const PAYMENT_MODES = ['Cash', 'Bank Transfer', 'UPI', 'Card', 'Cheque'];
 const EMPTY_REPORT_FILTERS = { from: '', to: '', category: '', paymentMode: '', status: '', vendorId: '', requestedById: '', search: '' };
 
@@ -94,6 +100,13 @@ export default function FinanceAdminPage() {
   const [showAdd, setShowAdd] = useState(false);
   const [editingExpense, setEditingExpense] = useState<Expense | null>(null);
   const [saving, setSaving] = useState(false);
+
+  // Budgets (SUPER_ADMIN manages; spenders see their own strip)
+  const [budgetSummary, setBudgetSummary] = useState<BudgetSummaryRow[]>([]);
+  const [budgetAllocations, setBudgetAllocations] = useState<BudgetAllocationRow[]>([]);
+  const [myBudget, setMyBudget] = useState<MyBudget | null>(null);
+  const [showBudgetModal, setShowBudgetModal] = useState(false);
+  const [editingBudget, setEditingBudget] = useState<BudgetAllocationRow | null>(null);
 
   const [ledger, setLedger] = useState<LedgerData | null>(null);
   const [funds, setFunds] = useState<FundReceipt[]>([]);
@@ -200,7 +213,7 @@ export default function FinanceAdminPage() {
   useEffect(() => { if (level && tab === 'report') fetchReport(); }, [level, tab, fetchReport]);
 
   useEffect(() => {
-    api.get('/api/employees').then((res) => setEmployees(res.data.data || [])).catch(() => setEmployees([]));
+    api.get('/api/employees?limit=200').then((res) => setEmployees(res.data.data || [])).catch(() => setEmployees([]));
     if (level) fetchVendors();
   }, [level, fetchVendors]);
 
@@ -211,6 +224,37 @@ export default function FinanceAdminPage() {
     } catch (err: unknown) {
       const e = err as { response?: { data?: { message?: string } } };
       setError(e.response?.data?.message || 'Failed to update status');
+    }
+  };
+
+  const fetchBudgets = useCallback(async () => {
+    if (!isSuperAdmin) return;
+    try {
+      const { data } = await api.get('/api/finance-admin/budgets');
+      setBudgetSummary(data.data?.summary || []);
+      setBudgetAllocations(data.data?.allocations || []);
+    } catch { /* ignore */ }
+  }, [isSuperAdmin]);
+
+  useEffect(() => { if (tab === 'budgets') fetchBudgets(); }, [tab, fetchBudgets]);
+
+  // Spender's own budget strip on the register tab
+  useEffect(() => {
+    if (tab !== 'register') return;
+    api.get('/api/finance-admin/budgets/my')
+      .then((r) => setMyBudget(r.data.data || null))
+      .catch(() => setMyBudget(null));
+  }, [tab]);
+
+  const deleteBudget = async (b: BudgetAllocationRow) => {
+    const who = b.employee ? `${b.employee.firstName} ${b.employee.lastName}` : 'employee';
+    if (!confirm(`Delete this ${fmt(b.amount)} allocation to ${who}?`)) return;
+    try {
+      await api.delete(`/api/finance-admin/budgets/${b.id}`);
+      fetchBudgets();
+    } catch (err: unknown) {
+      const er = err as { response?: { data?: { message?: string } } };
+      setError(er.response?.data?.message || 'Failed to delete allocation');
     }
   };
 
@@ -275,6 +319,7 @@ export default function FinanceAdminPage() {
       { id: 'recurring' as Tab, label: 'Recurring Expenses', icon: Repeat },
       { id: 'summary' as Tab, label: 'Category Summary', icon: PieChart },
     ] : []),
+    ...(isSuperAdmin ? [{ id: 'budgets' as Tab, label: 'Budgets', icon: PiggyBank }] : []),
   ];
 
   const exportReportCsv = () => {
@@ -323,6 +368,11 @@ export default function FinanceAdminPage() {
         {tab === 'report' && (
           <button onClick={exportReportCsv} disabled={!reportData || reportData.entries.length === 0} className="flex items-center gap-2 px-4 py-2 bg-emerald-600 text-white rounded-lg text-sm font-medium hover:bg-emerald-700 disabled:opacity-50">
             <Download className="w-4 h-4" /> Export CSV
+          </button>
+        )}
+        {tab === 'budgets' && isSuperAdmin && (
+          <button onClick={() => { setEditingBudget(null); setShowBudgetModal(true); }} className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700">
+            <Plus className="w-4 h-4" /> Allot Budget
           </button>
         )}
         {tab === 'funds' && canSeeAll && (
@@ -381,6 +431,15 @@ export default function FinanceAdminPage() {
 
       {tab === 'register' && (
         <>
+          {myBudget && (
+            <div className={`border rounded-xl p-4 flex flex-wrap items-center gap-x-8 gap-y-2 ${myBudget.balance < 0 ? 'bg-red-50 border-red-200' : 'bg-blue-50/50 border-blue-200'}`}>
+              <p className="text-sm font-semibold flex items-center gap-2"><PiggyBank className="w-4 h-4" /> My Budget</p>
+              <p className="text-sm">Given: <span className="font-bold">{fmt(myBudget.allocated)}</span></p>
+              <p className="text-sm">Spent: <span className="font-bold">{fmt(myBudget.spent)}</span></p>
+              <p className="text-sm">Balance: <span className={`font-bold ${myBudget.balance < 0 ? 'text-red-600' : 'text-emerald-700'}`}>{fmt(myBudget.balance)}</span></p>
+              {myBudget.balance < 0 && <span className="text-xs font-medium text-red-600 bg-red-100 px-2 py-0.5 rounded-full">Over budget</span>}
+            </div>
+          )}
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
             <StatCard icon={Clock} label="Pending" value={stats?.statusTotals?.PENDING?.count ?? 0} sub={fmt(stats?.statusTotals?.PENDING?.amount ?? 0)} />
             <StatCard icon={CheckCircle2} label="Approved" value={stats?.statusTotals?.APPROVED?.count ?? 0} sub={fmt(stats?.statusTotals?.APPROVED?.amount ?? 0)} />
@@ -815,6 +874,95 @@ export default function FinanceAdminPage() {
         </div>
       )}
 
+      {tab === 'budgets' && isSuperAdmin && (
+        <div className="space-y-6">
+          {/* Per-employee position */}
+          <div className="bg-card border rounded-xl overflow-hidden overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead className="bg-muted/50 text-left text-xs uppercase text-muted-foreground">
+                <tr>
+                  <th className="px-4 py-3">Employee</th>
+                  <th className="px-4 py-3">Total Given</th>
+                  <th className="px-4 py-3">Spent</th>
+                  <th className="px-4 py-3">Balance</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y">
+                {budgetSummary.length === 0 ? (
+                  <tr><td colSpan={4} className="px-4 py-8 text-center text-muted-foreground">No budgets allotted yet — click "Allot Budget" to give someone spending money.</td></tr>
+                ) : budgetSummary.map((r) => (
+                  <tr key={r.employeeId} className="hover:bg-muted/30">
+                    <td className="px-4 py-3 font-medium">{r.employee.firstName} {r.employee.lastName} <span className="text-xs text-muted-foreground">({r.employee.employeeCode})</span></td>
+                    <td className="px-4 py-3">{fmt(r.allocated)}</td>
+                    <td className="px-4 py-3">{fmt(r.spent)}</td>
+                    <td className={`px-4 py-3 font-bold ${r.balance < 0 ? 'text-red-600' : 'text-emerald-700'}`}>
+                      {fmt(r.balance)}
+                      {r.balance < 0 && <span className="ml-2 text-[10px] font-medium text-red-600 bg-red-100 px-1.5 py-0.5 rounded-full">OVER</span>}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+
+          {/* Allocation entries */}
+          <div>
+            <p className="text-sm font-medium mb-2">Allocation Entries</p>
+            <div className="bg-card border rounded-xl overflow-hidden overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead className="bg-muted/50 text-left text-xs uppercase text-muted-foreground">
+                  <tr>
+                    <th className="px-4 py-3">Date</th>
+                    <th className="px-4 py-3">Employee</th>
+                    <th className="px-4 py-3">Amount</th>
+                    <th className="px-4 py-3">Notes</th>
+                    <th className="px-4 py-3">Allotted By</th>
+                    <th className="px-4 py-3">Actions</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y">
+                  {budgetAllocations.length === 0 ? (
+                    <tr><td colSpan={6} className="px-4 py-8 text-center text-muted-foreground">No allocations yet</td></tr>
+                  ) : budgetAllocations.map((b) => (
+                    <tr key={b.id} className="hover:bg-muted/30">
+                      <td className="px-4 py-3 text-muted-foreground whitespace-nowrap">{new Date(b.allocatedDate).toLocaleDateString()}</td>
+                      <td className="px-4 py-3 font-medium">{b.employee ? `${b.employee.firstName} ${b.employee.lastName}` : '—'}</td>
+                      <td className="px-4 py-3 font-semibold">{fmt(b.amount)}</td>
+                      <td className="px-4 py-3 text-muted-foreground">{b.notes || '—'}</td>
+                      <td className="px-4 py-3 text-muted-foreground">{b.allocatedBy ? `${b.allocatedBy.firstName} ${b.allocatedBy.lastName}` : '—'}</td>
+                      <td className="px-4 py-3">
+                        <div className="flex items-center gap-1">
+                          <button onClick={() => { setEditingBudget(b); setShowBudgetModal(true); }} title="Edit"
+                            className="p-1.5 rounded hover:bg-muted text-muted-foreground hover:text-foreground">
+                            <Pencil className="w-3.5 h-3.5" />
+                          </button>
+                          <button onClick={() => deleteBudget(b)} title="Delete"
+                            className="p-1.5 rounded hover:bg-red-50 text-muted-foreground hover:text-red-500">
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showBudgetModal && (
+        <BudgetModal
+          allocation={editingBudget}
+          employees={employees}
+          saving={saving}
+          setSaving={setSaving}
+          onClose={() => { setShowBudgetModal(false); setEditingBudget(null); }}
+          onSaved={() => { setShowBudgetModal(false); setEditingBudget(null); fetchBudgets(); }}
+          setError={setError}
+        />
+      )}
+
       {showAdd && (
         <AddExpenseModal
           expense={editingExpense}
@@ -1186,6 +1334,87 @@ function RecurringModal({ template, vendors, saving, setSaving, onClose, onSaved
         <div className="flex justify-end gap-2">
           <button onClick={onClose} className="px-4 py-2 text-sm rounded-lg border">Cancel</button>
           <button onClick={submit} disabled={saving} className="px-4 py-2 text-sm rounded-lg bg-blue-600 text-white disabled:opacity-50">{saving ? 'Saving...' : template ? 'Save' : 'Create'}</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function BudgetModal({ allocation, employees, saving, setSaving, onClose, onSaved, setError }: {
+  allocation?: BudgetAllocationRow | null; employees: EmployeeLite[]; saving: boolean;
+  setSaving: (v: boolean) => void; onClose: () => void; onSaved: () => void; setError: (s: string) => void;
+}) {
+  const [form, setForm] = useState({
+    employeeId: allocation?.employee?.id || '',
+    amount: allocation ? String(allocation.amount) : '',
+    notes: allocation?.notes || '',
+    allocatedDate: (allocation?.allocatedDate || new Date().toISOString()).slice(0, 10),
+  });
+
+  const submit = async () => {
+    if (!allocation && !form.employeeId) { setError('Select an employee'); return; }
+    if (!form.amount || Number(form.amount) <= 0) { setError('Enter a positive amount'); return; }
+    setSaving(true);
+    setError('');
+    try {
+      if (allocation) {
+        await api.put(`/api/finance-admin/budgets/${allocation.id}`, {
+          amount: form.amount, notes: form.notes, allocatedDate: form.allocatedDate,
+        });
+      } else {
+        await api.post('/api/finance-admin/budgets', {
+          employeeId: form.employeeId, amount: form.amount, notes: form.notes, allocatedDate: form.allocatedDate,
+        });
+      }
+      onSaved();
+    } catch (err: unknown) {
+      const e = err as { response?: { data?: { message?: string } } };
+      setError(e.response?.data?.message || `Failed to ${allocation ? 'update' : 'create'} allocation`);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
+      <div className="bg-card border rounded-2xl shadow-xl w-full max-w-md p-6 space-y-4">
+        <h2 className="font-semibold text-lg">
+          {allocation
+            ? `Edit Allocation — ${allocation.employee ? `${allocation.employee.firstName} ${allocation.employee.lastName}` : ''}`
+            : 'Allot Budget'}
+        </h2>
+        {!allocation && (
+          <div>
+            <label className="text-xs text-muted-foreground">Employee *</label>
+            <select value={form.employeeId} onChange={(e) => setForm({ ...form, employeeId: e.target.value })}
+              className="w-full px-3 py-2 border rounded-lg text-sm">
+              <option value="">Select employee</option>
+              {employees.map((e) => (
+                <option key={e.id} value={e.id}>{e.firstName} {e.lastName}{e.employeeCode ? ` (${e.employeeCode})` : ''}</option>
+              ))}
+            </select>
+          </div>
+        )}
+        <div>
+          <label className="text-xs text-muted-foreground">Amount (₹) *</label>
+          <input type="number" min="1" value={form.amount} onChange={(e) => setForm({ ...form, amount: e.target.value })}
+            className="w-full px-3 py-2 border rounded-lg text-sm" placeholder="e.g. 25000" />
+        </div>
+        <div>
+          <label className="text-xs text-muted-foreground">Date</label>
+          <input type="date" value={form.allocatedDate} onChange={(e) => setForm({ ...form, allocatedDate: e.target.value })}
+            className="w-full px-3 py-2 border rounded-lg text-sm" />
+        </div>
+        <div>
+          <label className="text-xs text-muted-foreground">Notes</label>
+          <input value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })}
+            className="w-full px-3 py-2 border rounded-lg text-sm" placeholder="e.g. July office spending" />
+        </div>
+        <div className="flex justify-end gap-2">
+          <button onClick={onClose} className="px-4 py-2 text-sm rounded-lg border">Cancel</button>
+          <button onClick={submit} disabled={saving} className="px-4 py-2 text-sm rounded-lg bg-blue-600 text-white disabled:opacity-50">
+            {saving ? 'Saving...' : allocation ? 'Save Changes' : 'Allot Budget'}
+          </button>
         </div>
       </div>
     </div>
