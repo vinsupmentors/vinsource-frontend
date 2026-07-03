@@ -316,49 +316,32 @@ function InternshipCompletionTemplate({ f, short }: { f: Record<string, string>;
 }
 
 function CourseCompletionTemplate({ f }: { f: Record<string, string> }) {
+  // Pixel-perfect: the official design (course-completion-bg.png, 1414×2000 with
+  // dynamic areas blanked) as background, live data overlaid at exact positions.
+  // Sheet is fixed at 794px (= A4 width @96dpi), scale = 794/1414.
+  const dmy = f.issueDate ? new Date(f.issueDate).toLocaleDateString('en-GB') : '__/__/____';
   return (
-    <div className="cert-a4" style={{ fontFamily: 'Arial, sans-serif', color: '#1e3a8a', position: 'relative', overflow: 'hidden' }}>
-      {/* Left decorative waves */}
-      <div style={{ position: 'absolute', left: -70, top: -60, width: 190, height: 420, background: 'linear-gradient(160deg,#0e7490 20%,#22d3ee 60%,#1e3a8a 100%)', borderRadius: '0 0 65% 0', transform: 'rotate(8deg)' }} />
-      <div style={{ position: 'absolute', left: -110, bottom: -80, width: 220, height: 380, background: 'linear-gradient(20deg,#1e3a8a 15%,#38bdf8 70%)', borderRadius: '0 65% 0 0', transform: 'rotate(-6deg)' }} />
+    <div style={{ position: 'relative', width: 794, height: 1123, background: '#fff', fontFamily: 'Arial, sans-serif', overflow: 'hidden' }}>
+      <img src="/certificates/course-completion-bg.png" alt="" style={{ position: 'absolute', inset: 0, width: '100%', height: '100%' }} />
 
-      <div style={{ position: 'relative', textAlign: 'center', paddingTop: 8 }}>
-        <img
-          src="/certificates/academy-logo.png"
-          onError={(e) => { (e.target as HTMLImageElement).src = '/vinsup-logo.png'; }}
-          alt="Vinsup Skill Academy" style={{ height: 74, margin: '0 auto', display: 'block' }}
-        />
-        <h1 style={{ fontSize: 44, letterSpacing: 4, margin: '26px 0 2px', fontWeight: 800 }}>CERTIFICATE</h1>
-        <p style={{ fontSize: 15, letterSpacing: 2, margin: '0 0 34px', fontWeight: 600 }}>THIS IS TO CERTIFY THAT</p>
+      {/* Student photo → inside the medal circle */}
+      {f.photoUrl && (
+        <img src={f.photoUrl} alt="" style={{ position: 'absolute', left: 57, top: 484, width: 170, height: 170, borderRadius: '50%', objectFit: 'cover' }} />
+      )}
 
-        {f.photoUrl && (
-          <img src={f.photoUrl} alt="" style={{ width: 110, height: 110, objectFit: 'cover', borderRadius: '50%', border: '5px solid #d4af37', display: 'block', margin: '0 auto 16px' }} />
-        )}
+      {/* Student name + underline */}
+      <div style={{ position: 'absolute', left: 275, top: 458, width: 472, textAlign: 'center', borderBottom: '2px solid #1e3a8a', paddingBottom: 10 }}>
+        <span style={{ fontSize: f.studentName && f.studentName.length > 18 ? 27 : 34, fontWeight: 800, color: '#111', textTransform: 'uppercase', letterSpacing: 1, whiteSpace: 'nowrap' }}>
+          {f.studentName || 'STUDENT NAME'}
+        </span>
+      </div>
 
-        <p style={{ fontSize: 30, fontWeight: 800, color: '#111', borderBottom: '2px solid #111', display: 'inline-block', padding: '0 34px 6px', margin: '0 0 20px', textTransform: 'uppercase' }}>
-          {f.studentName || 'Student Name'}
-        </p>
-
-        <p style={{ fontSize: 14, color: '#374151', maxWidth: 420, margin: '0 auto', lineHeight: 1.7 }}>
-          for successfully completing the Course and has demonstrated proficiency in Industry-relevant technical skills &amp; Practical application through projects.
-        </p>
-
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', marginTop: 60, padding: '0 28px', textAlign: 'left' }}>
-          <div style={{ fontSize: 12.5, color: '#111' }}>
-            <p style={{ margin: '0 0 3px' }}><b>ISSUED ON :</b> {fmtD(f.issueDate)}</p>
-            <p style={{ margin: '0 0 3px' }}><b>STUDENT ID :</b> {f.studentId || '—'}</p>
-            <p style={{ margin: '0 0 3px' }}><b>COURSE :</b> {f.course || '—'}</p>
-            <p style={{ margin: 0 }}><b>BATCH :</b> {f.batch || '—'}</p>
-          </div>
-          <div style={{ textAlign: 'center' }}>
-            <img
-              src="/certificates/sign-vp.png"
-              onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
-              alt="" style={{ height: 44, display: 'block', margin: '0 auto 4px' }}
-            />
-            <p style={{ margin: 0, fontSize: 13, color: '#111', borderTop: '2px solid #1e3a8a', paddingTop: 4, minWidth: 120 }}>VP</p>
-          </div>
-        </div>
+      {/* Info block */}
+      <div style={{ position: 'absolute', left: 245, top: 733, fontSize: 15.5, color: '#111', lineHeight: '32px' }}>
+        <div><b>ISSUED ON :</b> {dmy}</div>
+        <div><b>STUDENT ID:</b> {f.studentId || '—'}</div>
+        <div><b>COURSE :</b> {f.course || '—'}</div>
+        <div><b>BATCH</b>&nbsp; : {f.batch || '—'}</div>
       </div>
     </div>
   );
