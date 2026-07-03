@@ -2,6 +2,7 @@ import { useEffect, useState, useCallback } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import api from '@/lib/api';
 import { useModuleAccess } from '@/hooks/useModuleAccess';
+import { useRole } from '@/hooks/useAuth';
 import {
   Lock, Plus, X, Wallet, Clock, CheckCircle2, BookOpen, PiggyBank, PieChart,
   Store, Repeat, Pencil, Trash2, Sparkles, RefreshCw, FileBarChart, Download, RotateCcw,
@@ -67,6 +68,8 @@ export default function FinanceAdminPage() {
   const level = modules.FINANCE_ADMIN;
   const canEdit = hasModule('FINANCE_ADMIN', 'EDIT');
   const canSeeAll = hasModule('FINANCE_ADMIN', 'ADMIN');
+  // Register CRUD (edit / approve / delete) is SUPER_ADMIN only
+  const { isSuperAdmin } = useRole();
 
   const [searchParams, setSearchParams] = useSearchParams();
   const tabFromUrl = searchParams.get('tab') as Tab | null;
@@ -89,6 +92,7 @@ export default function FinanceAdminPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [showAdd, setShowAdd] = useState(false);
+  const [editingExpense, setEditingExpense] = useState<Expense | null>(null);
   const [saving, setSaving] = useState(false);
 
   const [ledger, setLedger] = useState<LedgerData | null>(null);
@@ -207,6 +211,17 @@ export default function FinanceAdminPage() {
     } catch (err: unknown) {
       const e = err as { response?: { data?: { message?: string } } };
       setError(e.response?.data?.message || 'Failed to update status');
+    }
+  };
+
+  const deleteExpense = async (e: Expense) => {
+    if (!confirm(`Delete expense "${e.title}" (${fmt(e.amount)})?\n\nThis cannot be undone.`)) return;
+    try {
+      await api.delete(`/api/finance-admin/${e.id}`);
+      fetchAll();
+    } catch (err: unknown) {
+      const er = err as { response?: { data?: { message?: string } } };
+      setError(er.response?.data?.message || 'Failed to delete expense');
     }
   };
 
@@ -395,6 +410,7 @@ export default function FinanceAdminPage() {
                   {canSeeAll && <th className="px-4 py-3">Spent By</th>}
                   <th className="px-4 py-3">Attachments</th>
                   <th className="px-4 py-3">Status</th>
+                  {isSuperAdmin && <th className="px-4 py-3">Actions</th>}
                 </tr>
               </thead>
               <tbody className="divide-y">
@@ -429,7 +445,7 @@ export default function FinanceAdminPage() {
                       </div>
                     </td>
                     <td className="px-4 py-3">
-                      {canEdit ? (
+                      {isSuperAdmin ? (
                         <select
                           value={e.status}
                           onChange={(ev) => updateStatus(e.id, ev.target.value as ExpenseStatus)}
@@ -441,6 +457,26 @@ export default function FinanceAdminPage() {
                         <span className={`text-xs font-medium px-2 py-1 rounded-full ${STATUS_COLOR[e.status]}`}>{e.status}</span>
                       )}
                     </td>
+                    {isSuperAdmin && (
+                      <td className="px-4 py-3 whitespace-nowrap">
+                        <div className="flex items-center gap-1">
+                          <button
+                            onClick={() => { setEditingExpense(e); setShowAdd(true); }}
+                            title="Edit expense"
+                            className="p-1.5 rounded hover:bg-muted text-muted-foreground hover:text-foreground"
+                          >
+                            <Pencil className="w-3.5 h-3.5" />
+                          </button>
+                          <button
+                            onClick={() => deleteExpense(e)}
+                            title="Delete expense"
+                            className="p-1.5 rounded hover:bg-red-50 text-muted-foreground hover:text-red-500"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      </td>
+                    )}
                   </tr>
                 ))}
               </tbody>
@@ -781,11 +817,12 @@ export default function FinanceAdminPage() {
 
       {showAdd && (
         <AddExpenseModal
+          expense={editingExpense}
           vendors={vendors}
           saving={saving}
           setSaving={setSaving}
-          onClose={() => setShowAdd(false)}
-          onSaved={() => { setShowAdd(false); fetchAll(); }}
+          onClose={() => { setShowAdd(false); setEditingExpense(null); }}
+          onSaved={() => { setShowAdd(false); setEditingExpense(null); fetchAll(); }}
           setError={setError}
         />
       )}
@@ -861,12 +898,20 @@ function BreakdownPanel({ title, rows }: { title: string; rows: { key: string; a
   );
 }
 
-function AddExpenseModal({ vendors, saving, setSaving, onClose, onSaved, setError }: {
-  vendors: Vendor[]; saving: boolean; setSaving: (v: boolean) => void; onClose: () => void; onSaved: () => void; setError: (s: string) => void;
+function AddExpenseModal({ expense, vendors, saving, setSaving, onClose, onSaved, setError }: {
+  expense?: Expense | null; vendors: Vendor[]; saving: boolean; setSaving: (v: boolean) => void; onClose: () => void; onSaved: () => void; setError: (s: string) => void;
 }) {
   const [form, setForm] = useState({
-    title: '', category: '', miscDescription: '', amount: '', notes: '', vendorId: '',
-    voucherNo: '', billNo: '', paymentMode: '', expenseDate: new Date().toISOString().slice(0, 10),
+    title: expense?.title || '',
+    category: expense?.category || '',
+    miscDescription: expense?.miscDescription || '',
+    amount: expense ? String(expense.amount) : '',
+    notes: expense?.notes || '',
+    vendorId: expense?.vendor?.id || '',
+    voucherNo: expense?.voucherNo || '',
+    billNo: expense?.billNo || '',
+    paymentMode: expense?.paymentMode || '',
+    expenseDate: (expense?.expenseDate || new Date().toISOString()).slice(0, 10),
   });
   const [billCopy, setBillCopy] = useState<File | null>(null);
   const [paymentProof, setPaymentProof] = useState<File | null>(null);
@@ -890,11 +935,15 @@ function AddExpenseModal({ vendors, saving, setSaving, onClose, onSaved, setErro
       fd.append('expenseDate', form.expenseDate);
       if (billCopy) fd.append('billCopy', billCopy);
       if (paymentProof) fd.append('paymentProof', paymentProof);
-      await api.post('/api/finance-admin', fd, { headers: { 'Content-Type': 'multipart/form-data' } });
+      if (expense) {
+        await api.put(`/api/finance-admin/${expense.id}`, fd, { headers: { 'Content-Type': 'multipart/form-data' } });
+      } else {
+        await api.post('/api/finance-admin', fd, { headers: { 'Content-Type': 'multipart/form-data' } });
+      }
       onSaved();
     } catch (err: unknown) {
       const e = err as { response?: { data?: { message?: string } } };
-      setError(e.response?.data?.message || 'Failed to create expense');
+      setError(e.response?.data?.message || `Failed to ${expense ? 'update' : 'create'} expense`);
     } finally {
       setSaving(false);
     }
@@ -904,7 +953,7 @@ function AddExpenseModal({ vendors, saving, setSaving, onClose, onSaved, setErro
     <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
       <div className="bg-white rounded-xl w-full max-w-md p-6 space-y-4 max-h-[90vh] overflow-y-auto">
         <div className="flex items-center justify-between">
-          <h2 className="font-semibold text-lg">New Admin Expense</h2>
+          <h2 className="font-semibold text-lg">{expense ? `Edit Expense — ${expense.title}` : 'New Admin Expense'}</h2>
           <button onClick={onClose}><X className="w-4 h-4" /></button>
         </div>
         <div className="space-y-3">
