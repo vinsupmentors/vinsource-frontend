@@ -1,7 +1,7 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import api from '@/lib/api';
 import { useModuleAccess } from '@/hooks/useModuleAccess';
-import { FileText, Printer, Loader2, History, PlusCircle, Search } from 'lucide-react';
+import { FileText, Printer, Loader2, History, PlusCircle, Search, ZoomIn, X, Check } from 'lucide-react';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -39,6 +39,116 @@ const EMPTY_FORM: Record<string, string> = {
 };
 
 const fmtD = (d?: string) => (d ? new Date(d).toLocaleDateString('en-IN', { day: '2-digit', month: 'long', year: 'numeric' }) : '____');
+
+// ─── Photo cropper: drag to position, slider to zoom, circular crop ─────────
+
+function PhotoCropper({ src, onApply, onCancel }: { src: string; onApply: (dataUrl: string) => void; onCancel: () => void }) {
+  const SIZE = 240; // viewport px
+  const [zoom, setZoom] = useState(1);
+  const [offset, setOffset] = useState({ x: 0, y: 0 });
+  const [natural, setNatural] = useState<{ w: number; h: number } | null>(null);
+  const dragRef = useRef<{ startX: number; startY: number; baseX: number; baseY: number } | null>(null);
+
+  const baseScale = natural ? SIZE / Math.min(natural.w, natural.h) : 1;
+
+  const clampOffset = (x: number, y: number, z = zoom) => {
+    if (!natural) return { x, y };
+    const dw = natural.w * baseScale * z;
+    const dh = natural.h * baseScale * z;
+    const maxX = Math.max(0, (dw - SIZE) / 2);
+    const maxY = Math.max(0, (dh - SIZE) / 2);
+    return { x: Math.min(maxX, Math.max(-maxX, x)), y: Math.min(maxY, Math.max(-maxY, y)) };
+  };
+
+  const onPointerDown = (e: React.PointerEvent) => {
+    (e.target as HTMLElement).setPointerCapture(e.pointerId);
+    dragRef.current = { startX: e.clientX, startY: e.clientY, baseX: offset.x, baseY: offset.y };
+  };
+  const onPointerMove = (e: React.PointerEvent) => {
+    if (!dragRef.current) return;
+    const { startX, startY, baseX, baseY } = dragRef.current;
+    setOffset(clampOffset(baseX + (e.clientX - startX), baseY + (e.clientY - startY)));
+  };
+  const onPointerUp = () => { dragRef.current = null; };
+
+  const apply = () => {
+    if (!natural) return;
+    const OUT = 480;
+    const canvas = document.createElement('canvas');
+    canvas.width = OUT; canvas.height = OUT;
+    const ctx = canvas.getContext('2d')!;
+    const img = new Image();
+    img.onload = () => {
+      const ratio = OUT / SIZE;
+      ctx.fillStyle = '#fff';
+      ctx.fillRect(0, 0, OUT, OUT);
+      ctx.save();
+      ctx.beginPath();
+      ctx.arc(OUT / 2, OUT / 2, OUT / 2, 0, Math.PI * 2);
+      ctx.clip();
+      ctx.translate(OUT / 2 + offset.x * ratio, OUT / 2 + offset.y * ratio);
+      const s = baseScale * zoom * ratio;
+      ctx.scale(s, s);
+      ctx.drawImage(img, -natural.w / 2, -natural.h / 2);
+      ctx.restore();
+      onApply(canvas.toDataURL('image/jpeg', 0.92));
+    };
+    img.src = src;
+  };
+
+  return (
+    <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4">
+      <div className="bg-card border rounded-2xl shadow-xl p-6 space-y-4" style={{ width: 320 }}>
+        <p className="font-semibold text-sm">Position &amp; crop the photo</p>
+        <div
+          style={{ width: SIZE, height: SIZE }}
+          className="mx-auto rounded-full overflow-hidden border-4 border-primary/30 relative cursor-move touch-none bg-muted"
+          onPointerDown={onPointerDown}
+          onPointerMove={onPointerMove}
+          onPointerUp={onPointerUp}
+        >
+          {/* eslint-disable-next-line jsx-a11y/alt-text */}
+          <img
+            src={src}
+            draggable={false}
+            onLoad={(e) => {
+              const t = e.target as HTMLImageElement;
+              setNatural({ w: t.naturalWidth, h: t.naturalHeight });
+            }}
+            style={{
+              position: 'absolute',
+              left: '50%',
+              top: '50%',
+              transform: `translate(calc(-50% + ${offset.x}px), calc(-50% + ${offset.y}px)) scale(${baseScale * zoom})`,
+              transformOrigin: 'center',
+              width: natural ? natural.w : undefined,
+              maxWidth: 'none',
+              userSelect: 'none',
+              pointerEvents: 'none',
+            }}
+          />
+        </div>
+        <div className="flex items-center gap-2">
+          <ZoomIn className="w-4 h-4 text-muted-foreground" />
+          <input
+            type="range" min={1} max={3} step={0.01} value={zoom}
+            onChange={(e) => { const z = Number(e.target.value); setZoom(z); setOffset((o) => clampOffset(o.x, o.y, z)); }}
+            className="flex-1 accent-blue-600"
+          />
+        </div>
+        <p className="text-[11px] text-muted-foreground text-center">Drag the photo to position · slide to zoom</p>
+        <div className="flex gap-2">
+          <button onClick={onCancel} className="flex-1 flex items-center justify-center gap-1 px-4 py-2 border rounded-lg text-sm hover:bg-accent">
+            <X className="w-4 h-4" /> Cancel
+          </button>
+          <button onClick={apply} className="flex-1 flex items-center justify-center gap-1 px-4 py-2 bg-primary text-primary-foreground rounded-lg text-sm font-medium hover:opacity-90">
+            <Check className="w-4 h-4" /> Apply
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
 
 // ─── VINSUP INFOTECH logo — real image if present, faithful CSS version otherwise ──
 
@@ -285,12 +395,14 @@ export default function CertificateGeneratorPage() {
   };
   useEffect(() => { if (mode === 'history') fetchHistory(); /* eslint-disable-next-line */ }, [mode]);
 
+  const [cropSrc, setCropSrc] = useState<string | null>(null);
+
   const handlePhoto = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     e.target.value = '';
     if (!file) return;
     const reader = new FileReader();
-    reader.onload = (ev) => setForm((f) => ({ ...f, photoUrl: String(ev.target?.result || '') }));
+    reader.onload = (ev) => setCropSrc(String(ev.target?.result || ''));
     reader.readAsDataURL(file);
   };
 
@@ -360,6 +472,14 @@ export default function CertificateGeneratorPage() {
           </button>
         </div>
       </div>
+
+      {cropSrc && (
+        <PhotoCropper
+          src={cropSrc}
+          onApply={(dataUrl) => { setForm((f) => ({ ...f, photoUrl: dataUrl })); setCropSrc(null); }}
+          onCancel={() => setCropSrc(null)}
+        />
+      )}
 
       {mode === 'history' ? (
         <div className="space-y-3">
@@ -510,6 +630,13 @@ export default function CertificateGeneratorPage() {
               <div>
                 <label className="text-xs text-muted-foreground mb-1 block">Student Photo (optional)</label>
                 <input type="file" accept="image/*" onChange={handlePhoto} className="w-full text-xs" />
+                {form.photoUrl && (
+                  <div className="flex items-center gap-2 mt-2">
+                    <img src={form.photoUrl} alt="" className="w-10 h-10 rounded-full object-cover border" />
+                    <button onClick={() => setForm((f) => ({ ...f, photoUrl: '' }))} className="text-xs text-red-600 hover:underline">Remove</button>
+                  </div>
+                )}
+                <p className="text-[10px] text-muted-foreground mt-1">You'll be able to zoom &amp; position the photo after choosing it.</p>
               </div>
             )}
 
