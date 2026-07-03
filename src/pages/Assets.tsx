@@ -154,7 +154,7 @@ export default function AssetsPage() {
                 <button onClick={() => setTab('my')} className={cn('px-3 py-2 text-sm font-medium rounded-lg', tab === 'my' ? 'bg-primary text-primary-foreground' : 'bg-muted hover:bg-muted/70')}>My Assets</button>
                 <button onClick={() => setTab('all')} className={cn('px-3 py-2 text-sm font-medium rounded-lg', tab === 'all' ? 'bg-primary text-primary-foreground' : 'bg-muted hover:bg-muted/70')}>All Assets</button>
               </div>
-              {isHR && (
+              {canManageAssets && (
                 <button onClick={() => setShowAddAsset(true)} className="flex items-center gap-2 px-4 py-2 text-sm font-medium bg-primary text-primary-foreground rounded-lg hover:bg-primary/90">
                   <Plus className="w-4 h-4" /> Add Asset
                 </button>

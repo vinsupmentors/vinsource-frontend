@@ -1,0 +1,527 @@
+import { useEffect, useState } from 'react';
+import api from '@/lib/api';
+import { useModuleAccess } from '@/hooks/useModuleAccess';
+import { FileText, Printer, Loader2, History, PlusCircle, Search } from 'lucide-react';
+
+// ─── Types ────────────────────────────────────────────────────────────────────
+
+type CertType =
+  | 'OD_INTERNSHIP_JOINING'
+  | 'BONAFIDE'
+  | 'INTERNSHIP_COMPLETION_SHORT'
+  | 'COURSE_COMPLETION'
+  | 'INTERNSHIP_COMPLETION';
+
+interface CertRecord {
+  id: string;
+  type: CertType;
+  studentName: string;
+  certNo: string;
+  data: Record<string, string>;
+  createdAt: string;
+  issuedBy?: { firstName: string; lastName: string; employeeCode: string } | null;
+}
+
+const TYPE_META: Record<CertType, { label: string; short: string }> = {
+  OD_INTERNSHIP_JOINING:       { label: 'OD / Internship Joining Letter (College)', short: 'OD / Joining Letter' },
+  BONAFIDE:                    { label: 'Bonafide Certificate (Proof of Duration)', short: 'Bonafide' },
+  INTERNSHIP_COMPLETION_SHORT: { label: 'Internship Completion — Short Duration',   short: 'Internship (Short)' },
+  COURSE_COMPLETION:           { label: 'Course Completion Certificate',            short: 'Course Completion' },
+  INTERNSHIP_COMPLETION:       { label: 'Internship Completion Certificate',        short: 'Internship Completion' },
+};
+
+const EMPTY_FORM: Record<string, string> = {
+  studentName: '', relation: 'S/o', fatherName: '', gender: 'MALE',
+  course: '', collegeName: '', className: '', studentId: '', batch: '',
+  fromDate: '', toDate: '', issueDate: new Date().toISOString().slice(0, 10),
+  purpose: 'submission to the Hostel Authorities',
+  photoUrl: '',
+};
+
+const fmtD = (d?: string) => (d ? new Date(d).toLocaleDateString('en-IN', { day: '2-digit', month: 'long', year: 'numeric' }) : '____');
+
+// ─── Letterhead (VINSUP INFOTECH letters) ────────────────────────────────────
+
+function Letterhead() {
+  return (
+    <div style={{ textAlign: 'center' }}>
+      <img
+        src="/certificates/infotech-logo.png"
+        onError={(e) => { (e.target as HTMLImageElement).src = '/vinsup-logo.png'; }}
+        alt="Vinsup Infotech"
+        style={{ height: 64, margin: '0 auto', display: 'block' }}
+      />
+      <div style={{ borderTop: '3px solid #111', margin: '10px 24px 6px' }} />
+      <p style={{ fontSize: 12, margin: 0 }}>148, Gopalasamy Kovil St, Ganapathy, Coimbatore, Tamil Nadu - 641006</p>
+      <p style={{ fontSize: 12, margin: '2px 0 0' }}><b>EMail:</b> hrvinsup@gmail.com &nbsp; ☎ 8870060607</p>
+    </div>
+  );
+}
+
+function SignBlock({ date }: { date?: string }) {
+  return (
+    <div style={{ marginTop: 56, fontSize: 13.5 }}>
+      <p style={{ margin: '0 0 2px' }}>{fmtD(date)}</p>
+      <p style={{ margin: '0 0 2px' }}>Thanks and Regards,</p>
+      <p style={{ margin: '0 0 2px' }}>Pooranam Annamalai</p>
+      <p style={{ margin: 0 }}>CBPO</p>
+    </div>
+  );
+}
+
+// ─── Templates ────────────────────────────────────────────────────────────────
+
+function BonafideTemplate({ f }: { f: Record<string, string> }) {
+  const pronoun = f.gender === 'FEMALE' ? 'her' : 'him';
+  return (
+    <div className="cert-a4" style={{ fontFamily: 'Georgia, serif', color: '#111' }}>
+      <Letterhead />
+      <p style={{ textAlign: 'right', fontSize: 13, marginTop: 28 }}>{fmtD(f.issueDate)}</p>
+      <h2 style={{ textAlign: 'center', fontSize: 16, letterSpacing: 1, margin: '18px 0 22px' }}>BONAFIDE CERTIFICATE</h2>
+      <h3 style={{ textAlign: 'center', fontSize: 14.5, letterSpacing: 0.5, marginBottom: 30 }}>TO WHOMSOEVER IT MAY CONCERN</h3>
+      <p style={{ fontSize: 13.5, lineHeight: 1.9, textAlign: 'justify' }}>
+        This is to certify that <b>{f.studentName || 'Name'}</b>, {f.relation} <b>{f.fatherName || 'Father name'}</b>, is a bonafide
+        student of Vinsup Skill Academy and is currently enrolled in the <b>{f.course || 'course'}</b>.
+      </p>
+      <p style={{ fontSize: 13.5, lineHeight: 1.9, textAlign: 'justify' }}>
+        The student joined the course on {f.course || '—'} and is pursuing the training program with us during the academic
+        period <b>{fmtD(f.fromDate)}</b> to <b>{fmtD(f.toDate)}</b>.
+      </p>
+      <p style={{ fontSize: 13.5, lineHeight: 1.9, textAlign: 'justify' }}>
+        This certificate is issued at the request of the student for {f.purpose || 'submission to the concerned authorities'}.
+      </p>
+      <p style={{ fontSize: 13.5, lineHeight: 1.9 }}>We wish {pronoun} all the best in future endeavors.</p>
+      <SignBlock date={f.issueDate} />
+    </div>
+  );
+}
+
+function ODJoiningTemplate({ f }: { f: Record<string, string> }) {
+  const pronoun = f.gender === 'FEMALE' ? 'she' : 'he';
+  const possessive = f.gender === 'FEMALE' ? 'her' : 'his';
+  return (
+    <div className="cert-a4" style={{ fontFamily: 'Georgia, serif', color: '#111' }}>
+      <Letterhead />
+      <h3 style={{ textAlign: 'center', fontSize: 14.5, letterSpacing: 0.5, margin: '30px 0 18px' }}>TO WHOMSOEVER IT MAY CONCERN</h3>
+      <h2 style={{ textAlign: 'center', fontSize: 15, letterSpacing: 1, marginBottom: 26 }}>INTERNSHIP JOINING LETTER</h2>
+      <p style={{ fontSize: 13.5, lineHeight: 2, textAlign: 'justify' }}>
+        This is to respectfully inform you that <b>{f.studentName || 'Name'}</b>, a student of <b>{f.collegeName || 'College Name'}{f.className ? `, ${f.className}` : ''}</b>,
+        is currently doing an internship at our organization, VINSUP INFOTECH PVT LTD, for the period <b>{fmtD(f.fromDate)}</b> to <b>{fmtD(f.toDate)}</b>.
+      </p>
+      <p style={{ fontSize: 13.5, lineHeight: 2, textAlign: 'justify' }}>
+        During the above-mentioned period, {pronoun} has been actively involved in various assigned tasks and projects as part of {possessive} internship,
+        gaining practical exposure and industry-relevant knowledge aligned with {possessive} academic curriculum.
+      </p>
+      <p style={{ fontSize: 13.5, lineHeight: 2, textAlign: 'justify' }}>
+        In view of the above, we humbly request you to kindly consider the mentioned duration as On-Duty (OD) for the student.
+      </p>
+      <p style={{ fontSize: 13.5, lineHeight: 2, textAlign: 'justify' }}>
+        Should you require any further information or clarification, please feel free to contact us. We shall be glad to assist you.
+      </p>
+      <p style={{ fontSize: 13.5, lineHeight: 2 }}>Thank you for your time, support, and kind consideration.</p>
+      <SignBlock date={f.issueDate} />
+    </div>
+  );
+}
+
+function InternshipCompletionTemplate({ f, short }: { f: Record<string, string>; short?: boolean }) {
+  return (
+    <div className="cert-a4" style={{ fontFamily: 'Arial, sans-serif', color: '#222' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+        <img
+          src="/certificates/infotech-logo.png"
+          onError={(e) => { (e.target as HTMLImageElement).src = '/vinsup-logo.png'; }}
+          alt="Vinsup Infotech" style={{ height: 56 }}
+        />
+        <div style={{ fontSize: 10.5, textAlign: 'left', maxWidth: 240 }}>
+          <p style={{ margin: 0 }}><b>Phone</b> : 8870060607</p>
+          <p style={{ margin: 0 }}><b>Email</b> : hrvinsup@gmail.com</p>
+          <p style={{ margin: 0 }}><b>Address</b> : 148, Gopalasamy Kovil St, Ganapathy, Coimbatore, Tamil Nadu - 641006</p>
+        </div>
+      </div>
+      <div style={{ borderTop: '3px solid #111', margin: '12px 0 30px' }} />
+      <h2 style={{ textAlign: 'center', fontSize: 16, letterSpacing: 1, marginBottom: 28 }}>
+        INTERNSHIP COMPLETION CERTIFICATE{short ? ' ' : ''}
+      </h2>
+      <p style={{ fontSize: 13, lineHeight: 1.9, textAlign: 'justify' }}>
+        This is to certify that <b>{(f.studentName || 'Name').toUpperCase()}</b> has successfully completed the <b>Internship Program</b> at{' '}
+        <b>Vinsup Infotech Private Limited</b>{short && f.fromDate ? <> for the period <b>{fmtD(f.fromDate)}</b> to <b>{fmtD(f.toDate)}</b></> : null}.
+      </p>
+      <p style={{ fontSize: 13, lineHeight: 1.9, textAlign: 'justify' }}>
+        Throughout the internship tenure, the candidate has demonstrated commendable proficiency in industry-relevant technical
+        competencies and has effectively translated theoretical knowledge into practical execution through real-time projects and assignments.
+      </p>
+      <p style={{ fontSize: 13, fontWeight: 700, margin: '14px 0 6px' }}>During the program, the student consistently displayed:</p>
+      <ul style={{ fontSize: 13, lineHeight: 1.9, margin: 0, paddingLeft: 18 }}>
+        <li>Strong analytical and problem-solving abilities</li>
+        <li>Professional work ethics and discipline</li>
+        <li>Effective communication and collaborative skills</li>
+        <li>Commitment towards quality delivery and performance excellence</li>
+      </ul>
+      <p style={{ fontSize: 13, lineHeight: 1.9, textAlign: 'justify', marginTop: 14 }}>
+        The internship experience has equipped the candidate with practical exposure aligned to current industry standards and workplace expectations.
+      </p>
+      <p style={{ fontSize: 13, lineHeight: 1.9, textAlign: 'justify' }}>
+        We acknowledge and appreciate the dedication, sincerity, and performance demonstrated during the course of the internship and
+        extend our best wishes for continued growth and success in all future professional endeavors.
+      </p>
+      <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 30, fontSize: 13 }}>
+        <div>
+          <p style={{ margin: '0 0 4px' }}><b>Issued On:</b> {fmtD(f.issueDate)}</p>
+          <p style={{ margin: '0 0 4px' }}><b>Course:</b> {f.course || '—'}</p>
+          <p style={{ margin: '0 0 4px' }}><b>Student ID:</b> {f.studentId || '—'}</p>
+          <p style={{ margin: 0 }}><b>Batch:</b> {f.batch || '—'}</p>
+        </div>
+        <div style={{ textAlign: 'center', alignSelf: 'flex-end' }}>
+          <img
+            src="/certificates/sign-cbpo.png"
+            onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
+            alt="" style={{ height: 42, display: 'block', margin: '0 auto 4px' }}
+          />
+          <p style={{ margin: 0, borderTop: '1px solid #999', paddingTop: 4 }}>CBPO</p>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function CourseCompletionTemplate({ f }: { f: Record<string, string> }) {
+  return (
+    <div className="cert-a4" style={{ fontFamily: 'Arial, sans-serif', color: '#1e3a8a', position: 'relative', overflow: 'hidden' }}>
+      {/* Left decorative waves */}
+      <div style={{ position: 'absolute', left: -70, top: -60, width: 190, height: 420, background: 'linear-gradient(160deg,#0e7490 20%,#22d3ee 60%,#1e3a8a 100%)', borderRadius: '0 0 65% 0', transform: 'rotate(8deg)' }} />
+      <div style={{ position: 'absolute', left: -110, bottom: -80, width: 220, height: 380, background: 'linear-gradient(20deg,#1e3a8a 15%,#38bdf8 70%)', borderRadius: '0 65% 0 0', transform: 'rotate(-6deg)' }} />
+
+      <div style={{ position: 'relative', textAlign: 'center', paddingTop: 8 }}>
+        <img
+          src="/certificates/academy-logo.png"
+          onError={(e) => { (e.target as HTMLImageElement).src = '/vinsup-logo.png'; }}
+          alt="Vinsup Skill Academy" style={{ height: 74, margin: '0 auto', display: 'block' }}
+        />
+        <h1 style={{ fontSize: 44, letterSpacing: 4, margin: '26px 0 2px', fontWeight: 800 }}>CERTIFICATE</h1>
+        <p style={{ fontSize: 15, letterSpacing: 2, margin: '0 0 34px', fontWeight: 600 }}>THIS IS TO CERTIFY THAT</p>
+
+        {f.photoUrl && (
+          <img src={f.photoUrl} alt="" style={{ width: 110, height: 110, objectFit: 'cover', borderRadius: '50%', border: '5px solid #d4af37', display: 'block', margin: '0 auto 16px' }} />
+        )}
+
+        <p style={{ fontSize: 30, fontWeight: 800, color: '#111', borderBottom: '2px solid #111', display: 'inline-block', padding: '0 34px 6px', margin: '0 0 20px', textTransform: 'uppercase' }}>
+          {f.studentName || 'Student Name'}
+        </p>
+
+        <p style={{ fontSize: 14, color: '#374151', maxWidth: 420, margin: '0 auto', lineHeight: 1.7 }}>
+          for successfully completing the Course and has demonstrated proficiency in Industry-relevant technical skills &amp; Practical application through projects.
+        </p>
+
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', marginTop: 60, padding: '0 28px', textAlign: 'left' }}>
+          <div style={{ fontSize: 12.5, color: '#111' }}>
+            <p style={{ margin: '0 0 3px' }}><b>ISSUED ON :</b> {fmtD(f.issueDate)}</p>
+            <p style={{ margin: '0 0 3px' }}><b>STUDENT ID :</b> {f.studentId || '—'}</p>
+            <p style={{ margin: '0 0 3px' }}><b>COURSE :</b> {f.course || '—'}</p>
+            <p style={{ margin: 0 }}><b>BATCH :</b> {f.batch || '—'}</p>
+          </div>
+          <div style={{ textAlign: 'center' }}>
+            <img
+              src="/certificates/sign-vp.png"
+              onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
+              alt="" style={{ height: 44, display: 'block', margin: '0 auto 4px' }}
+            />
+            <p style={{ margin: 0, fontSize: 13, color: '#111', borderTop: '2px solid #1e3a8a', paddingTop: 4, minWidth: 120 }}>VP</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── Page ─────────────────────────────────────────────────────────────────────
+
+export default function CertificateGeneratorPage() {
+  const { hasModule, loaded } = useModuleAccess();
+  const canView = hasModule('CERTIFICATES', 'VIEW');
+  const canGenerate = hasModule('CERTIFICATES', 'EDIT');
+
+  const [mode, setMode] = useState<'generate' | 'history'>('generate');
+  const [type, setType] = useState<CertType>('BONAFIDE');
+  const [form, setForm] = useState<Record<string, string>>({ ...EMPTY_FORM });
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState('');
+  const [lastCertNo, setLastCertNo] = useState('');
+
+  const [history, setHistory] = useState<CertRecord[]>([]);
+  const [historySearch, setHistorySearch] = useState('');
+  const [historyLoading, setHistoryLoading] = useState(false);
+
+  const set = (k: string) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) =>
+    setForm((f) => ({ ...f, [k]: e.target.value }));
+
+  const fetchHistory = async () => {
+    setHistoryLoading(true);
+    try {
+      const { data } = await api.get('/api/certificates', { params: { search: historySearch || undefined, limit: 50 } });
+      setHistory(data.data || []);
+    } catch { /* ignore */ }
+    finally { setHistoryLoading(false); }
+  };
+  useEffect(() => { if (mode === 'history') fetchHistory(); /* eslint-disable-next-line */ }, [mode]);
+
+  const handlePhoto = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (ev) => setForm((f) => ({ ...f, photoUrl: String(ev.target?.result || '') }));
+    reader.readAsDataURL(file);
+  };
+
+  const generateAndPrint = async () => {
+    if (!form.studentName.trim()) { setError('Student name is required'); return; }
+    setSaving(true);
+    setError('');
+    try {
+      const { data } = await api.post('/api/certificates', {
+        type,
+        studentName: form.studentName,
+        data: { ...form, photoUrl: form.photoUrl ? '(photo attached)' : '' },
+      });
+      setLastCertNo(data.data?.certNo || '');
+      // Give React a tick to render the cert number, then print just the sheet
+      setTimeout(() => window.print(), 250);
+    } catch (e: any) {
+      setError(e?.response?.data?.message || 'Failed to record certificate');
+    } finally { setSaving(false); }
+  };
+
+  const reprint = (r: CertRecord) => {
+    setType(r.type);
+    setForm({ ...EMPTY_FORM, ...r.data, studentName: r.studentName, photoUrl: '' });
+    setLastCertNo(r.certNo);
+    setMode('generate');
+  };
+
+  if (loaded && !canView) {
+    return (
+      <div className="flex items-center justify-center py-24">
+        <div className="text-center">
+          <FileText className="w-10 h-10 mx-auto mb-3 text-muted-foreground opacity-40" />
+          <p className="font-medium">No access to Certificate Generator</p>
+          <p className="text-sm text-muted-foreground">Ask a Super Admin to grant you the "Certificate Generator" module in Master Control.</p>
+        </div>
+      </div>
+    );
+  }
+
+  const isLetter = type === 'BONAFIDE' || type === 'OD_INTERNSHIP_JOINING';
+
+  return (
+    <div className="space-y-6">
+      {/* Print-only styles: print just the certificate sheet */}
+      <style>{`
+        @media print {
+          body * { visibility: hidden !important; }
+          #cert-sheet, #cert-sheet * { visibility: visible !important; }
+          #cert-sheet { position: fixed !important; inset: 0 !important; margin: 0 !important; box-shadow: none !important; border: none !important; width: 100% !important; }
+          @page { size: A4; margin: 0; }
+        }
+        .cert-a4 { width: 100%; min-height: 1050px; padding: 48px 56px; background: #fff; box-sizing: border-box; }
+      `}</style>
+
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-2xl font-bold flex items-center gap-2"><FileText className="w-6 h-6" /> Certificate Generator</h1>
+          <p className="text-muted-foreground text-sm">Generate student letters &amp; certificates — fills the template, records it, and opens print/save-as-PDF</p>
+        </div>
+        <div className="flex gap-2">
+          <button onClick={() => setMode('generate')} className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium border ${mode === 'generate' ? 'bg-primary text-primary-foreground border-primary' : 'border-border hover:bg-accent'}`}>
+            <PlusCircle className="w-4 h-4" /> Generate
+          </button>
+          <button onClick={() => setMode('history')} className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium border ${mode === 'history' ? 'bg-primary text-primary-foreground border-primary' : 'border-border hover:bg-accent'}`}>
+            <History className="w-4 h-4" /> History
+          </button>
+        </div>
+      </div>
+
+      {mode === 'history' ? (
+        <div className="space-y-3">
+          <div className="flex gap-2">
+            <div className="relative flex-1 max-w-sm">
+              <Search className="w-4 h-4 absolute left-3 top-2.5 text-muted-foreground" />
+              <input value={historySearch} onChange={(e) => setHistorySearch(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && fetchHistory()}
+                placeholder="Search student name…" className="w-full pl-9 pr-3 py-2 border rounded-lg text-sm bg-background" />
+            </div>
+            <button onClick={fetchHistory} className="px-4 py-2 text-sm border rounded-lg hover:bg-accent">Search</button>
+          </div>
+          <div className="bg-card border rounded-xl overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead className="bg-muted/50 text-left text-xs uppercase text-muted-foreground">
+                <tr>
+                  <th className="px-4 py-3">Cert No.</th>
+                  <th className="px-4 py-3">Student</th>
+                  <th className="px-4 py-3">Type</th>
+                  <th className="px-4 py-3">Generated</th>
+                  <th className="px-4 py-3">By</th>
+                  <th className="px-4 py-3" />
+                </tr>
+              </thead>
+              <tbody className="divide-y">
+                {historyLoading ? (
+                  <tr><td colSpan={6} className="px-4 py-8 text-center text-muted-foreground">Loading…</td></tr>
+                ) : history.length === 0 ? (
+                  <tr><td colSpan={6} className="px-4 py-8 text-center text-muted-foreground">No certificates generated yet</td></tr>
+                ) : history.map((r) => (
+                  <tr key={r.id} className="hover:bg-muted/30">
+                    <td className="px-4 py-3 font-mono text-xs">{r.certNo}</td>
+                    <td className="px-4 py-3 font-medium">{r.studentName}</td>
+                    <td className="px-4 py-3 text-muted-foreground">{TYPE_META[r.type]?.short || r.type}</td>
+                    <td className="px-4 py-3 text-muted-foreground whitespace-nowrap">{new Date(r.createdAt).toLocaleDateString()}</td>
+                    <td className="px-4 py-3 text-muted-foreground">{r.issuedBy ? `${r.issuedBy.firstName} ${r.issuedBy.lastName}` : '—'}</td>
+                    <td className="px-4 py-3">
+                      <button onClick={() => reprint(r)} className="flex items-center gap-1 px-2.5 py-1.5 text-xs border rounded-lg hover:bg-accent">
+                        <Printer className="w-3.5 h-3.5" /> Re-print
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      ) : (
+        <div className="grid lg:grid-cols-[380px_1fr] gap-6 items-start">
+          {/* ── Form ── */}
+          <div className="bg-card border rounded-2xl p-5 space-y-4">
+            <div>
+              <label className="text-xs text-muted-foreground mb-1 block">Document Type</label>
+              <select value={type} onChange={(e) => setType(e.target.value as CertType)} className="w-full px-3 py-2 border rounded-lg text-sm bg-background">
+                {(Object.keys(TYPE_META) as CertType[]).map((t) => <option key={t} value={t}>{TYPE_META[t].label}</option>)}
+              </select>
+              {type === 'INTERNSHIP_COMPLETION_SHORT' && (
+                <p className="text-[11px] text-amber-600 mt-1">Using the standard completion layout with a duration line — will be updated once the sample is provided.</p>
+              )}
+            </div>
+
+            <div>
+              <label className="text-xs text-muted-foreground mb-1 block">Student Name *</label>
+              <input value={form.studentName} onChange={set('studentName')} className="w-full px-3 py-2 border rounded-lg text-sm bg-background" placeholder="e.g. Anbarasu" />
+            </div>
+
+            {type === 'BONAFIDE' && (
+              <>
+                <div className="grid grid-cols-[90px_1fr] gap-2">
+                  <div>
+                    <label className="text-xs text-muted-foreground mb-1 block">Relation</label>
+                    <select value={form.relation} onChange={set('relation')} className="w-full px-3 py-2 border rounded-lg text-sm bg-background">
+                      <option value="S/o">S/o</option>
+                      <option value="D/o">D/o</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="text-xs text-muted-foreground mb-1 block">Father / Guardian Name</label>
+                    <input value={form.fatherName} onChange={set('fatherName')} className="w-full px-3 py-2 border rounded-lg text-sm bg-background" />
+                  </div>
+                </div>
+                <div>
+                  <label className="text-xs text-muted-foreground mb-1 block">Issued for (purpose)</label>
+                  <input value={form.purpose} onChange={set('purpose')} className="w-full px-3 py-2 border rounded-lg text-sm bg-background" />
+                </div>
+              </>
+            )}
+
+            {type === 'OD_INTERNSHIP_JOINING' && (
+              <>
+                <div>
+                  <label className="text-xs text-muted-foreground mb-1 block">College Name</label>
+                  <input value={form.collegeName} onChange={set('collegeName')} className="w-full px-3 py-2 border rounded-lg text-sm bg-background" placeholder="e.g. PSG College of Arts" />
+                </div>
+                <div>
+                  <label className="text-xs text-muted-foreground mb-1 block">Class / Degree</label>
+                  <input value={form.className} onChange={set('className')} className="w-full px-3 py-2 border rounded-lg text-sm bg-background" placeholder="e.g. II MCA" />
+                </div>
+              </>
+            )}
+
+            {(type !== 'COURSE_COMPLETION') && (
+              <div>
+                <label className="text-xs text-muted-foreground mb-1 block">Gender (for pronouns)</label>
+                <select value={form.gender} onChange={set('gender')} className="w-full px-3 py-2 border rounded-lg text-sm bg-background">
+                  <option value="MALE">Male</option>
+                  <option value="FEMALE">Female</option>
+                </select>
+              </div>
+            )}
+
+            <div>
+              <label className="text-xs text-muted-foreground mb-1 block">Course</label>
+              <input value={form.course} onChange={set('course')} className="w-full px-3 py-2 border rounded-lg text-sm bg-background" placeholder="e.g. Data Analytics" />
+            </div>
+
+            {(type === 'COURSE_COMPLETION' || type === 'INTERNSHIP_COMPLETION' || type === 'INTERNSHIP_COMPLETION_SHORT') && (
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <label className="text-xs text-muted-foreground mb-1 block">Student ID</label>
+                  <input value={form.studentId} onChange={set('studentId')} className="w-full px-3 py-2 border rounded-lg text-sm bg-background" placeholder="e.g. VS70370" />
+                </div>
+                <div>
+                  <label className="text-xs text-muted-foreground mb-1 block">Batch</label>
+                  <input value={form.batch} onChange={set('batch')} className="w-full px-3 py-2 border rounded-lg text-sm bg-background" placeholder="e.g. Batch 10" />
+                </div>
+              </div>
+            )}
+
+            {(type === 'BONAFIDE' || type === 'OD_INTERNSHIP_JOINING' || type === 'INTERNSHIP_COMPLETION_SHORT') && (
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <label className="text-xs text-muted-foreground mb-1 block">Period From</label>
+                  <input type="date" value={form.fromDate} onChange={set('fromDate')} className="w-full px-3 py-2 border rounded-lg text-sm bg-background" />
+                </div>
+                <div>
+                  <label className="text-xs text-muted-foreground mb-1 block">Period To</label>
+                  <input type="date" value={form.toDate} onChange={set('toDate')} className="w-full px-3 py-2 border rounded-lg text-sm bg-background" />
+                </div>
+              </div>
+            )}
+
+            <div>
+              <label className="text-xs text-muted-foreground mb-1 block">Issue Date</label>
+              <input type="date" value={form.issueDate} onChange={set('issueDate')} className="w-full px-3 py-2 border rounded-lg text-sm bg-background" />
+            </div>
+
+            {type === 'COURSE_COMPLETION' && (
+              <div>
+                <label className="text-xs text-muted-foreground mb-1 block">Student Photo (optional)</label>
+                <input type="file" accept="image/*" onChange={handlePhoto} className="w-full text-xs" />
+              </div>
+            )}
+
+            {error && <p className="text-sm text-red-600">{error}</p>}
+            {lastCertNo && <p className="text-xs text-muted-foreground">Last generated: <span className="font-mono">{lastCertNo}</span></p>}
+
+            <div className="flex gap-2 pt-1">
+              <button
+                onClick={generateAndPrint}
+                disabled={saving || !canGenerate}
+                title={canGenerate ? '' : 'You have view-only access'}
+                className="flex-1 flex items-center justify-center gap-2 px-4 py-2.5 bg-primary text-primary-foreground rounded-lg text-sm font-medium hover:opacity-90 disabled:opacity-50"
+              >
+                {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Printer className="w-4 h-4" />}
+                Generate &amp; Print / Save PDF
+              </button>
+            </div>
+            <p className="text-[11px] text-muted-foreground">In the print dialog choose "Save as PDF" to download the document for the student.</p>
+          </div>
+
+          {/* ── Live preview ── */}
+          <div className="overflow-auto">
+            <div id="cert-sheet" className="border rounded shadow-lg mx-auto" style={{ maxWidth: 794, background: '#fff' }}>
+              {type === 'BONAFIDE' && <BonafideTemplate f={form} />}
+              {type === 'OD_INTERNSHIP_JOINING' && <ODJoiningTemplate f={form} />}
+              {type === 'INTERNSHIP_COMPLETION' && <InternshipCompletionTemplate f={form} />}
+              {type === 'INTERNSHIP_COMPLETION_SHORT' && <InternshipCompletionTemplate f={form} short />}
+              {type === 'COURSE_COMPLETION' && <CourseCompletionTemplate f={form} />}
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}

@@ -134,6 +134,7 @@ const moduleNavItems: ModuleNavItem[] = [
     ],
   },
   { label: 'Admin & Ops',        to: '/admin-ops',         icon: Building2,     module: 'ADMIN' },
+  { label: 'Certificate Generator', to: '/certificates',   icon: FileText,      module: 'CERTIFICATES' },
   {
     label: 'Production',
     to: '/production',

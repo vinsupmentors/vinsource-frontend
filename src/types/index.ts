@@ -56,7 +56,8 @@ export type ModuleName =
   | 'HR'
   | 'PRODUCTION_TRAINING'
   | 'PLACEMENTS'
-  | 'DIGITAL_MARKETING';
+  | 'DIGITAL_MARKETING'
+  | 'CERTIFICATES';
 
 export type AccessLevel = 'NONE' | 'VIEW' | 'EDIT' | 'ADMIN';
 
