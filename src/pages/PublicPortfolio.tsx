@@ -17,6 +17,7 @@ export interface PublicPortfolioData {
   skills: Skill[] | null;
   projects: ProjectItem[] | null;
   experience: Experience[] | null;
+  badges?: { id: string; emoji: string; label: string; desc: string }[];
   student: { firstName: string; lastName: string; studentCode: string; track: string; photo: string | null; email: string | null; phone: string | null };
 }
 
@@ -66,6 +67,17 @@ export function PortfolioView({ data }: { data: PublicPortfolioData }) {
               <BadgeCheck className="w-3.5 h-3.5 text-emerald-300" /> Vinsup Skill Academy · {student.studentCode}
             </span>
           </div>
+
+          {!!data.badges?.length && (
+            <div className="mt-5 flex items-center justify-center gap-2 flex-wrap">
+              {data.badges.map((b) => (
+                <span key={b.id} title={b.desc}
+                  className="inline-flex items-center gap-1.5 text-xs font-semibold bg-amber-400/15 border border-amber-300/30 text-amber-100 rounded-full px-3 py-1.5 backdrop-blur">
+                  <span className="text-sm">{b.emoji}</span> {b.label}
+                </span>
+              ))}
+            </div>
+          )}
 
           {(student.email || student.phone) && (
             <div className="mt-5 flex items-center justify-center gap-5 flex-wrap text-sm text-blue-100/90">

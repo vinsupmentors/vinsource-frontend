@@ -30,6 +30,8 @@ const TRACK_LABEL: Record<string, string> = {
   JRP: 'Job Ready Program', IOP: 'Industry Oriented Program', PAP: 'Placement Assurance Program',
 };
 
+interface BadgeRow { id: string; emoji: string; label: string; desc: string; earned: boolean }
+
 export default function StudentDashboard() {
   const user = useSelector((s: RootState) => s.auth.user);
   const [enrollments, setEnrollments] = useState<Enrollment[]>([]);
@@ -39,6 +41,8 @@ export default function StudentDashboard() {
   const [pendingProjects, setPendingProjects] = useState(0);
   const [pendingFeedback, setPendingFeedback] = useState(0);
   const [rank, setRank] = useState<string | null>(null);
+  const [streak, setStreak] = useState(0);
+  const [badges, setBadges] = useState<BadgeRow[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -50,8 +54,9 @@ export default function StudentDashboard() {
       api.get('/api/student-portal/projects'),
       api.get('/api/student-portal/feedback-forms'),
       api.get('/api/student-portal/rank-card'),
+      api.get('/api/student-portal/gamification'),
     ])
-      .then(([e, a, c, cc, pr, fb, rk]) => {
+      .then(([e, a, c, cc, pr, fb, rk, gm]) => {
         if (e.status === 'fulfilled') setEnrollments(e.value.data.data || []);
         if (a.status === 'fulfilled') setAttendancePct(a.value.data.meta?.percentage ?? null);
         if (c.status === 'fulfilled') setCertCount((c.value.data.data || []).length);
@@ -75,6 +80,10 @@ export default function StudentDashboard() {
           const first = Array.isArray(rows) ? rows[0] : rows;
           if (first?.rank) setRank(`#${first.rank}`);
         }
+        if (gm.status === 'fulfilled') {
+          setStreak(gm.value.data.data?.streak ?? 0);
+          setBadges(gm.value.data.data?.badges ?? []);
+        }
       })
       .finally(() => setLoading(false));
   }, []);
@@ -97,6 +106,11 @@ export default function StudentDashboard() {
           <div>
             <h1 className="text-2xl sm:text-3xl font-bold">{greeting}, {firstName} 👋</h1>
             <div className="mt-2 flex items-center gap-2 flex-wrap text-xs">
+              {streak > 0 && (
+                <span className="bg-orange-400/25 border border-orange-300/40 rounded-full px-2.5 py-1 font-bold text-orange-100">
+                  🔥 {streak}-day streak
+                </span>
+              )}
               <span className="bg-white/15 border border-white/20 rounded-full px-2.5 py-1 font-medium">{user?.student?.studentCode}</span>
               <span className="bg-white/15 border border-white/20 rounded-full px-2.5 py-1 font-medium">{TRACK_LABEL[user?.student?.track || ''] || user?.student?.track}</span>
               <span className="bg-emerald-400/20 border border-emerald-300/30 rounded-full px-2.5 py-1 font-medium text-emerald-100">{user?.student?.status}</span>
@@ -171,6 +185,25 @@ export default function StudentDashboard() {
           </div>
         )}
       </div>
+
+      {/* ── Badges ── */}
+      {badges.length > 0 && (
+        <div className="bg-card rounded-2xl border p-5">
+          <h2 className="text-sm font-semibold flex items-center gap-2 mb-4"><Award className="w-4 h-4 text-amber-500" /> My Badges
+            <span className="text-xs font-normal text-muted-foreground">({badges.filter((b) => b.earned).length} / {badges.length} earned)</span>
+          </h2>
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+            {badges.map((b) => (
+              <div key={b.id} title={b.desc}
+                className={`rounded-xl border p-3 text-center transition-all ${b.earned ? 'bg-amber-50/60 border-amber-200 shadow-sm' : 'opacity-40 grayscale'}`}>
+                <p className="text-2xl">{b.emoji}</p>
+                <p className="text-xs font-semibold mt-1">{b.label}</p>
+                <p className="text-[10px] text-muted-foreground mt-0.5">{b.desc}</p>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* ── Quick actions ── */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
