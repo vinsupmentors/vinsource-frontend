@@ -1,9 +1,12 @@
-import { useEffect } from 'react';
-import { NavLink, Navigate, Outlet, useNavigate } from 'react-router-dom';
+import { useEffect, useRef, useState } from 'react';
+import { NavLink, Navigate, Outlet, useNavigate, Link } from 'react-router-dom';
 import { useSelector } from 'react-redux';
 import { RootState } from '@/store';
 import { useAuth } from '@/hooks/useAuth';
-import { Loader2, LayoutDashboard, CalendarCheck, ClipboardList, Award, Briefcase, UserCircle, LogOut, GraduationCap, BookOpen, Trophy, Gift, FileText, ListChecks, BadgeCheck } from 'lucide-react';
+import {
+  Loader2, LayoutDashboard, CalendarCheck, ClipboardList, Award, Briefcase, UserCircle,
+  LogOut, BookOpen, Trophy, Gift, FileText, ListChecks, BadgeCheck, ChevronDown, Lock, Menu,
+} from 'lucide-react';
 import { cn } from '@/lib/utils';
 
 const NAV = [
@@ -25,10 +28,21 @@ export function StudentLayout() {
   const { user, loading, signOut } = useAuth();
   const token = useSelector((s: RootState) => s.auth.token);
   const navigate = useNavigate();
+  const [showMenu, setShowMenu] = useState(false);
+  const [mobileNav, setMobileNav] = useState(false);
+  const menuRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (!loading && !token) navigate('/login');
   }, [loading, token, navigate]);
+
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) setShowMenu(false);
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, []);
 
   if (!user) {
     return (
@@ -45,52 +59,103 @@ export function StudentLayout() {
   const mustOnboard = user.mustChangePassword || !user.student?.profileCompletedAt;
   if (mustOnboard) return <Navigate to="/student/complete-profile" replace />;
 
-  return (
-    <div className="min-h-screen bg-background flex">
-      <aside className="hidden lg:flex flex-col w-64 border-r bg-card fixed inset-y-0">
-        <div className="h-16 flex items-center gap-2 px-5 border-b">
-          <div className="w-8 h-8 rounded-lg bg-blue-600 flex items-center justify-center">
-            <GraduationCap className="w-4.5 h-4.5 text-white" />
-          </div>
-          <span className="font-semibold text-sm">Student Portal</span>
-        </div>
-        <nav className="flex-1 px-3 py-4 space-y-1">
-          {NAV.map(({ to, label, icon: Icon }) => (
-            <NavLink
-              key={to}
-              to={to}
-              className={({ isActive }) =>
-                cn(
-                  'flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors',
-                  isActive ? 'bg-blue-600 text-white' : 'text-muted-foreground hover:bg-muted hover:text-foreground'
-                )
-              }
-            >
-              <Icon className="w-4 h-4" />
-              {label}
-            </NavLink>
-          ))}
-        </nav>
-        <div className="p-3 border-t">
-          <button
-            onClick={signOut}
-            className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
+  const initials = `${user.student?.firstName?.[0] || ''}${user.student?.lastName?.[0] || ''}`.toUpperCase() || 'S';
+
+  const sidebar = (
+    <>
+      {/* Brand */}
+      <div className="h-20 flex flex-col items-center justify-center gap-1 px-5 border-b bg-white">
+        <img src="/vinsup-logo.png" alt="Vinsup Skill Academy" className="h-9 w-auto" />
+        <span className="text-[10px] font-semibold tracking-[0.2em] text-blue-900 uppercase">Student Portal</span>
+      </div>
+      <nav className="flex-1 px-3 py-4 space-y-1 overflow-y-auto">
+        {NAV.map(({ to, label, icon: Icon }) => (
+          <NavLink
+            key={to}
+            to={to}
+            onClick={() => setMobileNav(false)}
+            className={({ isActive }) =>
+              cn(
+                'flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors',
+                isActive ? 'bg-blue-600 text-white shadow-sm' : 'text-muted-foreground hover:bg-muted hover:text-foreground'
+              )
+            }
           >
-            <LogOut className="w-4 h-4" />
-            Sign out
-          </button>
+            <Icon className="w-4 h-4" />
+            {label}
+          </NavLink>
+        ))}
+      </nav>
+      <div className="p-3 border-t">
+        <button
+          onClick={signOut}
+          className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
+        >
+          <LogOut className="w-4 h-4" />
+          Sign out
+        </button>
+      </div>
+    </>
+  );
+
+  return (
+    <div className="min-h-screen bg-slate-50 flex">
+      <aside className="hidden lg:flex flex-col w-64 border-r bg-card fixed inset-y-0">{sidebar}</aside>
+
+      {/* Mobile slide-over nav */}
+      {mobileNav && (
+        <div className="lg:hidden fixed inset-0 z-40">
+          <div className="absolute inset-0 bg-black/40" onClick={() => setMobileNav(false)} />
+          <aside className="absolute inset-y-0 left-0 w-64 bg-card flex flex-col shadow-xl">{sidebar}</aside>
         </div>
-      </aside>
+      )}
 
       <div className="flex-1 flex flex-col min-w-0 lg:ml-64">
         <header className="h-16 border-b bg-card flex items-center justify-between px-4 lg:px-6 sticky top-0 z-10">
-          <div className="lg:hidden font-semibold text-sm">Student Portal</div>
-          <div className="flex items-center gap-3 ml-auto">
-            <span className="text-sm font-medium">{user.student?.firstName} {user.student?.lastName}</span>
-            <span className="text-xs px-2 py-0.5 rounded-full bg-blue-50 text-blue-700 font-medium">{user.student?.studentCode}</span>
-            <button onClick={signOut} className="lg:hidden text-muted-foreground">
-              <LogOut className="w-4 h-4" />
+          <div className="flex items-center gap-2 lg:hidden">
+            <button onClick={() => setMobileNav(true)} className="p-1.5 rounded-lg hover:bg-muted">
+              <Menu className="w-5 h-5" />
             </button>
+            <img src="/vinsup-logo.png" alt="Vinsup" className="h-7 w-auto" />
+          </div>
+
+          {/* Profile menu */}
+          <div className="relative ml-auto" ref={menuRef}>
+            <button
+              onClick={() => setShowMenu((v) => !v)}
+              className="flex items-center gap-2.5 pl-2 pr-2.5 py-1.5 rounded-full hover:bg-muted transition-colors"
+            >
+              <div className="w-8 h-8 rounded-full bg-gradient-to-br from-blue-600 to-cyan-500 text-white flex items-center justify-center text-xs font-bold">
+                {initials}
+              </div>
+              <div className="hidden sm:block text-left leading-tight">
+                <p className="text-sm font-medium">{user.student?.firstName} {user.student?.lastName}</p>
+                <p className="text-[10px] text-muted-foreground">{user.student?.studentCode} · {user.student?.track}</p>
+              </div>
+              <ChevronDown className="w-3.5 h-3.5 text-muted-foreground" />
+            </button>
+
+            {showMenu && (
+              <div className="absolute right-0 top-12 w-56 bg-card border rounded-xl shadow-xl z-50 overflow-hidden py-1">
+                <div className="px-4 py-2.5 border-b">
+                  <p className="text-sm font-semibold">{user.student?.firstName} {user.student?.lastName}</p>
+                  <p className="text-[11px] text-muted-foreground">{user.student?.studentCode} · {user.student?.track} track</p>
+                </div>
+                <Link to="/student/profile" onClick={() => setShowMenu(false)}
+                  className="flex items-center gap-3 px-4 py-2.5 text-sm hover:bg-muted transition-colors">
+                  <UserCircle className="w-4 h-4 text-muted-foreground" /> My Profile
+                </Link>
+                <Link to="/change-password" onClick={() => setShowMenu(false)}
+                  className="flex items-center gap-3 px-4 py-2.5 text-sm hover:bg-muted transition-colors">
+                  <Lock className="w-4 h-4 text-muted-foreground" /> Change Password
+                </Link>
+                <div className="border-t my-1" />
+                <button onClick={() => { setShowMenu(false); signOut(); }}
+                  className="w-full flex items-center gap-3 px-4 py-2.5 text-sm hover:bg-red-50 text-red-600 transition-colors text-left">
+                  <LogOut className="w-4 h-4" /> Sign Out
+                </button>
+              </div>
+            )}
           </div>
         </header>
         <main className="flex-1 p-3 sm:p-6 overflow-auto">
