@@ -324,9 +324,9 @@ function CourseCompletionTemplate({ f }: { f: Record<string, string> }) {
     <div style={{ position: 'relative', width: 794, height: 1123, background: '#fff', fontFamily: 'Arial, sans-serif', overflow: 'hidden' }}>
       <img src="/certificates/course-completion-bg.png" alt="" style={{ position: 'absolute', inset: 0, width: '100%', height: '100%' }} />
 
-      {/* Student photo → inside the medal circle */}
+      {/* Student photo → fills the medal's inner circle exactly */}
       {f.photoUrl && (
-        <img src={f.photoUrl} alt="" style={{ position: 'absolute', left: 57, top: 484, width: 170, height: 170, borderRadius: '50%', objectFit: 'cover' }} />
+        <img src={f.photoUrl} alt="" style={{ position: 'absolute', left: 50, top: 484, width: 174, height: 174, borderRadius: '50%', objectFit: 'cover' }} />
       )}
 
       {/* Student name + underline */}
@@ -336,12 +336,13 @@ function CourseCompletionTemplate({ f }: { f: Record<string, string> }) {
         </span>
       </div>
 
-      {/* Info block */}
-      <div style={{ position: 'absolute', left: 245, top: 733, fontSize: 15.5, color: '#111', lineHeight: '32px' }}>
-        <div><b>ISSUED ON :</b> {dmy}</div>
-        <div><b>STUDENT ID:</b> {f.studentId || '—'}</div>
-        <div><b>COURSE :</b> {f.course || '—'}</div>
-        <div><b>BATCH</b>&nbsp; : {f.batch || '—'}</div>
+      {/* Info block — label / colon / value in aligned columns */}
+      <div style={{ position: 'absolute', left: 245, top: 733, fontSize: 15.5, color: '#111' }}>
+        {([['ISSUED ON', dmy], ['STUDENT ID', f.studentId || '—'], ['COURSE', f.course || '—'], ['BATCH', f.batch || '—']] as [string, string][]).map(([label, value]) => (
+          <div key={label} style={{ display: 'grid', gridTemplateColumns: '112px 14px auto', lineHeight: '32px' }}>
+            <b>{label}</b><b>:</b><span>{value}</span>
+          </div>
+        ))}
       </div>
     </div>
   );
@@ -438,7 +439,7 @@ export default function CertificateGeneratorPage() {
           #cert-sheet { position: fixed !important; inset: 0 !important; margin: 0 !important; box-shadow: none !important; border: none !important; width: 100% !important; }
           @page { size: A4; margin: 0; }
         }
-        .cert-a4 { width: 100%; min-height: 1050px; padding: 48px 56px; background: #fff; box-sizing: border-box; }
+        .cert-a4 { width: 794px; min-height: 1123px; padding: 48px 56px; background: #fff; box-sizing: border-box; }
       `}</style>
 
       <div className="flex items-center justify-between">
@@ -642,7 +643,7 @@ export default function CertificateGeneratorPage() {
 
           {/* ── Live preview ── */}
           <div className="overflow-auto">
-            <div id="cert-sheet" className="border rounded shadow-lg mx-auto" style={{ maxWidth: 794, background: '#fff' }}>
+            <div id="cert-sheet" className="shadow-lg mx-auto" style={{ width: 'fit-content', maxWidth: '100%', background: '#fff', outline: '1px solid #e5e7eb' }}>
               {type === 'BONAFIDE' && <BonafideTemplate f={form} />}
               {type === 'OD_INTERNSHIP_JOINING' && <ODJoiningTemplate f={form} />}
               {type === 'INTERNSHIP_COMPLETION' && <InternshipCompletionTemplate f={form} />}
