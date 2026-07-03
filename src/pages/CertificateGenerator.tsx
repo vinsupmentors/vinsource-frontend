@@ -339,7 +339,7 @@ function CourseCompletionTemplate({ f }: { f: Record<string, string> }) {
       {/* Info block — label / colon / value in aligned columns */}
       <div style={{ position: 'absolute', left: 245, top: 733, fontSize: 15.5, color: '#111' }}>
         {([['ISSUED ON', dmy], ['STUDENT ID', f.studentId || '—'], ['COURSE', f.course || '—'], ['BATCH', f.batch || '—']] as [string, string][]).map(([label, value]) => (
-          <div key={label} style={{ display: 'grid', gridTemplateColumns: '112px 14px auto', lineHeight: '32px' }}>
+          <div key={label} style={{ display: 'grid', gridTemplateColumns: '112px 14px auto', lineHeight: '25px' }}>
             <b>{label}</b><b>:</b><span>{value}</span>
           </div>
         ))}
