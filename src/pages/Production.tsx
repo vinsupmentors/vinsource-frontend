@@ -1667,6 +1667,7 @@ function AddStudentModal({ onClose, setError, onSaved }: { onClose: () => void; 
   // on first login via the complete-profile wizard.
   const [studentCode, setStudentCode] = useState('');
   const [email, setEmail] = useState('');
+  const [track, setTrack] = useState('JRP');
   const [batches, setBatches] = useState<Batch[]>([]);
   const [batchId, setBatchId] = useState('');
   const [scheduleId, setScheduleId] = useState('');
@@ -1695,7 +1696,7 @@ function AddStudentModal({ onClose, setError, onSaved }: { onClose: () => void; 
     setSaving(true);
     setError('');
     try {
-      await api.post('/api/production/students', { studentCode, email, scheduleId });
+      await api.post('/api/production/students', { studentCode, email, track, scheduleId });
       onSaved();
     } catch (err) { setError(errMsg(err, 'Failed to add student')); } finally { setSaving(false); }
   };
@@ -1705,6 +1706,11 @@ function AddStudentModal({ onClose, setError, onSaved }: { onClose: () => void; 
       <div className="space-y-3">
         <input className="w-full px-3 py-2 border rounded-lg text-sm" placeholder="Student ID *" value={studentCode} onChange={(e) => setStudentCode(e.target.value)} />
         <input className="w-full px-3 py-2 border rounded-lg text-sm" placeholder="Email *" type="email" value={email} onChange={(e) => setEmail(e.target.value)} />
+        <select className="w-full px-3 py-2 border rounded-lg text-sm" value={track} onChange={(e) => setTrack(e.target.value)}>
+          <option value="JRP">JRP — Job Ready Program</option>
+          <option value="IOP">IOP — Industry Oriented Program</option>
+          <option value="PAP">PAP — Placement Assurance Program</option>
+        </select>
 
         <div>
           <input
