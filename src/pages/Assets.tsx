@@ -69,7 +69,7 @@ export default function AssetsPage() {
   const [showAssign, setShowAssign] = useState<Asset | null>(null);
   const [returnLoading, setReturnLoading] = useState<string | null>(null);
 
-  const [assetForm, setAssetForm] = useState({ name: '', type: 'LAPTOP', serialNumber: '', brand: '', model: '', notes: '' });
+  const [assetForm, setAssetForm] = useState({ name: '', type: 'LAPTOP', serialNumber: '', brand: '', model: '', notes: '', employeeId: '' });
   const [assignForm, setAssignForm] = useState({ employeeId: '', condition: '', notes: '' });
   const [submitting, setSubmitting] = useState(false);
 
@@ -101,10 +101,11 @@ export default function AssetsPage() {
     setSubmitting(true);
     try {
       await api.post('/api/assets', assetForm);
-      await fetchAll();
+      await Promise.all([fetchAll(), fetchMy()]);
       setShowAddAsset(false);
-      setAssetForm({ name: '', type: 'LAPTOP', serialNumber: '', brand: '', model: '', notes: '' });
-      flash('Asset created');
+      const assignedTo = employees.find((emp) => emp.id === assetForm.employeeId);
+      setAssetForm({ name: '', type: 'LAPTOP', serialNumber: '', brand: '', model: '', notes: '', employeeId: '' });
+      flash(assignedTo ? `Asset created and assigned to ${assignedTo.firstName} ${assignedTo.lastName}` : 'Asset created');
     } catch (e: any) { setError(e.response?.data?.message ?? 'Failed to create'); }
     finally { setSubmitting(false); }
   };
@@ -328,6 +329,13 @@ export default function AssetsPage() {
                 <div className="col-span-2">
                   <label className="block text-xs text-muted-foreground mb-1.5">Notes</label>
                   <input className={inputCls} value={assetForm.notes} onChange={e => setAssetForm(f => ({...f, notes: e.target.value}))} placeholder="Optional notes" />
+                </div>
+                <div className="col-span-2">
+                  <label className="block text-xs text-muted-foreground mb-1.5">Assign to Employee (optional)</label>
+                  <select className={selectCls} value={assetForm.employeeId} onChange={e => setAssetForm(f => ({...f, employeeId: e.target.value}))}>
+                    <option value="">Keep unassigned (assign later)</option>
+                    {employees.map(emp => <option key={emp.id} value={emp.id}>{emp.firstName} {emp.lastName} ({emp.employeeCode})</option>)}
+                  </select>
                 </div>
               </div>
               <div className="flex gap-3 pt-2">
