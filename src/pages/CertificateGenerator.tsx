@@ -274,14 +274,14 @@ function InternshipCompletionTemplate({ f, short }: { f: Record<string, string>;
 
   return (
     <div className="cert-a4 cert-letter" style={{ fontFamily: 'Arial, sans-serif', color: '#222' }}>
-      {/* Header: contact info LEFT, logo RIGHT (smaller) */}
+      {/* Header: logo LEFT, contact info RIGHT */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-        <div style={{ fontSize: 11.5, lineHeight: 1.7, maxWidth: 260 }}>
+        <InfotechLogo height={50} />
+        <div style={{ fontSize: 11.5, lineHeight: 1.7, textAlign: 'right', maxWidth: 260 }}>
           <p style={{ margin: 0 }}><b>Phone</b> : 8870060607</p>
           <p style={{ margin: 0 }}><b>Email</b> : hrvinsup@gmail.com</p>
           <p style={{ margin: 0 }}><b>Address</b> : 148, Gopalasamy Kovil St, Ganapathy,<br />Coimbatore, Tamil Nadu - 641006</p>
         </div>
-        <InfotechLogo height={50} />
       </div>
       <div style={{ borderTop: '4px solid #111', margin: '14px 0 2px' }} />
       <div style={{ borderTop: '1.5px solid #111', margin: '0 0 46px' }} />
@@ -333,13 +333,23 @@ function InternshipCompletionTemplate({ f, short }: { f: Record<string, string>;
           ) : (
             <div style={{ height: 118 }} /> /* spacer keeps CBPO in place when no QR */
           )}
-          <img
-            src="/certificates/sign-cbpo.png"
-            onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
-            alt=""
-            style={{ height: 48, display: 'block', margin: '0 auto 4px' }}
-          />
-          <p style={{ margin: 0, borderTop: '1.5px solid #999', paddingTop: 6, minWidth: 130, fontWeight: 600 }}>CBPO</p>
+          <div style={{ height: 52, display: 'flex', alignItems: 'flex-end', justifyContent: 'center' }}>
+            <img
+              src="/certificates/sign-cbpo.png"
+              alt=""
+              style={{ height: 48, display: 'block' }}
+              onError={(e) => {
+                // Fallback: CSS cursive signature
+                const el = e.target as HTMLImageElement;
+                el.style.display = 'none';
+                const sig = document.createElement('div');
+                sig.style.cssText = "font-family:'Brush Script MT','Segoe Script',cursive;font-size:36px;color:#1a1a8e;line-height:1;";
+                sig.textContent = 'Pooranam';
+                el.parentElement?.appendChild(sig);
+              }}
+            />
+          </div>
+          <p style={{ margin: '4px 0 0', borderTop: '1.5px solid #999', paddingTop: 6, minWidth: 130, fontWeight: 600, textAlign: 'center' }}>CBPO</p>
         </div>
       </div>
     </div>
