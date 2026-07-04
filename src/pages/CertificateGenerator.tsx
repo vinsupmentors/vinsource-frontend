@@ -274,10 +274,13 @@ function InternshipCompletionTemplate({ f, short }: { f: Record<string, string>;
 
   return (
     <div className="cert-a4 cert-letter" style={{ fontFamily: 'Arial, sans-serif', color: '#222' }}>
-      {/* Header: logo LEFT, contact info RIGHT */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+      {/* Header: logo LEFT | vertical divider | contact info RIGHT */}
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <InfotechLogo height={50} />
-        <div style={{ fontSize: 11.5, lineHeight: 1.7, textAlign: 'right', maxWidth: 260 }}>
+        <div style={{
+          fontSize: 11.5, lineHeight: 1.8, textAlign: 'left',
+          borderLeft: '2px solid #333', paddingLeft: 16, maxWidth: 280,
+        }}>
           <p style={{ margin: 0 }}><b>Phone</b> : 8870060607</p>
           <p style={{ margin: 0 }}><b>Email</b> : hrvinsup@gmail.com</p>
           <p style={{ margin: 0 }}><b>Address</b> : 148, Gopalasamy Kovil St, Ganapathy,<br />Coimbatore, Tamil Nadu - 641006</p>
@@ -322,24 +325,21 @@ function InternshipCompletionTemplate({ f, short }: { f: Record<string, string>;
           <p style={{ margin: 0 }}><b>Batch:</b> {f.batch || '—'}</p>
         </div>
 
-        {/* Right side: QR code (if URL provided) stacked above CBPO sign */}
-        <div style={{ textAlign: 'center' }}>
+        {/* Right side: QR code stacked above CBPO sign */}
+        <div style={{ textAlign: 'center', minWidth: 130 }}>
           {qrUrl ? (
             <img
-              src={`https://api.qrserver.com/v1/create-qr-code/?size=110x110&data=${encodeURIComponent(qrUrl)}`}
+              src={`https://api.qrserver.com/v1/create-qr-code/?size=120x120&data=${encodeURIComponent(qrUrl)}`}
               alt="Verify Certificate"
-              style={{ width: 110, height: 110, display: 'block', margin: '0 auto 8px' }}
+              style={{ width: 120, height: 120, display: 'block', margin: '0 auto 16px' }}
             />
-          ) : (
-            <div style={{ height: 118 }} /> /* spacer keeps CBPO in place when no QR */
-          )}
+          ) : null}
           <div style={{ height: 52, display: 'flex', alignItems: 'flex-end', justifyContent: 'center' }}>
             <img
               src="/certificates/sign-cbpo.png"
               alt=""
               style={{ height: 48, display: 'block' }}
               onError={(e) => {
-                // Fallback: CSS cursive signature
                 const el = e.target as HTMLImageElement;
                 el.style.display = 'none';
                 const sig = document.createElement('div');
@@ -349,7 +349,7 @@ function InternshipCompletionTemplate({ f, short }: { f: Record<string, string>;
               }}
             />
           </div>
-          <p style={{ margin: '4px 0 0', borderTop: '1.5px solid #999', paddingTop: 6, minWidth: 130, fontWeight: 600, textAlign: 'center' }}>CBPO</p>
+          <p style={{ margin: '6px 0 0', borderTop: '1.5px solid #1a1a8e', paddingTop: 6, fontWeight: 600, letterSpacing: 1 }}>CBPO</p>
         </div>
       </div>
     </div>
