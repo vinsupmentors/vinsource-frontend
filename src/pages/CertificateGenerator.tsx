@@ -36,6 +36,7 @@ const EMPTY_FORM: Record<string, string> = {
   fromDate: '', toDate: '', issueDate: new Date().toISOString().slice(0, 10),
   purpose: 'submission to the Hostel Authorities',
   photoUrl: '',
+  verifyUrl: '',
 };
 
 const fmtD = (d?: string) => (d ? new Date(d).toLocaleDateString('en-IN', { day: '2-digit', month: 'long', year: 'numeric' }) : '____');
@@ -269,21 +270,26 @@ function ODJoiningTemplate({ f }: { f: Record<string, string> }) {
 
 function InternshipCompletionTemplate({ f, short }: { f: Record<string, string>; short?: boolean }) {
   const P: React.CSSProperties = { fontSize: 14.5, lineHeight: 2.15, textAlign: 'justify', margin: '0 0 20px' };
+  const qrUrl = f.verifyUrl?.trim();
+
   return (
     <div className="cert-a4 cert-letter" style={{ fontFamily: 'Arial, sans-serif', color: '#222' }}>
+      {/* Header: contact info LEFT, logo RIGHT (smaller) */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-        <InfotechLogo height={62} />
-        <div style={{ fontSize: 11.5, textAlign: 'left', maxWidth: 250, lineHeight: 1.6 }}>
+        <div style={{ fontSize: 11.5, lineHeight: 1.7, maxWidth: 260 }}>
           <p style={{ margin: 0 }}><b>Phone</b> : 8870060607</p>
           <p style={{ margin: 0 }}><b>Email</b> : hrvinsup@gmail.com</p>
-          <p style={{ margin: 0 }}><b>Address</b> : 148, Gopalasamy Kovil St, Ganapathy, Coimbatore, Tamil Nadu - 641006</p>
+          <p style={{ margin: 0 }}><b>Address</b> : 148, Gopalasamy Kovil St, Ganapathy,<br />Coimbatore, Tamil Nadu - 641006</p>
         </div>
+        <InfotechLogo height={50} />
       </div>
       <div style={{ borderTop: '4px solid #111', margin: '14px 0 2px' }} />
       <div style={{ borderTop: '1.5px solid #111', margin: '0 0 46px' }} />
+
       <h2 style={{ textAlign: 'center', fontSize: 18, letterSpacing: 2, margin: '0 0 40px', textDecoration: 'underline', textUnderlineOffset: 6 }}>
         INTERNSHIP COMPLETION CERTIFICATE
       </h2>
+
       <p style={P}>
         This is to certify that <b>{(f.studentName || 'Name').toUpperCase()}</b> has successfully completed the <b>Internship Program</b> at{' '}
         <b>Vinsup Infotech Private Limited</b>{short && f.fromDate ? <> for the period <b>{fmtD(f.fromDate)}</b> to <b>{fmtD(f.toDate)}</b></> : null}.
@@ -306,7 +312,8 @@ function InternshipCompletionTemplate({ f, short }: { f: Record<string, string>;
         We acknowledge and appreciate the dedication, sincerity, and performance demonstrated during the course of the internship and
         extend our best wishes for continued growth and success in all future professional endeavors.
       </p>
-      {/* Footer pinned to the bottom of the page */}
+
+      {/* Footer pinned to the bottom */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', marginTop: 'auto', paddingBottom: 24, fontSize: 14 }}>
         <div style={{ lineHeight: 2 }}>
           <p style={{ margin: 0 }}><b>Issued On:</b> {fmtD(f.issueDate)}</p>
@@ -314,13 +321,25 @@ function InternshipCompletionTemplate({ f, short }: { f: Record<string, string>;
           <p style={{ margin: 0 }}><b>Student ID:</b> {f.studentId || '—'}</p>
           <p style={{ margin: 0 }}><b>Batch:</b> {f.batch || '—'}</p>
         </div>
+
+        {/* Right side: QR code (if URL provided) stacked above CBPO sign */}
         <div style={{ textAlign: 'center' }}>
+          {qrUrl ? (
+            <img
+              src={`https://api.qrserver.com/v1/create-qr-code/?size=110x110&data=${encodeURIComponent(qrUrl)}`}
+              alt="Verify Certificate"
+              style={{ width: 110, height: 110, display: 'block', margin: '0 auto 8px' }}
+            />
+          ) : (
+            <div style={{ height: 118 }} /> /* spacer keeps CBPO in place when no QR */
+          )}
           <img
             src="/certificates/sign-cbpo.png"
             onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
-            alt="" style={{ height: 48, display: 'block', margin: '0 auto 6px' }}
+            alt=""
+            style={{ height: 48, display: 'block', margin: '0 auto 4px' }}
           />
-          <p style={{ margin: 0, borderTop: '1.5px solid #999', paddingTop: 6, minWidth: 130 }}>CBPO</p>
+          <p style={{ margin: 0, borderTop: '1.5px solid #999', paddingTop: 6, minWidth: 130, fontWeight: 600 }}>CBPO</p>
         </div>
       </div>
     </div>
@@ -602,6 +621,19 @@ export default function CertificateGeneratorPage() {
                   <label className="text-xs text-muted-foreground mb-1 block">Batch</label>
                   <input value={form.batch} onChange={set('batch')} className="w-full px-3 py-2 border rounded-lg text-sm bg-background" placeholder="e.g. Batch 10" />
                 </div>
+              </div>
+            )}
+
+            {(type === 'INTERNSHIP_COMPLETION' || type === 'INTERNSHIP_COMPLETION_SHORT') && (
+              <div>
+                <label className="text-xs text-muted-foreground mb-1 block">Verification URL (for QR code)</label>
+                <input
+                  value={form.verifyUrl || ''}
+                  onChange={set('verifyUrl')}
+                  className="w-full px-3 py-2 border rounded-lg text-sm bg-background"
+                  placeholder="https://vinsource.vinsupskillacademy.com/verify/..."
+                />
+                <p className="text-[10px] text-muted-foreground mt-0.5">Each student gets their own URL → converted to QR on the certificate. Leave blank to omit.</p>
               </div>
             )}
 
