@@ -200,7 +200,7 @@ function SignBlock({ date }: { date?: string }) {
       <p style={{ margin: '0 0 4px' }}>{fmtD(date)}</p>
       <p style={{ margin: '0 0 26px' }}>Thanks and Regards,</p>
       <img
-        src="/certificates/sign-cbpo.png"
+        src="/certificates/cbpo.png"
         onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
         alt="" style={{ height: 46, display: 'block', marginBottom: 6 }}
       />
@@ -336,7 +336,7 @@ function InternshipCompletionTemplate({ f, short }: { f: Record<string, string>;
           ) : null}
           <div style={{ height: 52, display: 'flex', alignItems: 'flex-end', justifyContent: 'center' }}>
             <img
-              src="/certificates/sign-cbpo.png"
+              src="/certificates/cbpo.png"
               alt=""
               style={{ height: 48, display: 'block' }}
               onError={(e) => {
