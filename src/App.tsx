@@ -37,6 +37,8 @@ import CampaignDetailPage from './pages/CampaignDetail';
 import DigitalMarketingDayPage from './pages/DigitalMarketingDay';
 import OnboardingPage from './pages/Onboarding';
 import ChangePasswordPage from './pages/ChangePassword';
+import ForgotPasswordPage from './pages/ForgotPassword';
+import ResetPasswordPage from './pages/ResetPassword';
 import OnboardingDetailPage from './pages/OnboardingDetail';
 import ResignationPage from './pages/Resignation';
 import ExitClearancePage from './pages/ExitClearance';
@@ -92,6 +94,10 @@ export default function App() {
               </PublicRoute>
             }
           />
+
+          {/* Public password recovery routes */}
+          <Route path="/forgot-password" element={<ForgotPasswordPage />} />
+          <Route path="/reset-password" element={<ResetPasswordPage />} />
 
           {/* Standalone onboarding wizard — no sidebar/header, gates access to the dashboard */}
           <Route
