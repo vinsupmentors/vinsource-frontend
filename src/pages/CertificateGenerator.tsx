@@ -214,9 +214,9 @@ function CBPOSign({ height = 48 }: { height?: number }) {
 }
 
 function SignBlock({ date }: { date?: string }) {
-  // marginTop:auto pushes the signature to the bottom of the flex-column page
+  // flexShrink:0 keeps this pinned at the bottom — the sibling body div has flex:1
   return (
-    <div style={{ marginTop: 'auto', paddingTop: 24, paddingBottom: 20, fontSize: 15, lineHeight: 1.75 }}>
+    <div style={{ flexShrink: 0, paddingTop: 16, paddingBottom: 20, fontSize: 15, lineHeight: 1.75 }}>
       <p style={{ margin: '0 0 4px' }}>{fmtD(date)}</p>
       <p style={{ margin: '0 0 14px' }}>Thanks and Regards,</p>
       <CBPOSign height={46} />
@@ -233,23 +233,26 @@ function BonafideTemplate({ f }: { f: Record<string, string> }) {
   const P: React.CSSProperties = { fontSize: 15.5, lineHeight: 2.1, textAlign: 'justify', margin: '0 0 18px' };
   return (
     <div className="cert-a4 cert-letter" style={{ fontFamily: 'Georgia, serif', color: '#111' }}>
-      <Letterhead />
-      <p style={{ textAlign: 'right', fontSize: 14.5, marginTop: 28 }}><b>Date:</b> {fmtD(f.issueDate)}</p>
-      <h2 style={{ textAlign: 'center', fontSize: 19, letterSpacing: 2, margin: '20px 0 16px', textDecoration: 'underline', textUnderlineOffset: 6 }}>BONAFIDE CERTIFICATE</h2>
-      <h3 style={{ textAlign: 'center', fontSize: 16, letterSpacing: 1, margin: '0 0 24px' }}>TO WHOMSOEVER IT MAY CONCERN</h3>
-      <p style={P}>
-        This is to certify that <b>{f.studentName || 'Name'}</b>, {f.relation} <b>{f.fatherName || 'Father name'}</b>, is a bonafide
-        student of <b>Vinsup Skill Academy</b> and is currently enrolled in the <b>{f.course || 'course'}</b> training program.
-      </p>
-      <p style={P}>
-        The student joined the <b>{f.course || '—'}</b> course and is pursuing the training program with us during the academic
-        period <b>{fmtD(f.fromDate)}</b> to <b>{fmtD(f.toDate)}</b>. During this period, the student has been regular and is in
-        good standing with the academy.
-      </p>
-      <p style={P}>
-        This certificate is issued at the specific request of the student for {f.purpose || 'submission to the concerned authorities'}.
-      </p>
-      <p style={{ ...P, textAlign: 'left' }}>We wish {pronoun} all the best in future endeavors.</p>
+      {/* Body grows to fill space; overflow hidden prevents spilling to page 2 */}
+      <div style={{ flex: 1, minHeight: 0, overflow: 'hidden' }}>
+        <Letterhead />
+        <p style={{ textAlign: 'right', fontSize: 14.5, marginTop: 28 }}><b>Date:</b> {fmtD(f.issueDate)}</p>
+        <h2 style={{ textAlign: 'center', fontSize: 19, letterSpacing: 2, margin: '20px 0 16px', textDecoration: 'underline', textUnderlineOffset: 6 }}>BONAFIDE CERTIFICATE</h2>
+        <h3 style={{ textAlign: 'center', fontSize: 16, letterSpacing: 1, margin: '0 0 24px' }}>TO WHOMSOEVER IT MAY CONCERN</h3>
+        <p style={P}>
+          This is to certify that <b>{f.studentName || 'Name'}</b>, {f.relation} <b>{f.fatherName || 'Father name'}</b>, is a bonafide
+          student of <b>Vinsup Skill Academy</b> and is currently enrolled in the <b>{f.course || 'course'}</b> training program.
+        </p>
+        <p style={P}>
+          The student joined the <b>{f.course || '—'}</b> course and is pursuing the training program with us during the academic
+          period <b>{fmtD(f.fromDate)}</b> to <b>{fmtD(f.toDate)}</b>. During this period, the student has been regular and is in
+          good standing with the academy.
+        </p>
+        <p style={P}>
+          This certificate is issued at the specific request of the student for {f.purpose || 'submission to the concerned authorities'}.
+        </p>
+        <p style={{ ...P, textAlign: 'left' }}>We wish {pronoun} all the best in future endeavors.</p>
+      </div>
       <SignBlock date={f.issueDate} />
     </div>
   );
@@ -261,24 +264,26 @@ function ODJoiningTemplate({ f }: { f: Record<string, string> }) {
   const P: React.CSSProperties = { fontSize: 15.5, lineHeight: 2.1, textAlign: 'justify', margin: '0 0 18px' };
   return (
     <div className="cert-a4 cert-letter" style={{ fontFamily: 'Georgia, serif', color: '#111' }}>
-      <Letterhead />
-      <h3 style={{ textAlign: 'center', fontSize: 16, letterSpacing: 1, margin: '28px 0 14px' }}>TO WHOMSOEVER IT MAY CONCERN</h3>
-      <h2 style={{ textAlign: 'center', fontSize: 18, letterSpacing: 2, margin: '0 0 22px', textDecoration: 'underline', textUnderlineOffset: 6 }}>INTERNSHIP JOINING LETTER</h2>
-      <p style={P}>
-        This is to respectfully inform you that <b>{f.studentName || 'Name'}</b>, a student of <b>{f.collegeName || 'College Name'}{f.className ? `, ${f.className}` : ''}</b>,
-        is currently doing an internship at our organization, <b>VINSUP INFOTECH PVT LTD</b>, for the period <b>{fmtD(f.fromDate)}</b> to <b>{fmtD(f.toDate)}</b>.
-      </p>
-      <p style={P}>
-        During the above-mentioned period, {pronoun} has been actively involved in various assigned tasks and projects as part of {possessive} internship,
-        gaining practical exposure and industry-relevant knowledge aligned with {possessive} academic curriculum.
-      </p>
-      <p style={P}>
-        In view of the above, we humbly request you to kindly consider the mentioned duration as <b>On-Duty (OD)</b> for the student.
-      </p>
-      <p style={P}>
-        Should you require any further information or clarification, please feel free to contact us. We shall be glad to assist you.
-      </p>
-      <p style={{ ...P, textAlign: 'left' }}>Thank you for your time, support, and kind consideration.</p>
+      <div style={{ flex: 1, minHeight: 0, overflow: 'hidden' }}>
+        <Letterhead />
+        <h3 style={{ textAlign: 'center', fontSize: 16, letterSpacing: 1, margin: '28px 0 14px' }}>TO WHOMSOEVER IT MAY CONCERN</h3>
+        <h2 style={{ textAlign: 'center', fontSize: 18, letterSpacing: 2, margin: '0 0 22px', textDecoration: 'underline', textUnderlineOffset: 6 }}>INTERNSHIP JOINING LETTER</h2>
+        <p style={P}>
+          This is to respectfully inform you that <b>{f.studentName || 'Name'}</b>, a student of <b>{f.collegeName || 'College Name'}{f.className ? `, ${f.className}` : ''}</b>,
+          is currently doing an internship at our organization, <b>VINSUP INFOTECH PVT LTD</b>, for the period <b>{fmtD(f.fromDate)}</b> to <b>{fmtD(f.toDate)}</b>.
+        </p>
+        <p style={P}>
+          During the above-mentioned period, {pronoun} has been actively involved in various assigned tasks and projects as part of {possessive} internship,
+          gaining practical exposure and industry-relevant knowledge aligned with {possessive} academic curriculum.
+        </p>
+        <p style={P}>
+          In view of the above, we humbly request you to kindly consider the mentioned duration as <b>On-Duty (OD)</b> for the student.
+        </p>
+        <p style={P}>
+          Should you require any further information or clarification, please feel free to contact us. We shall be glad to assist you.
+        </p>
+        <p style={{ ...P, textAlign: 'left' }}>Thank you for your time, support, and kind consideration.</p>
+      </div>
       <SignBlock date={f.issueDate} />
     </div>
   );
@@ -290,64 +295,68 @@ function InternshipCompletionTemplate({ f, short }: { f: Record<string, string>;
 
   return (
     <div className="cert-a4 cert-letter" style={{ fontFamily: 'Arial, sans-serif', color: '#222' }}>
-      {/* Header: logo LEFT | vertical divider | contact info RIGHT */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <InfotechLogo height={50} />
-        <div style={{
-          fontSize: 11.5, lineHeight: 1.8, textAlign: 'left',
-          borderLeft: '2px solid #333', paddingLeft: 16, maxWidth: 280,
-        }}>
-          <p style={{ margin: 0 }}><b>Phone</b> : 8870060607</p>
-          <p style={{ margin: 0 }}><b>Email</b> : hrvinsup@gmail.com</p>
-          <p style={{ margin: 0 }}><b>Address</b> : 148, Gopalasamy Kovil St, Ganapathy,<br />Coimbatore, Tamil Nadu - 641006</p>
+
+      {/* ── Header: always visible, never scrolls away ── */}
+      <div style={{ flexShrink: 0 }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <InfotechLogo height={50} />
+          <div style={{
+            fontSize: 11.5, lineHeight: 1.8, textAlign: 'left',
+            borderLeft: '2px solid #333', paddingLeft: 16, maxWidth: 280,
+          }}>
+            <p style={{ margin: 0 }}><b>Phone</b> : 8870060607</p>
+            <p style={{ margin: 0 }}><b>Email</b> : hrvinsup@gmail.com</p>
+            <p style={{ margin: 0 }}><b>Address</b> : 148, Gopalasamy Kovil St, Ganapathy,<br />Coimbatore, Tamil Nadu - 641006</p>
+          </div>
         </div>
+        <div style={{ borderTop: '4px solid #111', margin: '14px 0 2px' }} />
+        <div style={{ borderTop: '1.5px solid #111', margin: '0 0 22px' }} />
       </div>
-      <div style={{ borderTop: '4px solid #111', margin: '14px 0 2px' }} />
-      <div style={{ borderTop: '1.5px solid #111', margin: '0 0 28px' }} />
 
-      <h2 style={{ textAlign: 'center', fontSize: 18, letterSpacing: 2, margin: '0 0 22px', textDecoration: 'underline', textUnderlineOffset: 6 }}>
-        INTERNSHIP COMPLETION CERTIFICATE
-      </h2>
+      {/* ── Body: grows to fill remaining space, clips if content overflows ── */}
+      <div style={{ flex: 1, minHeight: 0, overflow: 'hidden' }}>
+        <h2 style={{ textAlign: 'center', fontSize: 18, letterSpacing: 2, margin: '0 0 18px', textDecoration: 'underline', textUnderlineOffset: 6 }}>
+          INTERNSHIP COMPLETION CERTIFICATE
+        </h2>
+        <p style={P}>
+          This is to certify that <b>{(f.studentName || 'Name').toUpperCase()}</b> has successfully completed the <b>Internship Program</b> at{' '}
+          <b>Vinsup Infotech Private Limited</b>{short && f.fromDate ? <> for the period <b>{fmtD(f.fromDate)}</b> to <b>{fmtD(f.toDate)}</b></> : null}.
+        </p>
+        <p style={P}>
+          Throughout the internship tenure, the candidate has demonstrated commendable proficiency in industry-relevant technical
+          competencies and has effectively translated theoretical knowledge into practical execution through real-time projects and assignments.
+        </p>
+        <p style={{ fontSize: 14.5, fontWeight: 700, margin: '2px 0 6px' }}>During the program, the student consistently displayed:</p>
+        <ul style={{ fontSize: 14.5, lineHeight: 2.0, margin: '0 0 10px', paddingLeft: 22 }}>
+          <li>Strong analytical and problem-solving abilities</li>
+          <li>Professional work ethics and discipline</li>
+          <li>Effective communication and collaborative skills</li>
+          <li>Commitment towards quality delivery and performance excellence</li>
+        </ul>
+        <p style={P}>
+          The internship experience has equipped the candidate with practical exposure aligned to current industry standards and workplace expectations.
+        </p>
+        <p style={P}>
+          We acknowledge and appreciate the dedication, sincerity, and performance demonstrated during the course of the internship and
+          extend our best wishes for continued growth and success in all future professional endeavors.
+        </p>
+      </div>
 
-      <p style={P}>
-        This is to certify that <b>{(f.studentName || 'Name').toUpperCase()}</b> has successfully completed the <b>Internship Program</b> at{' '}
-        <b>Vinsup Infotech Private Limited</b>{short && f.fromDate ? <> for the period <b>{fmtD(f.fromDate)}</b> to <b>{fmtD(f.toDate)}</b></> : null}.
-      </p>
-      <p style={P}>
-        Throughout the internship tenure, the candidate has demonstrated commendable proficiency in industry-relevant technical
-        competencies and has effectively translated theoretical knowledge into practical execution through real-time projects and assignments.
-      </p>
-      <p style={{ fontSize: 14.5, fontWeight: 700, margin: '2px 0 6px' }}>During the program, the student consistently displayed:</p>
-      <ul style={{ fontSize: 14.5, lineHeight: 2.0, margin: '0 0 10px', paddingLeft: 22 }}>
-        <li>Strong analytical and problem-solving abilities</li>
-        <li>Professional work ethics and discipline</li>
-        <li>Effective communication and collaborative skills</li>
-        <li>Commitment towards quality delivery and performance excellence</li>
-      </ul>
-      <p style={P}>
-        The internship experience has equipped the candidate with practical exposure aligned to current industry standards and workplace expectations.
-      </p>
-      <p style={P}>
-        We acknowledge and appreciate the dedication, sincerity, and performance demonstrated during the course of the internship and
-        extend our best wishes for continued growth and success in all future professional endeavors.
-      </p>
-
-      {/* Footer pinned to the bottom */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginTop: 'auto', paddingBottom: 14, fontSize: 14 }}>
+      {/* ── Footer: always pinned to bottom, never pushed to next page ── */}
+      <div style={{ flexShrink: 0, display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', paddingTop: 12, paddingBottom: 14, fontSize: 14 }}>
         <div style={{ lineHeight: 2 }}>
           <p style={{ margin: 0 }}><b>Issued On:</b> {fmtD(f.issueDate)}</p>
           <p style={{ margin: 0 }}><b>Course:</b> {f.course || '—'}</p>
           <p style={{ margin: 0 }}><b>Student ID:</b> {f.studentId || '—'}</p>
           <p style={{ margin: 0 }}><b>Batch:</b> {f.batch || '—'}</p>
         </div>
-
-        {/* Right side: QR code stacked above CBPO sign */}
+        {/* Right: QR code above CBPO sign */}
         <div style={{ textAlign: 'center', minWidth: 130 }}>
           {qrUrl ? (
             <img
               src={`https://api.qrserver.com/v1/create-qr-code/?size=120x120&data=${encodeURIComponent(qrUrl)}`}
               alt="Verify Certificate"
-              style={{ width: 120, height: 120, display: 'block', margin: '0 auto 16px' }}
+              style={{ width: 120, height: 120, display: 'block', margin: '0 auto 12px' }}
             />
           ) : null}
           <div style={{ height: 52, display: 'flex', alignItems: 'flex-end', justifyContent: 'center' }}>
