@@ -216,7 +216,7 @@ function CBPOSign({ height = 48 }: { height?: number }) {
 function SignBlock({ date }: { date?: string }) {
   // Sign image removed — OD / Bonafide show name + designation text only
   return (
-    <div style={{ flexShrink: 0, paddingTop: 16, paddingBottom: 20, fontSize: 15, lineHeight: 1.75 }}>
+    <div style={{ flexShrink: 0, paddingTop: 16, paddingBottom: 120, fontSize: 15, lineHeight: 1.75 }}>
       <p style={{ margin: '0 0 4px' }}>{fmtD(date)}</p>
       <p style={{ margin: '0 0 20px' }}>Thanks and Regards,</p>
       <p style={{ margin: '0 0 2px', fontWeight: 700 }}>Pooranam Annamalai</p>
