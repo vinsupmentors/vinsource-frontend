@@ -333,7 +333,7 @@ function InternshipCompletionTemplate({ f, short }: { f: Record<string, string>;
       </p>
 
       {/* Footer pinned to the bottom */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', marginTop: 'auto', paddingBottom: 24, fontSize: 14 }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginTop: 'auto', paddingBottom: 24, fontSize: 14 }}>
         <div style={{ lineHeight: 2 }}>
           <p style={{ margin: 0 }}><b>Issued On:</b> {fmtD(f.issueDate)}</p>
           <p style={{ margin: 0 }}><b>Course:</b> {f.course || '—'}</p>
