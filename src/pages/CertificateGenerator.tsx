@@ -232,8 +232,8 @@ function BonafideTemplate({ f }: { f: Record<string, string> }) {
   const pronoun = f.gender === 'FEMALE' ? 'her' : 'him';
   const P: React.CSSProperties = { fontSize: 15.5, lineHeight: 2.1, textAlign: 'justify', margin: '0 0 18px' };
   return (
-    <div className="cert-a4 cert-letter" style={{ fontFamily: 'Georgia, serif', color: '#111' }}>
-      {/* Body grows to fill space; overflow hidden prevents spilling to page 2 */}
+    <div className="cert-a4" style={{ minHeight: 0, height: 1123, display: 'flex', flexDirection: 'column', fontFamily: 'Georgia, serif', color: '#111' }}>
+      {/* minHeight:0 overrides cert-a4's min-height so height:1123 is the hard cap */}
       <div style={{ flex: 1, minHeight: 0, overflow: 'hidden' }}>
         <Letterhead />
         <p style={{ textAlign: 'right', fontSize: 14.5, marginTop: 28 }}><b>Date:</b> {fmtD(f.issueDate)}</p>
@@ -263,7 +263,7 @@ function ODJoiningTemplate({ f }: { f: Record<string, string> }) {
   const possessive = f.gender === 'FEMALE' ? 'her' : 'his';
   const P: React.CSSProperties = { fontSize: 15.5, lineHeight: 2.1, textAlign: 'justify', margin: '0 0 18px' };
   return (
-    <div className="cert-a4 cert-letter" style={{ fontFamily: 'Georgia, serif', color: '#111' }}>
+    <div className="cert-a4" style={{ minHeight: 0, height: 1123, display: 'flex', flexDirection: 'column', fontFamily: 'Georgia, serif', color: '#111' }}>
       <div style={{ flex: 1, minHeight: 0, overflow: 'hidden' }}>
         <Letterhead />
         <h3 style={{ textAlign: 'center', fontSize: 16, letterSpacing: 1, margin: '28px 0 14px' }}>TO WHOMSOEVER IT MAY CONCERN</h3>
@@ -294,7 +294,7 @@ function InternshipCompletionTemplate({ f, short }: { f: Record<string, string>;
   const qrUrl = f.verifyUrl?.trim();
 
   return (
-    <div className="cert-a4 cert-letter" style={{ fontFamily: 'Arial, sans-serif', color: '#222' }}>
+    <div className="cert-a4" style={{ minHeight: 0, height: 1123, display: 'flex', flexDirection: 'column', fontFamily: 'Arial, sans-serif', color: '#222' }}>
 
       {/* ── Header: always visible, never scrolls away ── */}
       <div style={{ flexShrink: 0 }}>
