@@ -193,17 +193,33 @@ function Letterhead() {
   );
 }
 
+// React-state-based CBPO signature — survives re-renders caused by form input
+function CBPOSign({ height = 48 }: { height?: number }) {
+  const [failed, setFailed] = useState(false);
+  if (failed) {
+    return (
+      <div style={{ fontFamily: "'Brush Script MT','Segoe Script',cursive", fontSize: 36, color: '#1a1a8e', lineHeight: 1 }}>
+        Pooranam
+      </div>
+    );
+  }
+  return (
+    <img
+      src="/certificates/cbpo.png"
+      alt=""
+      style={{ height, display: 'block' }}
+      onError={() => setFailed(true)}
+    />
+  );
+}
+
 function SignBlock({ date }: { date?: string }) {
   // marginTop:auto pushes the signature to the bottom of the flex-column page
   return (
     <div style={{ marginTop: 'auto', paddingTop: 48, paddingBottom: 28, fontSize: 15, lineHeight: 1.9 }}>
       <p style={{ margin: '0 0 4px' }}>{fmtD(date)}</p>
       <p style={{ margin: '0 0 26px' }}>Thanks and Regards,</p>
-      <img
-        src="/certificates/cbpo.png"
-        onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
-        alt="" style={{ height: 46, display: 'block', marginBottom: 6 }}
-      />
+      <CBPOSign height={46} />
       <p style={{ margin: '0 0 2px', fontWeight: 700 }}>Pooranam Annamalai</p>
       <p style={{ margin: 0 }}>CBPO</p>
     </div>
@@ -335,19 +351,7 @@ function InternshipCompletionTemplate({ f, short }: { f: Record<string, string>;
             />
           ) : null}
           <div style={{ height: 52, display: 'flex', alignItems: 'flex-end', justifyContent: 'center' }}>
-            <img
-              src="/certificates/cbpo.png"
-              alt=""
-              style={{ height: 48, display: 'block' }}
-              onError={(e) => {
-                const el = e.target as HTMLImageElement;
-                el.style.display = 'none';
-                const sig = document.createElement('div');
-                sig.style.cssText = "font-family:'Brush Script MT','Segoe Script',cursive;font-size:36px;color:#1a1a8e;line-height:1;";
-                sig.textContent = 'Pooranam';
-                el.parentElement?.appendChild(sig);
-              }}
-            />
+            <CBPOSign height={48} />
           </div>
           <p style={{ margin: '6px 0 0', borderTop: '1.5px solid #1a1a8e', paddingTop: 6, fontWeight: 600, letterSpacing: 1 }}>CBPO</p>
         </div>
