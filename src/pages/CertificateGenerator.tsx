@@ -216,9 +216,9 @@ function CBPOSign({ height = 48 }: { height?: number }) {
 function SignBlock({ date }: { date?: string }) {
   // marginTop:auto pushes the signature to the bottom of the flex-column page
   return (
-    <div style={{ marginTop: 'auto', paddingTop: 48, paddingBottom: 28, fontSize: 15, lineHeight: 1.9 }}>
+    <div style={{ marginTop: 'auto', paddingTop: 24, paddingBottom: 20, fontSize: 15, lineHeight: 1.75 }}>
       <p style={{ margin: '0 0 4px' }}>{fmtD(date)}</p>
-      <p style={{ margin: '0 0 26px' }}>Thanks and Regards,</p>
+      <p style={{ margin: '0 0 14px' }}>Thanks and Regards,</p>
       <CBPOSign height={46} />
       <p style={{ margin: '0 0 2px', fontWeight: 700 }}>Pooranam Annamalai</p>
       <p style={{ margin: 0 }}>CBPO</p>
@@ -230,13 +230,13 @@ function SignBlock({ date }: { date?: string }) {
 
 function BonafideTemplate({ f }: { f: Record<string, string> }) {
   const pronoun = f.gender === 'FEMALE' ? 'her' : 'him';
-  const P: React.CSSProperties = { fontSize: 15.5, lineHeight: 2.35, textAlign: 'justify', margin: '0 0 26px' };
+  const P: React.CSSProperties = { fontSize: 15.5, lineHeight: 2.1, textAlign: 'justify', margin: '0 0 18px' };
   return (
     <div className="cert-a4 cert-letter" style={{ fontFamily: 'Georgia, serif', color: '#111' }}>
       <Letterhead />
-      <p style={{ textAlign: 'right', fontSize: 14.5, marginTop: 44 }}><b>Date:</b> {fmtD(f.issueDate)}</p>
-      <h2 style={{ textAlign: 'center', fontSize: 19, letterSpacing: 2, margin: '30px 0 26px', textDecoration: 'underline', textUnderlineOffset: 6 }}>BONAFIDE CERTIFICATE</h2>
-      <h3 style={{ textAlign: 'center', fontSize: 16, letterSpacing: 1, margin: '0 0 44px' }}>TO WHOMSOEVER IT MAY CONCERN</h3>
+      <p style={{ textAlign: 'right', fontSize: 14.5, marginTop: 28 }}><b>Date:</b> {fmtD(f.issueDate)}</p>
+      <h2 style={{ textAlign: 'center', fontSize: 19, letterSpacing: 2, margin: '20px 0 16px', textDecoration: 'underline', textUnderlineOffset: 6 }}>BONAFIDE CERTIFICATE</h2>
+      <h3 style={{ textAlign: 'center', fontSize: 16, letterSpacing: 1, margin: '0 0 24px' }}>TO WHOMSOEVER IT MAY CONCERN</h3>
       <p style={P}>
         This is to certify that <b>{f.studentName || 'Name'}</b>, {f.relation} <b>{f.fatherName || 'Father name'}</b>, is a bonafide
         student of <b>Vinsup Skill Academy</b> and is currently enrolled in the <b>{f.course || 'course'}</b> training program.
@@ -258,12 +258,12 @@ function BonafideTemplate({ f }: { f: Record<string, string> }) {
 function ODJoiningTemplate({ f }: { f: Record<string, string> }) {
   const pronoun = f.gender === 'FEMALE' ? 'she' : 'he';
   const possessive = f.gender === 'FEMALE' ? 'her' : 'his';
-  const P: React.CSSProperties = { fontSize: 15.5, lineHeight: 2.35, textAlign: 'justify', margin: '0 0 26px' };
+  const P: React.CSSProperties = { fontSize: 15.5, lineHeight: 2.1, textAlign: 'justify', margin: '0 0 18px' };
   return (
     <div className="cert-a4 cert-letter" style={{ fontFamily: 'Georgia, serif', color: '#111' }}>
       <Letterhead />
-      <h3 style={{ textAlign: 'center', fontSize: 16, letterSpacing: 1, margin: '48px 0 26px' }}>TO WHOMSOEVER IT MAY CONCERN</h3>
-      <h2 style={{ textAlign: 'center', fontSize: 18, letterSpacing: 2, margin: '0 0 44px', textDecoration: 'underline', textUnderlineOffset: 6 }}>INTERNSHIP JOINING LETTER</h2>
+      <h3 style={{ textAlign: 'center', fontSize: 16, letterSpacing: 1, margin: '28px 0 14px' }}>TO WHOMSOEVER IT MAY CONCERN</h3>
+      <h2 style={{ textAlign: 'center', fontSize: 18, letterSpacing: 2, margin: '0 0 22px', textDecoration: 'underline', textUnderlineOffset: 6 }}>INTERNSHIP JOINING LETTER</h2>
       <p style={P}>
         This is to respectfully inform you that <b>{f.studentName || 'Name'}</b>, a student of <b>{f.collegeName || 'College Name'}{f.className ? `, ${f.className}` : ''}</b>,
         is currently doing an internship at our organization, <b>VINSUP INFOTECH PVT LTD</b>, for the period <b>{fmtD(f.fromDate)}</b> to <b>{fmtD(f.toDate)}</b>.
@@ -285,7 +285,7 @@ function ODJoiningTemplate({ f }: { f: Record<string, string> }) {
 }
 
 function InternshipCompletionTemplate({ f, short }: { f: Record<string, string>; short?: boolean }) {
-  const P: React.CSSProperties = { fontSize: 14.5, lineHeight: 2.15, textAlign: 'justify', margin: '0 0 20px' };
+  const P: React.CSSProperties = { fontSize: 14.5, lineHeight: 2.0, textAlign: 'justify', margin: '0 0 12px' };
   const qrUrl = f.verifyUrl?.trim();
 
   return (
@@ -303,9 +303,9 @@ function InternshipCompletionTemplate({ f, short }: { f: Record<string, string>;
         </div>
       </div>
       <div style={{ borderTop: '4px solid #111', margin: '14px 0 2px' }} />
-      <div style={{ borderTop: '1.5px solid #111', margin: '0 0 46px' }} />
+      <div style={{ borderTop: '1.5px solid #111', margin: '0 0 28px' }} />
 
-      <h2 style={{ textAlign: 'center', fontSize: 18, letterSpacing: 2, margin: '0 0 40px', textDecoration: 'underline', textUnderlineOffset: 6 }}>
+      <h2 style={{ textAlign: 'center', fontSize: 18, letterSpacing: 2, margin: '0 0 22px', textDecoration: 'underline', textUnderlineOffset: 6 }}>
         INTERNSHIP COMPLETION CERTIFICATE
       </h2>
 
@@ -317,8 +317,8 @@ function InternshipCompletionTemplate({ f, short }: { f: Record<string, string>;
         Throughout the internship tenure, the candidate has demonstrated commendable proficiency in industry-relevant technical
         competencies and has effectively translated theoretical knowledge into practical execution through real-time projects and assignments.
       </p>
-      <p style={{ fontSize: 14.5, fontWeight: 700, margin: '4px 0 10px' }}>During the program, the student consistently displayed:</p>
-      <ul style={{ fontSize: 14.5, lineHeight: 2.15, margin: '0 0 20px', paddingLeft: 22 }}>
+      <p style={{ fontSize: 14.5, fontWeight: 700, margin: '2px 0 6px' }}>During the program, the student consistently displayed:</p>
+      <ul style={{ fontSize: 14.5, lineHeight: 2.0, margin: '0 0 10px', paddingLeft: 22 }}>
         <li>Strong analytical and problem-solving abilities</li>
         <li>Professional work ethics and discipline</li>
         <li>Effective communication and collaborative skills</li>
@@ -333,7 +333,7 @@ function InternshipCompletionTemplate({ f, short }: { f: Record<string, string>;
       </p>
 
       {/* Footer pinned to the bottom */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginTop: 'auto', paddingBottom: 24, fontSize: 14 }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginTop: 'auto', paddingBottom: 14, fontSize: 14 }}>
         <div style={{ lineHeight: 2 }}>
           <p style={{ margin: 0 }}><b>Issued On:</b> {fmtD(f.issueDate)}</p>
           <p style={{ margin: 0 }}><b>Course:</b> {f.course || '—'}</p>
