@@ -214,12 +214,11 @@ function CBPOSign({ height = 48 }: { height?: number }) {
 }
 
 function SignBlock({ date }: { date?: string }) {
-  // flexShrink:0 keeps this pinned at the bottom — the sibling body div has flex:1
+  // Sign image removed — OD / Bonafide show name + designation text only
   return (
     <div style={{ flexShrink: 0, paddingTop: 16, paddingBottom: 20, fontSize: 15, lineHeight: 1.75 }}>
       <p style={{ margin: '0 0 4px' }}>{fmtD(date)}</p>
-      <p style={{ margin: '0 0 14px' }}>Thanks and Regards,</p>
-      <CBPOSign height={46} />
+      <p style={{ margin: '0 0 20px' }}>Thanks and Regards,</p>
       <p style={{ margin: '0 0 2px', fontWeight: 700 }}>Pooranam Annamalai</p>
       <p style={{ margin: 0 }}>CBPO</p>
     </div>
@@ -233,8 +232,8 @@ function BonafideTemplate({ f }: { f: Record<string, string> }) {
   const P: React.CSSProperties = { fontSize: 15.5, lineHeight: 2.1, textAlign: 'justify', margin: '0 0 18px' };
   return (
     <div className="cert-a4" style={{ minHeight: 0, height: 1123, display: 'flex', flexDirection: 'column', fontFamily: 'Georgia, serif', color: '#111' }}>
-      {/* minHeight:0 overrides cert-a4's min-height so height:1123 is the hard cap */}
-      <div style={{ flex: 1, minHeight: 0, overflow: 'hidden' }}>
+      {/* Body capped at 500px — spacer fills gap, SignBlock always at bottom */}
+      <div style={{ height: 500, overflow: 'hidden' }}>
         <Letterhead />
         <p style={{ textAlign: 'right', fontSize: 14.5, marginTop: 28 }}><b>Date:</b> {fmtD(f.issueDate)}</p>
         <h2 style={{ textAlign: 'center', fontSize: 19, letterSpacing: 2, margin: '20px 0 16px', textDecoration: 'underline', textUnderlineOffset: 6 }}>BONAFIDE CERTIFICATE</h2>
@@ -253,6 +252,7 @@ function BonafideTemplate({ f }: { f: Record<string, string> }) {
         </p>
         <p style={{ ...P, textAlign: 'left' }}>We wish {pronoun} all the best in future endeavors.</p>
       </div>
+      <div style={{ flex: 1 }} />
       <SignBlock date={f.issueDate} />
     </div>
   );
@@ -264,7 +264,8 @@ function ODJoiningTemplate({ f }: { f: Record<string, string> }) {
   const P: React.CSSProperties = { fontSize: 15.5, lineHeight: 2.1, textAlign: 'justify', margin: '0 0 18px' };
   return (
     <div className="cert-a4" style={{ minHeight: 0, height: 1123, display: 'flex', flexDirection: 'column', fontFamily: 'Georgia, serif', color: '#111' }}>
-      <div style={{ flex: 1, minHeight: 0, overflow: 'hidden' }}>
+      {/* Body capped at 500px — spacer fills gap, SignBlock always at bottom */}
+      <div style={{ height: 500, overflow: 'hidden' }}>
         <Letterhead />
         <h3 style={{ textAlign: 'center', fontSize: 16, letterSpacing: 1, margin: '28px 0 14px' }}>TO WHOMSOEVER IT MAY CONCERN</h3>
         <h2 style={{ textAlign: 'center', fontSize: 18, letterSpacing: 2, margin: '0 0 22px', textDecoration: 'underline', textUnderlineOffset: 6 }}>INTERNSHIP JOINING LETTER</h2>
@@ -284,6 +285,7 @@ function ODJoiningTemplate({ f }: { f: Record<string, string> }) {
         </p>
         <p style={{ ...P, textAlign: 'left' }}>Thank you for your time, support, and kind consideration.</p>
       </div>
+      <div style={{ flex: 1 }} />
       <SignBlock date={f.issueDate} />
     </div>
   );
@@ -313,8 +315,8 @@ function InternshipCompletionTemplate({ f, short }: { f: Record<string, string>;
         <div style={{ borderTop: '1.5px solid #111', margin: '0 0 22px' }} />
       </div>
 
-      {/* ── Body: grows to fill remaining space, clips if content overflows ── */}
-      <div style={{ flex: 1, minHeight: 0, overflow: 'hidden' }}>
+      {/* ── Body: fixed 450px — spacer fills gap, footer always at bottom ── */}
+      <div style={{ height: 450, overflow: 'hidden' }}>
         <h2 style={{ textAlign: 'center', fontSize: 18, letterSpacing: 2, margin: '0 0 18px', textDecoration: 'underline', textUnderlineOffset: 6 }}>
           INTERNSHIP COMPLETION CERTIFICATE
         </h2>
@@ -342,6 +344,7 @@ function InternshipCompletionTemplate({ f, short }: { f: Record<string, string>;
         </p>
       </div>
 
+      <div style={{ flex: 1 }} />
       {/* ── Footer: always pinned to bottom, never pushed to next page ── */}
       <div style={{ flexShrink: 0, display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', paddingTop: 12, paddingBottom: 14, fontSize: 14 }}>
         <div style={{ lineHeight: 2 }}>
