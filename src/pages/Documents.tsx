@@ -1,6 +1,7 @@
 import { useEffect, useState, useCallback, useRef } from 'react';
 import { api } from '@/lib/api';
 import { useRole } from '@/hooks/useAuth';
+import { useModuleAccess } from '@/hooks/useModuleAccess';
 import { formatDate } from '@/lib/utils';
 import {
   FileText, Upload, CheckCircle2, XCircle, AlertCircle, Loader2,
@@ -54,7 +55,10 @@ const BACKEND = (import.meta as any).env?.VITE_API_URL || 'http://localhost:5000
 
 export default function DocumentsPage() {
   const { can } = useRole();
-  const isHR = can('HR');
+  const { hasModule } = useModuleAccess();
+  // isHR: either the user has HR role (or above), or has been granted the HR module
+  // (e.g. Yureka as a designated document reviewer with HR:VIEW or HR:EDIT access)
+  const isHR = can('HR') || hasModule('HR', 'VIEW');
   const [myDocs, setMyDocs] = useState<Document[]>([]);
   const [allDocs, setAllDocs] = useState<Document[]>([]);
   const [originals, setOriginals] = useState<OriginalsRow[]>([]);

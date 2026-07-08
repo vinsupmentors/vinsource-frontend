@@ -113,6 +113,7 @@ export default function FinanceAdminPage() {
   const [categories, setCategories] = useState<CategoryRow[]>([]);
   const [prevMonthTotal, setPrevMonthTotal] = useState<number | null>(null);
   const [showAddFund, setShowAddFund] = useState(false);
+  const [editingFund, setEditingFund] = useState<FundReceipt | null>(null);
 
   const [showVendorModal, setShowVendorModal] = useState(false);
   const [editingVendor, setEditingVendor] = useState<Vendor | null>(null);
@@ -719,17 +720,24 @@ export default function FinanceAdminPage() {
                 <th className="px-4 py-3">Amount</th>
                 <th className="px-4 py-3">Recorded By</th>
                 <th className="px-4 py-3">Notes</th>
+                <th className="px-4 py-3 text-right">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y">
               {funds.length === 0 ? (
-                <tr><td colSpan={4} className="px-4 py-8 text-center text-muted-foreground">No HO funds recorded this month</td></tr>
+                <tr><td colSpan={5} className="px-4 py-8 text-center text-muted-foreground">No HO funds recorded this month</td></tr>
               ) : funds.map((f) => (
                 <tr key={f.id} className="hover:bg-muted/30">
                   <td className="px-4 py-3 text-muted-foreground whitespace-nowrap">{new Date(f.receivedDate).toLocaleDateString()}</td>
                   <td className="px-4 py-3 font-semibold text-green-700">{fmt(f.amount)}</td>
                   <td className="px-4 py-3">{f.recordedBy ? `${f.recordedBy.firstName} ${f.recordedBy.lastName}` : '—'}</td>
                   <td className="px-4 py-3 text-muted-foreground">{f.notes || '—'}</td>
+                  <td className="px-4 py-3 text-right">
+                    <div className="flex items-center justify-end gap-2">
+                      <button onClick={() => setEditingFund(f)} className="p-1.5 rounded hover:bg-muted text-muted-foreground hover:text-foreground" title="Edit"><Pencil className="w-3.5 h-3.5" /></button>
+                      <button onClick={async () => { if (!window.confirm('Delete this fund receipt?')) return; try { await api.delete(`/api/finance-admin/funds/${f.id}`); fetchFunds(); fetchLedger(); } catch { setError('Failed to delete fund receipt'); } }} className="p-1.5 rounded hover:bg-red-50 text-muted-foreground hover:text-red-600" title="Delete"><Trash2 className="w-3.5 h-3.5" /></button>
+                    </div>
+                  </td>
                 </tr>
               ))}
             </tbody>
@@ -985,6 +993,17 @@ export default function FinanceAdminPage() {
         />
       )}
 
+      {editingFund && (
+        <EditFundModal
+          fund={editingFund}
+          saving={saving}
+          setSaving={setSaving}
+          onClose={() => setEditingFund(null)}
+          onSaved={() => { setEditingFund(null); fetchFunds(); fetchLedger(); }}
+          setError={setError}
+        />
+      )}
+
       {showVendorModal && (
         <VendorModal
           vendor={editingVendor}
@@ -1193,6 +1212,51 @@ function AddFundModal({ saving, setSaving, onClose, onSaved, setError }: {
         <div className="flex justify-end gap-2">
           <button onClick={onClose} className="px-4 py-2 text-sm rounded-lg border">Cancel</button>
           <button onClick={submit} disabled={saving} className="px-4 py-2 text-sm rounded-lg bg-blue-600 text-white disabled:opacity-50">{saving ? 'Saving...' : 'Record'}</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function EditFundModal({ fund, saving, setSaving, onClose, onSaved, setError }: {
+  fund: FundReceipt; saving: boolean; setSaving: (v: boolean) => void; onClose: () => void; onSaved: () => void; setError: (s: string) => void;
+}) {
+  const [form, setForm] = useState({
+    amount: String(fund.amount),
+    receivedDate: fund.receivedDate.slice(0, 10),
+    notes: fund.notes || '',
+  });
+
+  const submit = async () => {
+    if (!form.amount) { setError('Amount is required'); return; }
+    setSaving(true);
+    setError('');
+    try {
+      await api.put(`/api/finance-admin/funds/${fund.id}`, form);
+      onSaved();
+    } catch (err: unknown) {
+      const e = err as { response?: { data?: { message?: string } } };
+      setError(e.response?.data?.message || 'Failed to update fund receipt');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
+      <div className="bg-white rounded-xl w-full max-w-md p-6 space-y-4">
+        <div className="flex items-center justify-between">
+          <h2 className="font-semibold text-lg">Edit HO Fund Receipt</h2>
+          <button onClick={onClose}><X className="w-4 h-4" /></button>
+        </div>
+        <div className="space-y-3">
+          <input type="number" className="w-full px-3 py-2 border rounded-lg text-sm" placeholder="Amount *" value={form.amount} onChange={(e) => setForm({ ...form, amount: e.target.value })} />
+          <input type="date" className="w-full px-3 py-2 border rounded-lg text-sm" value={form.receivedDate} onChange={(e) => setForm({ ...form, receivedDate: e.target.value })} />
+          <textarea className="w-full px-3 py-2 border rounded-lg text-sm" placeholder="Notes" rows={2} value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} />
+        </div>
+        <div className="flex justify-end gap-2">
+          <button onClick={onClose} className="px-4 py-2 text-sm rounded-lg border">Cancel</button>
+          <button onClick={submit} disabled={saving} className="px-4 py-2 text-sm rounded-lg bg-blue-600 text-white disabled:opacity-50">{saving ? 'Saving...' : 'Update'}</button>
         </div>
       </div>
     </div>
