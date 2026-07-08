@@ -216,7 +216,7 @@ function CBPOSign({ height = 48 }: { height?: number }) {
 function SignBlock({ date }: { date?: string }) {
   // Sign image removed — OD / Bonafide show name + designation text only
   return (
-    <div style={{ flexShrink: 0, paddingTop: 16, paddingBottom: 120, fontSize: 15, lineHeight: 1.75 }}>
+    <div style={{ flexShrink: 0, paddingTop: 16, paddingBottom: 100, fontSize: 15, lineHeight: 1.75 }}>
       <p style={{ margin: '0 0 4px' }}>{fmtD(date)}</p>
       <p style={{ margin: '0 0 20px' }}>Thanks and Regards,</p>
       <p style={{ margin: '0 0 2px', fontWeight: 700 }}>Pooranam Annamalai</p>
@@ -263,9 +263,10 @@ function ODJoiningTemplate({ f }: { f: Record<string, string> }) {
   const possessive = f.gender === 'FEMALE' ? 'her' : 'his';
   const P: React.CSSProperties = { fontSize: 15.5, lineHeight: 2.1, textAlign: 'justify', margin: '0 0 18px' };
   return (
+    // minHeight:0 inline overrides cert-a4's min-height:1123px so height:1123 is the hard cap
     <div className="cert-a4" style={{ minHeight: 0, height: 1123, display: 'flex', flexDirection: 'column', fontFamily: 'Georgia, serif', color: '#111' }}>
-      {/* Body capped at 500px — spacer fills gap, SignBlock always at bottom */}
-      <div style={{ height: 500, overflow: 'hidden' }}>
+      {/* Body grows to fill available space (1027px - SignBlock height), clips overflow */}
+      <div style={{ flex: 1, minHeight: 0, overflow: 'hidden' }}>
         <Letterhead />
         <h3 style={{ textAlign: 'center', fontSize: 16, letterSpacing: 1, margin: '28px 0 14px' }}>TO WHOMSOEVER IT MAY CONCERN</h3>
         <h2 style={{ textAlign: 'center', fontSize: 18, letterSpacing: 2, margin: '0 0 22px', textDecoration: 'underline', textUnderlineOffset: 6 }}>INTERNSHIP JOINING LETTER</h2>
@@ -285,7 +286,7 @@ function ODJoiningTemplate({ f }: { f: Record<string, string> }) {
         </p>
         <p style={{ ...P, textAlign: 'left' }}>Thank you for your time, support, and kind consideration.</p>
       </div>
-      <div style={{ flex: 1 }} />
+      {/* SignBlock: flexShrink:0 pins it at bottom; paddingBottom:100 = 100px above page edge */}
       <SignBlock date={f.issueDate} />
     </div>
   );
