@@ -263,9 +263,11 @@ function ODJoiningTemplate({ f }: { f: Record<string, string> }) {
   const possessive = f.gender === 'FEMALE' ? 'her' : 'his';
   const P: React.CSSProperties = { fontSize: 15.5, lineHeight: 2.1, textAlign: 'justify', margin: '0 0 18px' };
   return (
-    // position:relative so the sign div can be absolutely pinned to the bottom
-    <div className="cert-a4" style={{ minHeight: 0, height: 1123, position: 'relative', fontFamily: 'Georgia, serif', color: '#111' }}>
-      {/* All content flows naturally — no height cap, no overflow clip */}
+    <div style={{
+      width: 794, height: 1123, overflow: 'hidden',
+      padding: '48px 60px', background: '#fff', boxSizing: 'border-box',
+      position: 'relative', fontFamily: 'Georgia, serif', color: '#111',
+    }}>
       <Letterhead />
       <h3 style={{ textAlign: 'center', fontSize: 16, letterSpacing: 1, margin: '28px 0 14px' }}>TO WHOMSOEVER IT MAY CONCERN</h3>
       <h2 style={{ textAlign: 'center', fontSize: 18, letterSpacing: 2, margin: '0 0 22px', textDecoration: 'underline', textUnderlineOffset: 6 }}>INTERNSHIP JOINING LETTER</h2>
@@ -285,8 +287,8 @@ function ODJoiningTemplate({ f }: { f: Record<string, string> }) {
       </p>
       <p style={{ ...P, textAlign: 'left' }}>Thank you for your time, support, and kind consideration.</p>
 
-      {/* Sign block: absolutely pinned — bottom:148 = 100px above the 48px cert-a4 bottom padding */}
-      <div style={{ position: 'absolute', bottom: 148, left: 60, right: 60, fontSize: 15, lineHeight: 1.75 }}>
+      {/* Sign: absolutely pinned. bottom:220 keeps full block (130px tall) well above the viewport cut */}
+      <div style={{ position: 'absolute', bottom: 220, left: 60, right: 60, fontSize: 15, lineHeight: 1.75 }}>
         <p style={{ margin: '0 0 4px' }}>{fmtD(f.issueDate)}</p>
         <p style={{ margin: '0 0 20px' }}>Thanks and Regards,</p>
         <p style={{ margin: '0 0 2px', fontWeight: 700 }}>Pooranam Annamalai</p>
