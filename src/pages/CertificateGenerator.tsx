@@ -729,14 +729,18 @@ export default function CertificateGeneratorPage() {
             <p className="text-[11px] text-muted-foreground">In the print dialog choose "Save as PDF" to download the document for the student.</p>
           </div>
 
-          {/* ── Live preview ── */}
-          <div className="overflow-auto">
-            <div id="cert-sheet" className="shadow-lg mx-auto" style={{ width: 'fit-content', maxWidth: '100%', background: '#fff', outline: '1px solid #e5e7eb' }}>
-              {type === 'BONAFIDE' && <BonafideTemplate f={form} />}
-              {type === 'OD_INTERNSHIP_JOINING' && <ODJoiningTemplate f={form} />}
-              {type === 'INTERNSHIP_COMPLETION' && <InternshipCompletionTemplate f={form} />}
-              {type === 'INTERNSHIP_COMPLETION_SHORT' && <InternshipCompletionTemplate f={form} short />}
-              {type === 'COURSE_COMPLETION' && <CourseCompletionTemplate f={form} />}
+          {/* ── Live preview — scaled to 82% so the full A4 certificate fits on screen.
+               Print CSS already uses position:fixed;inset:0 on #cert-sheet, so
+               the parent transform has no effect on the printed PDF. ── */}
+          <div className="overflow-auto" style={{ display: 'flex', justifyContent: 'center' }}>
+            <div style={{ transform: 'scale(0.82)', transformOrigin: 'top center', marginBottom: -202 }}>
+              <div id="cert-sheet" className="shadow-lg" style={{ background: '#fff', outline: '1px solid #e5e7eb' }}>
+                {type === 'BONAFIDE' && <BonafideTemplate f={form} />}
+                {type === 'OD_INTERNSHIP_JOINING' && <ODJoiningTemplate f={form} />}
+                {type === 'INTERNSHIP_COMPLETION' && <InternshipCompletionTemplate f={form} />}
+                {type === 'INTERNSHIP_COMPLETION_SHORT' && <InternshipCompletionTemplate f={form} short />}
+                {type === 'COURSE_COMPLETION' && <CourseCompletionTemplate f={form} />}
+              </div>
             </div>
           </div>
         </div>
