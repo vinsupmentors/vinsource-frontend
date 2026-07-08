@@ -231,29 +231,36 @@ function BonafideTemplate({ f }: { f: Record<string, string> }) {
   const pronoun = f.gender === 'FEMALE' ? 'her' : 'him';
   const P: React.CSSProperties = { fontSize: 15.5, lineHeight: 2.1, textAlign: 'justify', margin: '0 0 18px' };
   return (
-    <div className="cert-a4" style={{ minHeight: 0, height: 1123, display: 'flex', flexDirection: 'column', fontFamily: 'Georgia, serif', color: '#111' }}>
-      {/* Body capped at 500px — spacer fills gap, SignBlock always at bottom */}
-      <div style={{ height: 500, overflow: 'hidden' }}>
-        <Letterhead />
-        <p style={{ textAlign: 'right', fontSize: 14.5, marginTop: 28 }}><b>Date:</b> {fmtD(f.issueDate)}</p>
-        <h2 style={{ textAlign: 'center', fontSize: 19, letterSpacing: 2, margin: '20px 0 16px', textDecoration: 'underline', textUnderlineOffset: 6 }}>BONAFIDE CERTIFICATE</h2>
-        <h3 style={{ textAlign: 'center', fontSize: 16, letterSpacing: 1, margin: '0 0 24px' }}>TO WHOMSOEVER IT MAY CONCERN</h3>
-        <p style={P}>
-          This is to certify that <b>{f.studentName || 'Name'}</b>, {f.relation} <b>{f.fatherName || 'Father name'}</b>, is a bonafide
-          student of <b>Vinsup Skill Academy</b> and is currently enrolled in the <b>{f.course || 'course'}</b> training program.
-        </p>
-        <p style={P}>
-          The student joined the <b>{f.course || '—'}</b> course and is pursuing the training program with us during the academic
-          period <b>{fmtD(f.fromDate)}</b> to <b>{fmtD(f.toDate)}</b>. During this period, the student has been regular and is in
-          good standing with the academy.
-        </p>
-        <p style={P}>
-          This certificate is issued at the specific request of the student for {f.purpose || 'submission to the concerned authorities'}.
-        </p>
-        <p style={{ ...P, textAlign: 'left' }}>We wish {pronoun} all the best in future endeavors.</p>
+    <div style={{
+      width: 794, height: 1123, overflow: 'hidden',
+      padding: '48px 60px', background: '#fff', boxSizing: 'border-box',
+      position: 'relative', fontFamily: 'Georgia, serif', color: '#111',
+    }}>
+      <Letterhead />
+      <p style={{ textAlign: 'right', fontSize: 14.5, marginTop: 28 }}><b>Date:</b> {fmtD(f.issueDate)}</p>
+      <h2 style={{ textAlign: 'center', fontSize: 19, letterSpacing: 2, margin: '20px 0 16px', textDecoration: 'underline', textUnderlineOffset: 6 }}>BONAFIDE CERTIFICATE</h2>
+      <h3 style={{ textAlign: 'center', fontSize: 16, letterSpacing: 1, margin: '0 0 24px' }}>TO WHOMSOEVER IT MAY CONCERN</h3>
+      <p style={P}>
+        This is to certify that <b>{f.studentName || 'Name'}</b>, {f.relation} <b>{f.fatherName || 'Father name'}</b>, is a bonafide
+        student of <b>Vinsup Skill Academy</b> and is currently enrolled in the <b>{f.course || 'course'}</b> training program.
+      </p>
+      <p style={P}>
+        The student joined the <b>{f.course || '—'}</b> course and is pursuing the training program with us during the academic
+        period <b>{fmtD(f.fromDate)}</b> to <b>{fmtD(f.toDate)}</b>. During this period, the student has been regular and is in
+        good standing with the academy.
+      </p>
+      <p style={P}>
+        This certificate is issued at the specific request of the student for {f.purpose || 'submission to the concerned authorities'}.
+      </p>
+      <p style={{ ...P, textAlign: 'left' }}>We wish {pronoun} all the best in future endeavors.</p>
+
+      {/* Sign: absolute, bottom:220 keeps full block above preview viewport cut */}
+      <div style={{ position: 'absolute', bottom: 220, left: 60, right: 60, fontSize: 15, lineHeight: 1.75 }}>
+        <p style={{ margin: '0 0 4px' }}>{fmtD(f.issueDate)}</p>
+        <p style={{ margin: '0 0 20px' }}>Thanks and Regards,</p>
+        <p style={{ margin: '0 0 2px', fontWeight: 700 }}>Pooranam Annamalai</p>
+        <p style={{ margin: 0 }}>CBPO</p>
       </div>
-      <div style={{ flex: 1 }} />
-      <SignBlock date={f.issueDate} />
     </div>
   );
 }
