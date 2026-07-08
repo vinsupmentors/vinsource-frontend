@@ -341,7 +341,7 @@ function InternshipCompletionTemplate({ f, short }: { f: Record<string, string>;
         </h2>
         <p style={P}>
           This is to certify that <b>{(f.studentName || 'Name').toUpperCase()}</b> has successfully completed the <b>Internship Program</b> at{' '}
-          <b>Vinsup Infotech Private Limited</b>{short && f.fromDate ? <> for the period <b>{fmtD(f.fromDate)}</b> to <b>{fmtD(f.toDate)}</b></> : null}.
+          <b>Vinsup Infotech Private Limited</b>{f.fromDate ? <> for the period <b>{fmtD(f.fromDate)}</b> to <b>{fmtD(f.toDate)}</b></> : null}.
         </p>
         <p style={P}>
           Throughout the internship tenure, the candidate has demonstrated commendable proficiency in industry-relevant technical
