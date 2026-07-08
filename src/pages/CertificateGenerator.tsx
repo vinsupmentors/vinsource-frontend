@@ -371,18 +371,17 @@ function InternshipCompletionTemplate({ f, short }: { f: Record<string, string>;
           <p style={{ margin: 0 }}><b>Student ID:</b> {f.studentId || '—'}</p>
           <p style={{ margin: 0 }}><b>Batch:</b> {f.batch || '—'}</p>
         </div>
-        {/* Right: QR code above CBPO sign */}
+        {/* Right: QR code + text signature */}
         <div style={{ textAlign: 'center', minWidth: 130 }}>
           {qrUrl ? (
             <img
-              src={`https://api.qrserver.com/v1/create-qr-code/?size=120x120&data=${encodeURIComponent(qrUrl)}`}
+              src={`https://api.qrserver.com/v1/create-qr-code/?size=100x100&data=${encodeURIComponent(qrUrl)}`}
               alt="Verify Certificate"
-              style={{ width: 120, height: 120, display: 'block', margin: '0 auto 12px' }}
+              style={{ width: 100, height: 100, display: 'block', margin: '0 auto 10px' }}
             />
           ) : null}
-          <div style={{ height: 52, display: 'flex', alignItems: 'flex-end', justifyContent: 'center' }}>
-            <CBPOSign height={48} />
-          </div>
+          <p style={{ margin: '0 0 2px', fontSize: 13 }}>Thanks and Regards,</p>
+          <p style={{ margin: '0 0 6px', fontSize: 13, fontWeight: 700 }}>Pooranam Annamalai</p>
           <p style={{ margin: '6px 0 0', borderTop: '1.5px solid #1a1a8e', paddingTop: 6, fontWeight: 600, letterSpacing: 1 }}>CBPO</p>
         </div>
       </div>
