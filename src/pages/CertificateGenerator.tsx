@@ -263,31 +263,35 @@ function ODJoiningTemplate({ f }: { f: Record<string, string> }) {
   const possessive = f.gender === 'FEMALE' ? 'her' : 'his';
   const P: React.CSSProperties = { fontSize: 15.5, lineHeight: 2.1, textAlign: 'justify', margin: '0 0 18px' };
   return (
-    // minHeight:0 inline overrides cert-a4's min-height:1123px so height:1123 is the hard cap
-    <div className="cert-a4" style={{ minHeight: 0, height: 1123, display: 'flex', flexDirection: 'column', fontFamily: 'Georgia, serif', color: '#111' }}>
-      {/* Body grows to fill available space (1027px - SignBlock height), clips overflow */}
-      <div style={{ flex: 1, minHeight: 0, overflow: 'hidden' }}>
-        <Letterhead />
-        <h3 style={{ textAlign: 'center', fontSize: 16, letterSpacing: 1, margin: '28px 0 14px' }}>TO WHOMSOEVER IT MAY CONCERN</h3>
-        <h2 style={{ textAlign: 'center', fontSize: 18, letterSpacing: 2, margin: '0 0 22px', textDecoration: 'underline', textUnderlineOffset: 6 }}>INTERNSHIP JOINING LETTER</h2>
-        <p style={P}>
-          This is to respectfully inform you that <b>{f.studentName || 'Name'}</b>, a student of <b>{f.collegeName || 'College Name'}{f.className ? `, ${f.className}` : ''}</b>,
-          is currently doing an internship at our organization, <b>VINSUP INFOTECH PVT LTD</b>, for the period <b>{fmtD(f.fromDate)}</b> to <b>{fmtD(f.toDate)}</b>.
-        </p>
-        <p style={P}>
-          During the above-mentioned period, {pronoun} has been actively involved in various assigned tasks and projects as part of {possessive} internship,
-          gaining practical exposure and industry-relevant knowledge aligned with {possessive} academic curriculum.
-        </p>
-        <p style={P}>
-          In view of the above, we humbly request you to kindly consider the mentioned duration as <b>On-Duty (OD)</b> for the student.
-        </p>
-        <p style={P}>
-          Should you require any further information or clarification, please feel free to contact us. We shall be glad to assist you.
-        </p>
-        <p style={{ ...P, textAlign: 'left' }}>Thank you for your time, support, and kind consideration.</p>
+    // position:relative so the sign div can be absolutely pinned to the bottom
+    <div className="cert-a4" style={{ minHeight: 0, height: 1123, position: 'relative', fontFamily: 'Georgia, serif', color: '#111' }}>
+      {/* All content flows naturally — no height cap, no overflow clip */}
+      <Letterhead />
+      <h3 style={{ textAlign: 'center', fontSize: 16, letterSpacing: 1, margin: '28px 0 14px' }}>TO WHOMSOEVER IT MAY CONCERN</h3>
+      <h2 style={{ textAlign: 'center', fontSize: 18, letterSpacing: 2, margin: '0 0 22px', textDecoration: 'underline', textUnderlineOffset: 6 }}>INTERNSHIP JOINING LETTER</h2>
+      <p style={P}>
+        This is to respectfully inform you that <b>{f.studentName || 'Name'}</b>, a student of <b>{f.collegeName || 'College Name'}{f.className ? `, ${f.className}` : ''}</b>,
+        is currently doing an internship at our organization, <b>VINSUP INFOTECH PVT LTD</b>, for the period <b>{fmtD(f.fromDate)}</b> to <b>{fmtD(f.toDate)}</b>.
+      </p>
+      <p style={P}>
+        During the above-mentioned period, {pronoun} has been actively involved in various assigned tasks and projects as part of {possessive} internship,
+        gaining practical exposure and industry-relevant knowledge aligned with {possessive} academic curriculum.
+      </p>
+      <p style={P}>
+        In view of the above, we humbly request you to kindly consider the mentioned duration as <b>On-Duty (OD)</b> for the student.
+      </p>
+      <p style={P}>
+        Should you require any further information or clarification, please feel free to contact us. We shall be glad to assist you.
+      </p>
+      <p style={{ ...P, textAlign: 'left' }}>Thank you for your time, support, and kind consideration.</p>
+
+      {/* Sign block: absolutely pinned — bottom:148 = 100px above the 48px cert-a4 bottom padding */}
+      <div style={{ position: 'absolute', bottom: 148, left: 60, right: 60, fontSize: 15, lineHeight: 1.75 }}>
+        <p style={{ margin: '0 0 4px' }}>{fmtD(f.issueDate)}</p>
+        <p style={{ margin: '0 0 20px' }}>Thanks and Regards,</p>
+        <p style={{ margin: '0 0 2px', fontWeight: 700 }}>Pooranam Annamalai</p>
+        <p style={{ margin: 0 }}>CBPO</p>
       </div>
-      {/* SignBlock: flexShrink:0 pins it at bottom; paddingBottom:100 = 100px above page edge */}
-      <SignBlock date={f.issueDate} />
     </div>
   );
 }
