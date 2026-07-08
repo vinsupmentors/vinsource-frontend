@@ -310,9 +310,14 @@ function InternshipCompletionTemplate({ f, short }: { f: Record<string, string>;
   const qrUrl = f.verifyUrl?.trim();
 
   return (
-    <div className="cert-a4" style={{ minHeight: 0, height: 1123, display: 'flex', flexDirection: 'column', fontFamily: 'Arial, sans-serif', color: '#222' }}>
+    <div style={{
+      width: 794, height: 1123, overflow: 'hidden',
+      padding: '48px 60px', background: '#fff', boxSizing: 'border-box',
+      display: 'flex', flexDirection: 'column',
+      fontFamily: 'Arial, sans-serif', color: '#222',
+    }}>
 
-      {/* ── Header: always visible, never scrolls away ── */}
+      {/* ── Header ── */}
       <div style={{ flexShrink: 0 }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <InfotechLogo height={50} />
@@ -329,8 +334,8 @@ function InternshipCompletionTemplate({ f, short }: { f: Record<string, string>;
         <div style={{ borderTop: '1.5px solid #111', margin: '0 0 22px' }} />
       </div>
 
-      {/* ── Body: fixed 450px — spacer fills gap, footer always at bottom ── */}
-      <div style={{ height: 450, overflow: 'hidden' }}>
+      {/* ── Body: flex:1 — no height cap, no overflow clip ── */}
+      <div style={{ flex: 1 }}>
         <h2 style={{ textAlign: 'center', fontSize: 18, letterSpacing: 2, margin: '0 0 18px', textDecoration: 'underline', textUnderlineOffset: 6 }}>
           INTERNSHIP COMPLETION CERTIFICATE
         </h2>
@@ -358,8 +363,7 @@ function InternshipCompletionTemplate({ f, short }: { f: Record<string, string>;
         </p>
       </div>
 
-      <div style={{ flex: 1 }} />
-      {/* ── Footer: always pinned to bottom, never pushed to next page ── */}
+      {/* ── Footer: flexShrink:0 pins it to bottom ── */}
       <div style={{ flexShrink: 0, display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', paddingTop: 12, paddingBottom: 14, fontSize: 14 }}>
         <div style={{ lineHeight: 2 }}>
           <p style={{ margin: 0 }}><b>Issued On:</b> {fmtD(f.issueDate)}</p>
