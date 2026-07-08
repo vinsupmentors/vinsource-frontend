@@ -306,13 +306,13 @@ function ODJoiningTemplate({ f }: { f: Record<string, string> }) {
 }
 
 function InternshipCompletionTemplate({ f, short }: { f: Record<string, string>; short?: boolean }) {
-  const P: React.CSSProperties = { fontSize: 14.5, lineHeight: 2.0, textAlign: 'justify', margin: '0 0 12px' };
+  const P: React.CSSProperties = { fontSize: 14, lineHeight: 1.85, textAlign: 'justify', margin: '0 0 9px' };
   const qrUrl = f.verifyUrl?.trim();
 
   return (
     <div style={{
       width: 794, height: 1123, overflow: 'hidden',
-      padding: '48px 60px', background: '#fff', boxSizing: 'border-box',
+      padding: '40px 60px', background: '#fff', boxSizing: 'border-box',
       display: 'flex', flexDirection: 'column',
       fontFamily: 'Arial, sans-serif', color: '#222',
     }}>
@@ -330,13 +330,13 @@ function InternshipCompletionTemplate({ f, short }: { f: Record<string, string>;
             <p style={{ margin: 0 }}><b>Address</b> : 148, Gopalasamy Kovil St, Ganapathy,<br />Coimbatore, Tamil Nadu - 641006</p>
           </div>
         </div>
-        <div style={{ borderTop: '4px solid #111', margin: '14px 0 2px' }} />
-        <div style={{ borderTop: '1.5px solid #111', margin: '0 0 22px' }} />
+        <div style={{ borderTop: '4px solid #111', margin: '12px 0 2px' }} />
+        <div style={{ borderTop: '1.5px solid #111', margin: '0 0 16px' }} />
       </div>
 
-      {/* ── Body: flex:1 — no height cap, no overflow clip ── */}
-      <div style={{ flex: 1 }}>
-        <h2 style={{ textAlign: 'center', fontSize: 18, letterSpacing: 2, margin: '0 0 18px', textDecoration: 'underline', textUnderlineOffset: 6 }}>
+      {/* ── Body ── */}
+      <div style={{ flex: 1, overflow: 'hidden' }}>
+        <h2 style={{ textAlign: 'center', fontSize: 17, letterSpacing: 2, margin: '0 0 14px', textDecoration: 'underline', textUnderlineOffset: 5 }}>
           INTERNSHIP COMPLETION CERTIFICATE
         </h2>
         <p style={P}>
@@ -347,8 +347,8 @@ function InternshipCompletionTemplate({ f, short }: { f: Record<string, string>;
           Throughout the internship tenure, the candidate has demonstrated commendable proficiency in industry-relevant technical
           competencies and has effectively translated theoretical knowledge into practical execution through real-time projects and assignments.
         </p>
-        <p style={{ fontSize: 14.5, fontWeight: 700, margin: '2px 0 6px' }}>During the program, the student consistently displayed:</p>
-        <ul style={{ fontSize: 14.5, lineHeight: 2.0, margin: '0 0 10px', paddingLeft: 22 }}>
+        <p style={{ fontSize: 14, fontWeight: 700, margin: '2px 0 5px' }}>During the program, the student consistently displayed:</p>
+        <ul style={{ fontSize: 14, lineHeight: 1.85, margin: '0 0 8px', paddingLeft: 22 }}>
           <li>Strong analytical and problem-solving abilities</li>
           <li>Professional work ethics and discipline</li>
           <li>Effective communication and collaborative skills</li>
@@ -363,26 +363,26 @@ function InternshipCompletionTemplate({ f, short }: { f: Record<string, string>;
         </p>
       </div>
 
-      {/* ── Footer: flexShrink:0 pins it to bottom ── */}
-      <div style={{ flexShrink: 0, display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', paddingTop: 12, paddingBottom: 14, fontSize: 14 }}>
-        <div style={{ lineHeight: 2 }}>
+      {/* ── Footer ── */}
+      <div style={{ flexShrink: 0, display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', paddingTop: 14, fontSize: 13.5 }}>
+        <div style={{ lineHeight: 1.85 }}>
           <p style={{ margin: 0 }}><b>Issued On:</b> {fmtD(f.issueDate)}</p>
           <p style={{ margin: 0 }}><b>Course:</b> {f.course || '—'}</p>
           <p style={{ margin: 0 }}><b>Student ID:</b> {f.studentId || '—'}</p>
           <p style={{ margin: 0 }}><b>Batch:</b> {f.batch || '—'}</p>
         </div>
         {/* Right: QR code + text signature */}
-        <div style={{ textAlign: 'center', minWidth: 130 }}>
+        <div style={{ textAlign: 'center', minWidth: 120 }}>
           {qrUrl ? (
             <img
-              src={`https://api.qrserver.com/v1/create-qr-code/?size=100x100&data=${encodeURIComponent(qrUrl)}`}
+              src={`https://api.qrserver.com/v1/create-qr-code/?size=80x80&data=${encodeURIComponent(qrUrl)}`}
               alt="Verify Certificate"
-              style={{ width: 100, height: 100, display: 'block', margin: '0 auto 10px' }}
+              style={{ width: 80, height: 80, display: 'block', margin: '0 auto 8px' }}
             />
           ) : null}
-          <p style={{ margin: '0 0 2px', fontSize: 13 }}>Thanks and Regards,</p>
-          <p style={{ margin: '0 0 6px', fontSize: 13, fontWeight: 700 }}>Pooranam Annamalai</p>
-          <p style={{ margin: '6px 0 0', borderTop: '1.5px solid #1a1a8e', paddingTop: 6, fontWeight: 600, letterSpacing: 1 }}>CBPO</p>
+          <p style={{ margin: '0 0 2px', fontSize: 12.5 }}>Thanks and Regards,</p>
+          <p style={{ margin: '0 0 4px', fontSize: 12.5, fontWeight: 700 }}>Pooranam Annamalai</p>
+          <p style={{ margin: '4px 0 0', borderTop: '1.5px solid #1a1a8e', paddingTop: 5, fontWeight: 600, letterSpacing: 1, fontSize: 13 }}>CBPO</p>
         </div>
       </div>
     </div>
