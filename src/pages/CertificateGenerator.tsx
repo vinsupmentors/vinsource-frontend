@@ -308,6 +308,7 @@ function ODJoiningTemplate({ f }: { f: Record<string, string> }) {
 function InternshipCompletionTemplate({ f, short }: { f: Record<string, string>; short?: boolean }) {
   const P: React.CSSProperties = { fontSize: 14, lineHeight: 1.85, textAlign: 'justify', margin: '0 0 9px' };
   const qrUrl = f.verifyUrl?.trim();
+  const dmy = f.issueDate ? new Date(f.issueDate).toLocaleDateString('en-GB') : '—';
 
   return (
     <div style={{
@@ -336,11 +337,11 @@ function InternshipCompletionTemplate({ f, short }: { f: Record<string, string>;
 
       {/* ── Body ── */}
       <div style={{ flex: 1, overflow: 'hidden' }}>
-        <h2 style={{ textAlign: 'center', fontSize: 17, letterSpacing: 2, margin: '0 0 14px', textDecoration: 'underline', textUnderlineOffset: 5 }}>
+        <h2 style={{ textAlign: 'center', fontSize: 17, letterSpacing: 1, margin: '0 0 14px', fontWeight: 700 }}>
           INTERNSHIP COMPLETION CERTIFICATE
         </h2>
         <p style={P}>
-          This is to certify that <b>{(f.studentName || 'Name').toUpperCase()}</b> has successfully completed the <b>Internship Program</b> at{' '}
+          This is to certify that <b>{f.studentName || 'Name'}</b> has successfully completed the <b>Internship Program</b> at{' '}
           <b>Vinsup Infotech Private Limited</b>{f.fromDate ? <> for the period <b>{fmtD(f.fromDate)}</b> to <b>{fmtD(f.toDate)}</b></> : null}.
         </p>
         <p style={P}>
@@ -365,24 +366,27 @@ function InternshipCompletionTemplate({ f, short }: { f: Record<string, string>;
 
       {/* ── Footer ── */}
       <div style={{ flexShrink: 0, display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', paddingTop: 14, fontSize: 13.5 }}>
-        <div style={{ lineHeight: 1.85 }}>
-          <p style={{ margin: 0 }}><b>Issued On:</b> {fmtD(f.issueDate)}</p>
+        <div style={{ lineHeight: 1.9 }}>
+          <p style={{ margin: 0 }}><b>Issued On:</b> {dmy}</p>
           <p style={{ margin: 0 }}><b>Course:</b> {f.course || '—'}</p>
           <p style={{ margin: 0 }}><b>Student ID:</b> {f.studentId || '—'}</p>
           <p style={{ margin: 0 }}><b>Batch:</b> {f.batch || '—'}</p>
         </div>
-        {/* Right: QR code + text signature */}
-        <div style={{ textAlign: 'center', minWidth: 120 }}>
+        {/* Right: QR code + handwritten CBPO signature */}
+        <div style={{ display: 'flex', alignItems: 'flex-end', gap: 32 }}>
           {qrUrl ? (
             <img
-              src={`https://api.qrserver.com/v1/create-qr-code/?size=80x80&data=${encodeURIComponent(qrUrl)}`}
+              src={`https://api.qrserver.com/v1/create-qr-code/?size=90x90&data=${encodeURIComponent(qrUrl)}`}
               alt="Verify Certificate"
-              style={{ width: 80, height: 80, display: 'block', margin: '0 auto 8px' }}
+              style={{ width: 90, height: 90, display: 'block' }}
             />
           ) : null}
-          <p style={{ margin: '0 0 2px', fontSize: 12.5 }}>Thanks and Regards,</p>
-          <p style={{ margin: '0 0 4px', fontSize: 12.5, fontWeight: 700 }}>Pooranam Annamalai</p>
-          <p style={{ margin: '4px 0 0', borderTop: '1.5px solid #1a1a8e', paddingTop: 5, fontWeight: 600, letterSpacing: 1, fontSize: 13 }}>CBPO</p>
+          <div style={{ textAlign: 'center' }}>
+            <div style={{ display: 'flex', justifyContent: 'center' }}>
+              <CBPOSign height={46} />
+            </div>
+            <p style={{ margin: '4px 0 0', fontWeight: 600, letterSpacing: 1, fontSize: 13 }}>CBPO</p>
+          </div>
         </div>
       </div>
     </div>
