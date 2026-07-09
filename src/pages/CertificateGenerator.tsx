@@ -515,10 +515,10 @@ export default function CertificateGeneratorPage() {
           body * { visibility: hidden !important; }
           #cert-sheet, #cert-sheet * { visibility: visible !important; }
           #cert-sheet { position: fixed !important; inset: 0 !important; margin: 0 !important; box-shadow: none !important; border: none !important; width: 100% !important; }
-          .cert-preview-zoom { zoom: 1 !important; }
+          .cert-preview-zoom { zoom: 1 !important; width: auto !important; margin: 0 !important; }
           @page { size: A4; margin: 0; }
         }
-        .cert-preview-zoom { zoom: 0.82; }
+        .cert-preview-zoom { zoom: 0.75; width: fit-content; margin: 0 auto; }
         .cert-a4 { width: 794px; min-height: 1123px; padding: 48px 60px; background: #fff; box-sizing: border-box; }
         .cert-letter { display: flex; flex-direction: column; height: 1123px; }
       `}</style>
@@ -740,7 +740,7 @@ export default function CertificateGeneratorPage() {
                the wrapper to zoom:1 while cert-sheet uses position:fixed;inset:0. ── */}
           <div className="overflow-auto">
             <div className="cert-preview-zoom">
-              <div id="cert-sheet" className="shadow-lg mx-auto" style={{ width: 'fit-content', background: '#fff', outline: '1px solid #e5e7eb' }}>
+              <div id="cert-sheet" className="shadow-lg" style={{ background: '#fff', outline: '1px solid #e5e7eb' }}>
                 {type === 'BONAFIDE' && <BonafideTemplate f={form} />}
                 {type === 'OD_INTERNSHIP_JOINING' && <ODJoiningTemplate f={form} />}
                 {type === 'INTERNSHIP_COMPLETION' && <InternshipCompletionTemplate f={form} />}
