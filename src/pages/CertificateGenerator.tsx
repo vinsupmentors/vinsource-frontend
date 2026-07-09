@@ -316,7 +316,7 @@ function InternshipCompletionTemplate({ f, short }: { f: Record<string, string>;
   return (
     <div className="cert-internship-content" style={{
       width: 794, height: 1123, overflow: 'hidden',
-      padding: '36px 56px 56px', background: '#FFF9F2', boxSizing: 'border-box',
+      padding: '36px 56px 70px', background: '#FFF9F2', boxSizing: 'border-box',
       display: 'flex', flexDirection: 'column',
       fontFamily: 'Georgia, "Times New Roman", serif', color: '#1a1a1a',
     }}>
@@ -391,10 +391,10 @@ function InternshipCompletionTemplate({ f, short }: { f: Record<string, string>;
       </div>
 
       {/* ── Footer row 2: signature (right-aligned, below QR) ── */}
-      <div style={{ flexShrink: 0, display: 'flex', justifyContent: 'flex-end', paddingTop: 16 }}>
-        <div style={{ textAlign: 'center', minWidth: 130 }}>
+      <div style={{ flexShrink: 0, display: 'flex', justifyContent: 'flex-end', paddingTop: 14 }}>
+        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', minWidth: 140 }}>
           <CBPOSign height={44} />
-          <div style={{ borderTop: '1.5px solid #333', marginTop: 6, paddingTop: 5 }}>
+          <div style={{ borderTop: '1.5px solid #333', marginTop: 6, paddingTop: 5, width: '100%', textAlign: 'center' }}>
             <p style={{ margin: 0, fontWeight: 700, letterSpacing: 2, fontSize: 13, fontFamily: 'Arial, sans-serif' }}>CBPO</p>
           </div>
         </div>
