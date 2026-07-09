@@ -311,8 +311,8 @@ function InternshipCompletionTemplate({ f, short }: { f: Record<string, string>;
   const dmy = f.issueDate ? new Date(f.issueDate).toLocaleDateString('en-GB') : '—';
 
   return (
-    <div style={{
-      width: 794, height: 1123, overflow: 'hidden',
+    <div className="cert-internship-content" style={{
+      width: 794, overflow: 'hidden',
       padding: '40px 60px', background: '#fff', boxSizing: 'border-box',
       display: 'flex', flexDirection: 'column',
       fontFamily: 'Arial, sans-serif', color: '#222',
@@ -516,6 +516,7 @@ export default function CertificateGeneratorPage() {
           #cert-sheet, #cert-sheet * { visibility: visible !important; }
           #cert-sheet { position: fixed !important; inset: 0 !important; margin: 0 !important; box-shadow: none !important; border: none !important; width: 100% !important; }
           .cert-preview-zoom { zoom: 1 !important; width: auto !important; margin: 0 !important; }
+          .cert-internship-content { height: 1123px !important; }
           @page { size: A4; margin: 0; }
         }
         .cert-preview-zoom { zoom: 0.75; width: fit-content; margin: 0 auto; }
