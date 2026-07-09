@@ -307,7 +307,7 @@ function ODJoiningTemplate({ f }: { f: Record<string, string> }) {
 
 function InternshipCompletionTemplate({ f, short }: { f: Record<string, string>; short?: boolean }) {
   const P: React.CSSProperties = {
-    fontSize: 15, lineHeight: 2.05, textAlign: 'justify', margin: '0 0 0',
+    fontSize: 15, lineHeight: 2.05, textAlign: 'justify', margin: '0 0 22px',
     fontFamily: 'Georgia, "Times New Roman", serif',
   };
   const qrUrl = f.verifyUrl?.trim();
@@ -351,23 +351,23 @@ function InternshipCompletionTemplate({ f, short }: { f: Record<string, string>;
           This is to certify that <b>{f.studentName || 'Name'}</b> has successfully completed the <b>Internship Program</b> at{' '}
           <b>Vinsup Infotech Private Limited</b>{f.fromDate ? <> for the period <b>{fmtD(f.fromDate)}</b> to <b>{fmtD(f.toDate)}</b></> : null}.
         </p>
-        <p style={{ ...P, marginTop: 0 }}>
+        <p style={P}>
           Throughout the internship tenure, the candidate has demonstrated commendable proficiency in industry-relevant technical
           competencies and has effectively translated theoretical knowledge into practical execution through real-time projects and assignments.
         </p>
         <p style={{ fontSize: 15, fontWeight: 700, margin: '0 0 0', fontFamily: 'Arial, sans-serif', lineHeight: 2.05 }}>
           During the program, the student consistently displayed:
         </p>
-        <div style={{ fontSize: 15, lineHeight: 2.05, margin: '0 0 0', paddingLeft: 10, fontFamily: 'Georgia, "Times New Roman", serif' }}>
+        <div style={{ fontSize: 15, lineHeight: 2.05, margin: '0 0 22px', paddingLeft: 10, fontFamily: 'Georgia, "Times New Roman", serif' }}>
           <p style={{ margin: 0 }}>• &nbsp;Strong analytical and problem-solving abilities</p>
           <p style={{ margin: 0 }}>• &nbsp;Professional work ethics and discipline</p>
           <p style={{ margin: 0 }}>• &nbsp;Effective communication and collaborative skills</p>
           <p style={{ margin: 0 }}>• &nbsp;Commitment towards quality delivery and performance excellence</p>
         </div>
-        <p style={{ ...P, marginTop: 0 }}>
+        <p style={P}>
           The internship experience has equipped the candidate with practical exposure aligned to current industry standards and workplace expectations.
         </p>
-        <p style={{ ...P, marginTop: 0 }}>
+        <p style={{ ...P, margin: 0 }}>
           We acknowledge and appreciate the dedication, sincerity, and performance demonstrated during the course of the internship and
           extend our best wishes for continued growth and success in all future professional endeavors.
         </p>
