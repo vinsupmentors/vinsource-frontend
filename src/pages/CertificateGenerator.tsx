@@ -468,6 +468,29 @@ export default function CertificateGeneratorPage() {
     reader.readAsDataURL(file);
   };
 
+  const printCert = () => {
+    const certEl = document.getElementById('cert-sheet');
+    if (!certEl) return;
+    // Clone the rendered DOM so we can fix up relative image URLs
+    const clone = certEl.cloneNode(true) as HTMLElement;
+    const origin = window.location.origin;
+    clone.querySelectorAll('img[src^="/"]').forEach((img) => {
+      (img as HTMLImageElement).src = origin + (img as HTMLImageElement).getAttribute('src');
+    });
+    const printWin = window.open('', '_blank', 'width=900,height=1200');
+    if (!printWin) { window.print(); return; }
+    printWin.document.write(`<!DOCTYPE html><html><head><meta charset="utf-8"><title>Certificate</title>
+<style>
+  *{box-sizing:border-box;margin:0;padding:0}
+  html,body{background:#fff;width:794px}
+  @page{size:A4;margin:0}
+  @media print{html,body{width:794px}}
+  body{font-family:Arial,sans-serif;color:#222}
+</style></head><body>${clone.outerHTML}</body></html>`);
+    printWin.document.close();
+    setTimeout(() => { printWin.focus(); printWin.print(); printWin.close(); }, 600);
+  };
+
   const generateAndPrint = async () => {
     if (!form.studentName.trim()) { setError('Student name is required'); return; }
     setSaving(true);
@@ -479,8 +502,8 @@ export default function CertificateGeneratorPage() {
         data: { ...form, photoUrl: form.photoUrl ? '(photo attached)' : '' },
       });
       setLastCertNo(data.data?.certNo || '');
-      // Give React a tick to render the cert number, then print just the sheet
-      setTimeout(() => window.print(), 250);
+      // Give React a tick to render the cert number, then print
+      setTimeout(() => printCert(), 350);
     } catch (e: any) {
       setError(e?.response?.data?.message || 'Failed to record certificate');
     } finally { setSaving(false); }
@@ -491,6 +514,7 @@ export default function CertificateGeneratorPage() {
     setForm({ ...EMPTY_FORM, ...r.data, studentName: r.studentName, photoUrl: '' });
     setLastCertNo(r.certNo);
     setMode('generate');
+    setTimeout(() => printCert(), 600);
   };
 
   if (loaded && !canView) {
@@ -511,13 +535,6 @@ export default function CertificateGeneratorPage() {
     <div className="space-y-6">
       {/* Print-only styles: print just the certificate sheet */}
       <style>{`
-        @page { size: A4; margin: 0; }
-        @media print {
-          body * { visibility: hidden !important; }
-          #cert-sheet, #cert-sheet * { visibility: visible !important; }
-          #cert-sheet { position: fixed !important; inset: 0 !important; margin: 0 !important; box-shadow: none !important; border: none !important; width: 100% !important; }
-          .cert-preview-zoom { zoom: 1 !important; width: auto !important; margin: 0 !important; }
-        }
         @media screen { .cert-internship-content { height: auto !important; } }
         .cert-preview-zoom { zoom: 0.75; width: fit-content; margin: 0 auto; }
         .cert-a4 { width: 794px; min-height: 1123px; padding: 48px 60px; background: #fff; box-sizing: border-box; }
