@@ -313,35 +313,44 @@ function InternshipCompletionTemplate({ f, short }: { f: Record<string, string>;
   return (
     <div className="cert-internship-content" style={{
       width: 794, height: 1123, overflow: 'hidden',
-      padding: '40px 60px', background: '#fff', boxSizing: 'border-box',
-      display: 'flex', flexDirection: 'column',
+      padding: '32px 50px', background: '#fff', boxSizing: 'border-box',
+      display: 'flex', flexDirection: 'column', position: 'relative',
       fontFamily: 'Arial, sans-serif', color: '#222',
     }}>
 
+      {/* ── Decorative double border frame ── */}
+      <div style={{ position: 'absolute', inset: 12, border: '3px solid #1a1a8e', pointerEvents: 'none', zIndex: 0 }} />
+      <div style={{ position: 'absolute', inset: 17, border: '1px solid #1a1a8e', pointerEvents: 'none', zIndex: 0 }} />
+
       {/* ── Header ── */}
-      <div style={{ flexShrink: 0 }}>
+      <div style={{ flexShrink: 0, position: 'relative', zIndex: 1 }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-          <InfotechLogo height={50} />
+          <InfotechLogo height={52} />
           <div style={{
             fontSize: 11.5, lineHeight: 1.8, textAlign: 'left',
-            borderLeft: '2px solid #333', paddingLeft: 16, maxWidth: 280,
+            borderLeft: '2px solid #1a1a8e', paddingLeft: 16, maxWidth: 280,
           }}>
             <p style={{ margin: 0 }}><b>Phone</b> : 8870060607</p>
             <p style={{ margin: 0 }}><b>Email</b> : hrvinsup@gmail.com</p>
             <p style={{ margin: 0 }}><b>Address</b> : 148, Gopalasamy Kovil St, Ganapathy,<br />Coimbatore, Tamil Nadu - 641006</p>
           </div>
         </div>
-        <div style={{ borderTop: '4px solid #111', margin: '12px 0 2px' }} />
-        <div style={{ borderTop: '1.5px solid #111', margin: '0 0 16px' }} />
+        <div style={{ borderTop: '4px solid #1a1a8e', margin: '10px 0 2px' }} />
+        <div style={{ borderTop: '1.5px solid #1a1a8e', margin: '0 0 14px' }} />
       </div>
 
       {/* ── Body ── */}
-      <div style={{ flex: 1 }}>
-        <h2 style={{ textAlign: 'center', fontSize: 17, letterSpacing: 1, margin: '0 0 14px', fontWeight: 700 }}>
+      <div style={{ flex: 1, position: 'relative', zIndex: 1 }}>
+        <h2 style={{ textAlign: 'center', fontSize: 17, letterSpacing: 2, margin: '0 0 4px', fontWeight: 700, color: '#1a1a8e', textDecoration: 'underline', textUnderlineOffset: 5 }}>
           INTERNSHIP COMPLETION CERTIFICATE
         </h2>
+        <div style={{ textAlign: 'center', marginBottom: 14 }}>
+          <span style={{ display: 'inline-block', width: 60, height: 2, background: '#1a1a8e', verticalAlign: 'middle', marginRight: 8 }} />
+          <span style={{ fontSize: 11, letterSpacing: 3, color: '#1a1a8e', fontWeight: 600 }}>VINSUP INFOTECH PVT LTD</span>
+          <span style={{ display: 'inline-block', width: 60, height: 2, background: '#1a1a8e', verticalAlign: 'middle', marginLeft: 8 }} />
+        </div>
         <p style={P}>
-          This is to certify that <b>{f.studentName || 'Name'}</b> has successfully completed the <b>Internship Program</b> at{' '}
+          This is to certify that <b style={{ color: '#1a1a8e' }}>{(f.studentName || 'Name').toUpperCase()}</b> has successfully completed the <b>Internship Program</b> at{' '}
           <b>Vinsup Infotech Private Limited</b>{f.fromDate ? <> for the period <b>{fmtD(f.fromDate)}</b> to <b>{fmtD(f.toDate)}</b></> : null}.
         </p>
         <p style={P}>
@@ -365,27 +374,31 @@ function InternshipCompletionTemplate({ f, short }: { f: Record<string, string>;
       </div>
 
       {/* ── Footer ── */}
-      <div style={{ flexShrink: 0, display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', paddingTop: 14, fontSize: 13.5 }}>
+      <div style={{ flexShrink: 0, position: 'relative', zIndex: 1, borderTop: '1px solid #d1d5db', paddingTop: 16, marginTop: 10, display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', fontSize: 13 }}>
         <div style={{ lineHeight: 1.9 }}>
           <p style={{ margin: 0 }}><b>Issued On:</b> {dmy}</p>
           <p style={{ margin: 0 }}><b>Course:</b> {f.course || '—'}</p>
           <p style={{ margin: 0 }}><b>Student ID:</b> {f.studentId || '—'}</p>
           <p style={{ margin: 0 }}><b>Batch:</b> {f.batch || '—'}</p>
         </div>
-        {/* Right: QR code + handwritten CBPO signature */}
-        <div style={{ display: 'flex', alignItems: 'flex-end', gap: 32 }}>
+        {/* Right: QR + signature */}
+        <div style={{ display: 'flex', alignItems: 'flex-end', gap: 28 }}>
           {qrUrl ? (
-            <img
-              src={`https://api.qrserver.com/v1/create-qr-code/?size=90x90&data=${encodeURIComponent(qrUrl)}`}
-              alt="Verify Certificate"
-              style={{ width: 90, height: 90, display: 'block' }}
-            />
+            <div style={{ textAlign: 'center' }}>
+              <img
+                src={`https://api.qrserver.com/v1/create-qr-code/?size=80x80&data=${encodeURIComponent(qrUrl)}`}
+                alt="Verify Certificate"
+                style={{ width: 80, height: 80, display: 'block' }}
+              />
+              <p style={{ margin: '2px 0 0', fontSize: 9, color: '#666' }}>Scan to verify</p>
+            </div>
           ) : null}
           <div style={{ textAlign: 'center' }}>
-            <div style={{ display: 'flex', justifyContent: 'center' }}>
-              <CBPOSign height={46} />
+            <CBPOSign height={44} />
+            <div style={{ borderTop: '1.5px solid #1a1a8e', marginTop: 4, paddingTop: 4 }}>
+              <p style={{ margin: 0, fontWeight: 700, letterSpacing: 1, fontSize: 12 }}>CBPO</p>
+              <p style={{ margin: 0, fontSize: 10, color: '#555' }}>Vinsup Infotech Pvt Ltd</p>
             </div>
-            <p style={{ margin: '4px 0 0', fontWeight: 600, letterSpacing: 1, fontSize: 13 }}>CBPO</p>
           </div>
         </div>
       </div>
@@ -471,12 +484,18 @@ export default function CertificateGeneratorPage() {
   const printCert = () => {
     const certEl = document.getElementById('cert-sheet');
     if (!certEl) return;
-    // Clone the rendered DOM so we can fix up relative image URLs
     const clone = certEl.cloneNode(true) as HTMLElement;
     const origin = window.location.origin;
+    // Fix relative image src → absolute so popup can load them
     clone.querySelectorAll('img[src^="/"]').forEach((img) => {
       (img as HTMLImageElement).src = origin + (img as HTMLImageElement).getAttribute('src');
     });
+    // Remove fixed height so footer sits right below content (no big gap)
+    const internshipDiv = clone.querySelector('.cert-internship-content') as HTMLElement | null;
+    if (internshipDiv) {
+      internshipDiv.style.height = 'auto';
+      internshipDiv.style.minHeight = '0';
+    }
     const printWin = window.open('', '_blank', 'width=900,height=1200');
     if (!printWin) { window.print(); return; }
     printWin.document.write(`<!DOCTYPE html><html><head><meta charset="utf-8"><title>Certificate</title>
