@@ -312,7 +312,7 @@ function InternshipCompletionTemplate({ f, short }: { f: Record<string, string>;
 
   return (
     <div className="cert-internship-content" style={{
-      width: 794, overflow: 'hidden',
+      width: 794, height: 1123, overflow: 'hidden',
       padding: '40px 60px', background: '#fff', boxSizing: 'border-box',
       display: 'flex', flexDirection: 'column',
       fontFamily: 'Arial, sans-serif', color: '#222',
@@ -516,9 +516,9 @@ export default function CertificateGeneratorPage() {
           #cert-sheet, #cert-sheet * { visibility: visible !important; }
           #cert-sheet { position: fixed !important; inset: 0 !important; margin: 0 !important; box-shadow: none !important; border: none !important; width: 100% !important; }
           .cert-preview-zoom { zoom: 1 !important; width: auto !important; margin: 0 !important; }
-          .cert-internship-content { height: 1123px !important; }
           @page { size: A4; margin: 0; }
         }
+        @media screen { .cert-internship-content { height: auto !important; } }
         .cert-preview-zoom { zoom: 0.75; width: fit-content; margin: 0 auto; }
         .cert-a4 { width: 794px; min-height: 1123px; padding: 48px 60px; background: #fff; box-sizing: border-box; }
         .cert-letter { display: flex; flex-direction: column; height: 1123px; }
