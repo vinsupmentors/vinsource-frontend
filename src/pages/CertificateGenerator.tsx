@@ -514,9 +514,11 @@ export default function CertificateGeneratorPage() {
         @media print {
           body * { visibility: hidden !important; }
           #cert-sheet, #cert-sheet * { visibility: visible !important; }
-          #cert-sheet { position: fixed !important; inset: 0 !important; margin: 0 !important; box-shadow: none !important; border: none !important; width: 100% !important; zoom: 1 !important; }
+          #cert-sheet { position: fixed !important; inset: 0 !important; margin: 0 !important; box-shadow: none !important; border: none !important; width: 100% !important; }
+          .cert-preview-zoom { zoom: 1 !important; }
           @page { size: A4; margin: 0; }
         }
+        .cert-preview-zoom { zoom: 0.82; }
         .cert-a4 { width: 794px; min-height: 1123px; padding: 48px 60px; background: #fff; box-sizing: border-box; }
         .cert-letter { display: flex; flex-direction: column; height: 1123px; }
       `}</style>
@@ -733,16 +735,18 @@ export default function CertificateGeneratorPage() {
             <p className="text-[11px] text-muted-foreground">In the print dialog choose "Save as PDF" to download the document for the student.</p>
           </div>
 
-          {/* ── Live preview — zoom:0.82 shrinks the A4 sheet to ~921px so the full
-               certificate (including footer signature) fits on screen without scrolling.
-               Print CSS resets zoom to 1 and uses position:fixed;inset:0. ── */}
+          {/* ── Live preview — .cert-preview-zoom applies zoom:0.82 on screen only
+               so the full A4 certificate fits without scrolling. Print CSS resets
+               the wrapper to zoom:1 while cert-sheet uses position:fixed;inset:0. ── */}
           <div className="overflow-auto">
-            <div id="cert-sheet" className="shadow-lg mx-auto" style={{ width: 'fit-content', background: '#fff', outline: '1px solid #e5e7eb', zoom: 0.82 }}>
-              {type === 'BONAFIDE' && <BonafideTemplate f={form} />}
-              {type === 'OD_INTERNSHIP_JOINING' && <ODJoiningTemplate f={form} />}
-              {type === 'INTERNSHIP_COMPLETION' && <InternshipCompletionTemplate f={form} />}
-              {type === 'INTERNSHIP_COMPLETION_SHORT' && <InternshipCompletionTemplate f={form} short />}
-              {type === 'COURSE_COMPLETION' && <CourseCompletionTemplate f={form} />}
+            <div className="cert-preview-zoom">
+              <div id="cert-sheet" className="shadow-lg mx-auto" style={{ width: 'fit-content', background: '#fff', outline: '1px solid #e5e7eb' }}>
+                {type === 'BONAFIDE' && <BonafideTemplate f={form} />}
+                {type === 'OD_INTERNSHIP_JOINING' && <ODJoiningTemplate f={form} />}
+                {type === 'INTERNSHIP_COMPLETION' && <InternshipCompletionTemplate f={form} />}
+                {type === 'INTERNSHIP_COMPLETION_SHORT' && <InternshipCompletionTemplate f={form} short />}
+                {type === 'COURSE_COMPLETION' && <CourseCompletionTemplate f={form} />}
+              </div>
             </div>
           </div>
         </div>
