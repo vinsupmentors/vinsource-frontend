@@ -316,7 +316,7 @@ function InternshipCompletionTemplate({ f, short }: { f: Record<string, string>;
   return (
     <div className="cert-internship-content" style={{
       width: 794, height: 1123, overflow: 'hidden',
-      padding: '36px 56px 32px', background: '#FFF9F2', boxSizing: 'border-box',
+      padding: '36px 56px 56px', background: '#FFF9F2', boxSizing: 'border-box',
       display: 'flex', flexDirection: 'column',
       fontFamily: 'Georgia, "Times New Roman", serif', color: '#1a1a1a',
     }}>
@@ -374,7 +374,7 @@ function InternshipCompletionTemplate({ f, short }: { f: Record<string, string>;
       </div>
 
       {/* ── Footer row 1: details + QR ── */}
-      <div style={{ flexShrink: 0, display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', paddingTop: 20 }}>
+      <div style={{ flexShrink: 0, display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', paddingTop: 14 }}>
         <div style={{ fontSize: 13.5, lineHeight: 2.05, fontFamily: 'Arial, sans-serif', color: '#1a1a1a' }}>
           <p style={{ margin: 0 }}><b>Issued On :</b> {dmy}</p>
           <p style={{ margin: 0 }}><b>Course &nbsp;&nbsp;&nbsp;&nbsp;:</b> {f.course || '—'}</p>
@@ -491,10 +491,10 @@ export default function CertificateGeneratorPage() {
     if (!printWin) { window.print(); return; }
     printWin.document.write(`<!DOCTYPE html><html><head><meta charset="utf-8"><title>Certificate</title>
 <style>
-  *{box-sizing:border-box;margin:0;padding:0}
-  html,body{background:#fff;width:794px}
+  *{box-sizing:border-box}
+  html,body{margin:0;padding:0;background:#FFF9F2;width:794px}
   @page{size:A4;margin:0}
-  @media print{html,body{width:794px}}
+  @media print{html,body{width:794px;background:#FFF9F2}}
   body{font-family:Georgia,serif;color:#1a1a1a}
 </style></head><body>${clone.outerHTML}</body></html>`);
     printWin.document.close();
