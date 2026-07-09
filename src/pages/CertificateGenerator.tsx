@@ -511,12 +511,12 @@ export default function CertificateGeneratorPage() {
     <div className="space-y-6">
       {/* Print-only styles: print just the certificate sheet */}
       <style>{`
+        @page { size: A4; margin: 0; }
         @media print {
           body * { visibility: hidden !important; }
           #cert-sheet, #cert-sheet * { visibility: visible !important; }
           #cert-sheet { position: fixed !important; inset: 0 !important; margin: 0 !important; box-shadow: none !important; border: none !important; width: 100% !important; }
           .cert-preview-zoom { zoom: 1 !important; width: auto !important; margin: 0 !important; }
-          @page { size: A4; margin: 0; }
         }
         @media screen { .cert-internship-content { height: auto !important; } }
         .cert-preview-zoom { zoom: 0.75; width: fit-content; margin: 0 auto; }
