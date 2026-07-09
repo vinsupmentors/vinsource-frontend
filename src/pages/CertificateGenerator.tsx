@@ -336,7 +336,7 @@ function InternshipCompletionTemplate({ f, short }: { f: Record<string, string>;
       </div>
 
       {/* ── Body ── */}
-      <div style={{ flex: 1, overflow: 'hidden' }}>
+      <div style={{ flex: 1 }}>
         <h2 style={{ textAlign: 'center', fontSize: 17, letterSpacing: 1, margin: '0 0 14px', fontWeight: 700 }}>
           INTERNSHIP COMPLETION CERTIFICATE
         </h2>
