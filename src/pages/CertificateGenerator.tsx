@@ -306,99 +306,96 @@ function ODJoiningTemplate({ f }: { f: Record<string, string> }) {
 }
 
 function InternshipCompletionTemplate({ f, short }: { f: Record<string, string>; short?: boolean }) {
-  const P: React.CSSProperties = { fontSize: 14, lineHeight: 1.85, textAlign: 'justify', margin: '0 0 9px' };
+  const P: React.CSSProperties = {
+    fontSize: 15, lineHeight: 2.05, textAlign: 'justify', margin: '0 0 0',
+    fontFamily: 'Georgia, "Times New Roman", serif',
+  };
   const qrUrl = f.verifyUrl?.trim();
   const dmy = f.issueDate ? new Date(f.issueDate).toLocaleDateString('en-GB') : '—';
 
   return (
     <div className="cert-internship-content" style={{
       width: 794, height: 1123, overflow: 'hidden',
-      padding: '32px 50px', background: '#fff', boxSizing: 'border-box',
-      display: 'flex', flexDirection: 'column', position: 'relative',
-      fontFamily: 'Arial, sans-serif', color: '#222',
+      padding: '36px 56px 32px', background: '#FFF9F2', boxSizing: 'border-box',
+      display: 'flex', flexDirection: 'column',
+      fontFamily: 'Georgia, "Times New Roman", serif', color: '#1a1a1a',
     }}>
 
-      {/* ── Decorative double border frame ── */}
-      <div style={{ position: 'absolute', inset: 12, border: '3px solid #1a1a8e', pointerEvents: 'none', zIndex: 0 }} />
-      <div style={{ position: 'absolute', inset: 17, border: '1px solid #1a1a8e', pointerEvents: 'none', zIndex: 0 }} />
-
       {/* ── Header ── */}
-      <div style={{ flexShrink: 0, position: 'relative', zIndex: 1 }}>
+      <div style={{ flexShrink: 0 }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-          <InfotechLogo height={52} />
+          <InfotechLogo height={55} />
           <div style={{
             fontSize: 11.5, lineHeight: 1.8, textAlign: 'left',
-            borderLeft: '2px solid #1a1a8e', paddingLeft: 16, maxWidth: 280,
+            borderLeft: '2px solid #333', paddingLeft: 16, maxWidth: 285,
+            fontFamily: 'Arial, sans-serif',
           }}>
             <p style={{ margin: 0 }}><b>Phone</b> : 8870060607</p>
             <p style={{ margin: 0 }}><b>Email</b> : hrvinsup@gmail.com</p>
             <p style={{ margin: 0 }}><b>Address</b> : 148, Gopalasamy Kovil St, Ganapathy,<br />Coimbatore, Tamil Nadu - 641006</p>
           </div>
         </div>
-        <div style={{ borderTop: '4px solid #1a1a8e', margin: '10px 0 2px' }} />
-        <div style={{ borderTop: '1.5px solid #1a1a8e', margin: '0 0 14px' }} />
+        <div style={{ borderTop: '4px solid #111', margin: '14px 0 3px' }} />
+        <div style={{ borderTop: '1.5px solid #111', margin: '0 0 28px' }} />
       </div>
 
       {/* ── Body ── */}
-      <div style={{ flex: 1, position: 'relative', zIndex: 1 }}>
-        <h2 style={{ textAlign: 'center', fontSize: 17, letterSpacing: 2, margin: '0 0 4px', fontWeight: 700, color: '#1a1a8e', textDecoration: 'underline', textUnderlineOffset: 5 }}>
+      <div style={{ flex: 1 }}>
+        <h2 style={{
+          textAlign: 'center', fontSize: 20, letterSpacing: 1.5, margin: '0 0 28px',
+          fontWeight: 700, color: '#1a1a1a', fontFamily: 'Arial, sans-serif',
+        }}>
           INTERNSHIP COMPLETION CERTIFICATE
         </h2>
-        <div style={{ textAlign: 'center', marginBottom: 14 }}>
-          <span style={{ display: 'inline-block', width: 60, height: 2, background: '#1a1a8e', verticalAlign: 'middle', marginRight: 8 }} />
-          <span style={{ fontSize: 11, letterSpacing: 3, color: '#1a1a8e', fontWeight: 600 }}>VINSUP INFOTECH PVT LTD</span>
-          <span style={{ display: 'inline-block', width: 60, height: 2, background: '#1a1a8e', verticalAlign: 'middle', marginLeft: 8 }} />
-        </div>
         <p style={P}>
-          This is to certify that <b style={{ color: '#1a1a8e' }}>{(f.studentName || 'Name').toUpperCase()}</b> has successfully completed the <b>Internship Program</b> at{' '}
+          This is to certify that <b>{f.studentName || 'Name'}</b> has successfully completed the <b>Internship Program</b> at{' '}
           <b>Vinsup Infotech Private Limited</b>{f.fromDate ? <> for the period <b>{fmtD(f.fromDate)}</b> to <b>{fmtD(f.toDate)}</b></> : null}.
         </p>
-        <p style={P}>
+        <p style={{ ...P, marginTop: 0 }}>
           Throughout the internship tenure, the candidate has demonstrated commendable proficiency in industry-relevant technical
           competencies and has effectively translated theoretical knowledge into practical execution through real-time projects and assignments.
         </p>
-        <p style={{ fontSize: 14, fontWeight: 700, margin: '2px 0 5px' }}>During the program, the student consistently displayed:</p>
-        <ul style={{ fontSize: 14, lineHeight: 1.85, margin: '0 0 8px', paddingLeft: 22 }}>
-          <li>Strong analytical and problem-solving abilities</li>
-          <li>Professional work ethics and discipline</li>
-          <li>Effective communication and collaborative skills</li>
-          <li>Commitment towards quality delivery and performance excellence</li>
-        </ul>
-        <p style={P}>
+        <p style={{ fontSize: 15, fontWeight: 700, margin: '0 0 0', fontFamily: 'Arial, sans-serif', lineHeight: 2.05 }}>
+          During the program, the student consistently displayed:
+        </p>
+        <div style={{ fontSize: 15, lineHeight: 2.05, margin: '0 0 0', paddingLeft: 10, fontFamily: 'Georgia, "Times New Roman", serif' }}>
+          <p style={{ margin: 0 }}>• &nbsp;Strong analytical and problem-solving abilities</p>
+          <p style={{ margin: 0 }}>• &nbsp;Professional work ethics and discipline</p>
+          <p style={{ margin: 0 }}>• &nbsp;Effective communication and collaborative skills</p>
+          <p style={{ margin: 0 }}>• &nbsp;Commitment towards quality delivery and performance excellence</p>
+        </div>
+        <p style={{ ...P, marginTop: 0 }}>
           The internship experience has equipped the candidate with practical exposure aligned to current industry standards and workplace expectations.
         </p>
-        <p style={P}>
+        <p style={{ ...P, marginTop: 0 }}>
           We acknowledge and appreciate the dedication, sincerity, and performance demonstrated during the course of the internship and
           extend our best wishes for continued growth and success in all future professional endeavors.
         </p>
       </div>
 
-      {/* ── Footer ── */}
-      <div style={{ flexShrink: 0, position: 'relative', zIndex: 1, borderTop: '1px solid #d1d5db', paddingTop: 16, marginTop: 10, display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', fontSize: 13 }}>
-        <div style={{ lineHeight: 1.9 }}>
-          <p style={{ margin: 0 }}><b>Issued On:</b> {dmy}</p>
-          <p style={{ margin: 0 }}><b>Course:</b> {f.course || '—'}</p>
-          <p style={{ margin: 0 }}><b>Student ID:</b> {f.studentId || '—'}</p>
-          <p style={{ margin: 0 }}><b>Batch:</b> {f.batch || '—'}</p>
+      {/* ── Footer row 1: details + QR ── */}
+      <div style={{ flexShrink: 0, display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', paddingTop: 20 }}>
+        <div style={{ fontSize: 13.5, lineHeight: 2.05, fontFamily: 'Arial, sans-serif', color: '#1a1a1a' }}>
+          <p style={{ margin: 0 }}><b>Issued On :</b> {dmy}</p>
+          <p style={{ margin: 0 }}><b>Course &nbsp;&nbsp;&nbsp;&nbsp;:</b> {f.course || '—'}</p>
+          <p style={{ margin: 0 }}><b>Student ID :</b> {f.studentId || '—'}</p>
+          <p style={{ margin: 0 }}><b>Batch &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;:</b> {f.batch || '—'}</p>
         </div>
-        {/* Right: QR + signature */}
-        <div style={{ display: 'flex', alignItems: 'flex-end', gap: 28 }}>
-          {qrUrl ? (
-            <div style={{ textAlign: 'center' }}>
-              <img
-                src={`https://api.qrserver.com/v1/create-qr-code/?size=80x80&data=${encodeURIComponent(qrUrl)}`}
-                alt="Verify Certificate"
-                style={{ width: 80, height: 80, display: 'block' }}
-              />
-              <p style={{ margin: '2px 0 0', fontSize: 9, color: '#666' }}>Scan to verify</p>
-            </div>
-          ) : null}
-          <div style={{ textAlign: 'center' }}>
-            <CBPOSign height={44} />
-            <div style={{ borderTop: '1.5px solid #1a1a8e', marginTop: 4, paddingTop: 4 }}>
-              <p style={{ margin: 0, fontWeight: 700, letterSpacing: 1, fontSize: 12 }}>CBPO</p>
-              <p style={{ margin: 0, fontSize: 10, color: '#555' }}>Vinsup Infotech Pvt Ltd</p>
-            </div>
+        {qrUrl ? (
+          <img
+            src={`https://api.qrserver.com/v1/create-qr-code/?size=110x110&data=${encodeURIComponent(qrUrl)}`}
+            alt="Verify Certificate"
+            style={{ width: 110, height: 110, display: 'block' }}
+          />
+        ) : null}
+      </div>
+
+      {/* ── Footer row 2: signature (right-aligned, below QR) ── */}
+      <div style={{ flexShrink: 0, display: 'flex', justifyContent: 'flex-end', paddingTop: 16 }}>
+        <div style={{ textAlign: 'center', minWidth: 130 }}>
+          <CBPOSign height={44} />
+          <div style={{ borderTop: '1.5px solid #333', marginTop: 6, paddingTop: 5 }}>
+            <p style={{ margin: 0, fontWeight: 700, letterSpacing: 2, fontSize: 13, fontFamily: 'Arial, sans-serif' }}>CBPO</p>
           </div>
         </div>
       </div>
@@ -490,12 +487,6 @@ export default function CertificateGeneratorPage() {
     clone.querySelectorAll('img[src^="/"]').forEach((img) => {
       (img as HTMLImageElement).src = origin + (img as HTMLImageElement).getAttribute('src');
     });
-    // Remove fixed height so footer sits right below content (no big gap)
-    const internshipDiv = clone.querySelector('.cert-internship-content') as HTMLElement | null;
-    if (internshipDiv) {
-      internshipDiv.style.height = 'auto';
-      internshipDiv.style.minHeight = '0';
-    }
     const printWin = window.open('', '_blank', 'width=900,height=1200');
     if (!printWin) { window.print(); return; }
     printWin.document.write(`<!DOCTYPE html><html><head><meta charset="utf-8"><title>Certificate</title>
@@ -504,7 +495,7 @@ export default function CertificateGeneratorPage() {
   html,body{background:#fff;width:794px}
   @page{size:A4;margin:0}
   @media print{html,body{width:794px}}
-  body{font-family:Arial,sans-serif;color:#222}
+  body{font-family:Georgia,serif;color:#1a1a1a}
 </style></head><body>${clone.outerHTML}</body></html>`);
     printWin.document.close();
     setTimeout(() => { printWin.focus(); printWin.print(); printWin.close(); }, 600);
