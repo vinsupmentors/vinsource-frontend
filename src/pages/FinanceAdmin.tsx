@@ -1063,7 +1063,7 @@ export default function FinanceAdminPage() {
                       </td>
                       <td className="px-4 py-3 font-medium max-w-[180px]">
                         <span className="line-clamp-2">{String(old.title || '—')}</span>
-                        {old.category && <span className="text-xs text-muted-foreground">{String(old.category)}</span>}
+                        {!!old.category && <span className="text-xs text-muted-foreground">{String(old.category)}</span>}
                       </td>
                       <td className="px-4 py-3">
                         <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold ${isDelete ? 'bg-red-100 text-red-700' : 'bg-amber-100 text-amber-700'}`}>
