@@ -12,7 +12,7 @@ import {
   ClipboardList, ShieldAlert, UserPlus, DoorOpen, TrendingUp,
   Wallet, GraduationCap, Target, Megaphone, KeyRound,
   BookOpen, PiggyBank, Store, Repeat, PieChart, X, Receipt, CheckCircle2,
-  Presentation, CalendarClock, Handshake, ListChecks, Mic2, Network,
+  Presentation, CalendarClock, Handshake, ListChecks, Mic2, Network, FileBadge,
 } from 'lucide-react';
 
 interface NavItem {
@@ -47,6 +47,7 @@ const navItems: NavItem[] = [
   { label: 'Documents',      to: '/documents',      icon: FileText },
   { label: 'Helpdesk',       to: '/helpdesk',       icon: HelpCircle },
   { label: 'Onboarding',     to: '/onboarding',     icon: UserPlus,      minRole: 'MANAGER' },
+  { label: 'Appt. Letters',  to: '/appointment-letters', icon: FileBadge,   minRole: 'HR' },
   { label: 'My Training',    to: '/my-training',    icon: Presentation, trainersOnly: true },
   // { label: 'Org Chart',      to: '/org-chart',      icon: Network },  // hidden — locked
   { label: 'Resignation',    to: '/resignation',    icon: DoorOpen },

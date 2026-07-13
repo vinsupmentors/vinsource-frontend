@@ -36,6 +36,7 @@ import DigitalMarketingPage from './pages/DigitalMarketing';
 import CampaignDetailPage from './pages/CampaignDetail';
 import DigitalMarketingDayPage from './pages/DigitalMarketingDay';
 import OnboardingPage from './pages/Onboarding';
+import AppointmentLettersPage from './pages/AppointmentLetters';
 import ChangePasswordPage from './pages/ChangePassword';
 import ForgotPasswordPage from './pages/ForgotPassword';
 import ResetPasswordPage from './pages/ResetPassword';
@@ -200,6 +201,7 @@ export default function App() {
             <Route path="digital-marketing/:id" element={<CampaignDetailPage />} />
             <Route path="onboarding" element={<OnboardingPage />} />
             <Route path="onboarding/:id" element={<OnboardingDetailPage />} />
+            <Route path="appointment-letters" element={<AppointmentLettersPage />} />
             <Route path="resignation" element={<ResignationPage />} />
             <Route path="exit-clearance/:id" element={<ExitClearancePage />} />
             <Route path="my-training" element={<MyTrainingPage />} />
