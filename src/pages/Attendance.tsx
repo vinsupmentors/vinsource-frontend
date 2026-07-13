@@ -5,7 +5,7 @@ import { useRole } from '@/hooks/useAuth';
 import {
   Clock, LogIn, LogOut, Loader2, AlertCircle,
   CheckCircle, ChevronLeft, ChevronRight, Home, Wifi,
-  Calendar as CalendarIcon, HelpCircle, Send,
+  Calendar as CalendarIcon, HelpCircle, Send, ListChecks, Users,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
@@ -42,7 +42,12 @@ interface RegularizationRequest {
   reason: string;
   status: 'PENDING' | 'APPROVED' | 'REJECTED';
   managerNote?: string | null;
+  actedAt?: string | null;
   createdAt: string;
+}
+
+interface TeamRegRequest extends RegularizationRequest {
+  employee: { firstName: string; lastName: string; employeeCode: string };
 }
 
 const REG_STATUS_CFG: Record<string, { bg: string; text: string }> = {
@@ -88,6 +93,8 @@ function getStatusKey(r: AttendanceRecord) {
 
 export default function AttendancePage() {
   const { can, isSuperAdmin } = useRole();
+  const [activeTab, setActiveTab] = useState<'attendance' | 'my-queries' | 'team-requests'>('attendance');
+
   const [today, setToday] = useState<TodayAtt | null>(null);
   const [records, setRecords] = useState<AttendanceRecord[]>([]);
   const [loading, setLoading] = useState(true);
@@ -101,6 +108,14 @@ export default function AttendancePage() {
 
   // WFH pending list (for managers)
   const [wfhPending, setWfhPending] = useState<any[]>([]);
+
+  // Manager: team regularization requests (all statuses)
+  const [teamRequests, setTeamRequests] = useState<TeamRegRequest[]>([]);
+  const [teamFilter, setTeamFilter] = useState<'ALL' | 'PENDING' | 'APPROVED' | 'REJECTED'>('ALL');
+  const [teamLoading, setTeamLoading] = useState(false);
+  const [teamActionId, setTeamActionId] = useState<string | null>(null);
+  const [noteModal, setNoteModal] = useState<{ id: string; action: 'approve' | 'reject' } | null>(null);
+  const [noteText, setNoteText] = useState('');
 
   // Comp Off
   const [compOffDate, setCompOffDate] = useState<string | null>(null);
@@ -139,6 +154,34 @@ export default function AttendancePage() {
       setMyRegRequests(r.data.data ?? []);
     } catch { /* ignore */ }
   }, []);
+
+  const fetchTeamRequests = useCallback(async (filter: string = 'ALL') => {
+    if (!can('MANAGER')) return;
+    setTeamLoading(true);
+    try {
+      const q = filter !== 'ALL' ? `?status=${filter}` : '';
+      const r = await api.get<{ data: TeamRegRequest[] }>(`/api/attendance-regularization/team${q}`);
+      setTeamRequests(r.data.data ?? []);
+    } catch { /* ignore */ } finally {
+      setTeamLoading(false);
+    }
+  }, [can]);
+
+  const handleTeamAction = async (id: string, action: 'approve' | 'reject', note: string) => {
+    setTeamActionId(id);
+    try {
+      await api.put(`/api/attendance-regularization/${id}/${action}`, { note });
+      setSuccess(`Request ${action}d successfully`);
+      setTimeout(() => setSuccess(''), 3000);
+      await fetchTeamRequests(teamFilter);
+    } catch (e: any) {
+      setError(e.response?.data?.message ?? 'Action failed');
+    } finally {
+      setTeamActionId(null);
+      setNoteModal(null);
+      setNoteText('');
+    }
+  };
 
   const handleRegSubmit = async () => {
     if (!regForm.reason.trim()) { setError('Please describe the issue'); return; }
@@ -188,6 +231,9 @@ export default function AttendancePage() {
 
   useEffect(() => { fetchAll(); }, [fetchAll]);
   useEffect(() => { fetchMyRegRequests(); }, [fetchMyRegRequests]);
+  useEffect(() => {
+    if (activeTab === 'team-requests') fetchTeamRequests(teamFilter);
+  }, [activeTab, teamFilter, fetchTeamRequests]);
 
   const handleCheckIn = async () => {
     setActionLoading(true);
@@ -264,19 +310,51 @@ export default function AttendancePage() {
 
   return (
     <div className="space-y-5">
+      {/* ── Page header ── */}
       <div className="flex items-start justify-between flex-wrap gap-3">
         <div>
           <h1 className="text-2xl font-bold">Attendance</h1>
           <p className="text-muted-foreground text-sm">Track your daily attendance and WFH status</p>
         </div>
-        <button
-          onClick={() => openRegModal()}
-          className="flex items-center gap-2 px-4 py-2 text-sm font-medium bg-amber-500 text-white rounded-lg hover:bg-amber-600 transition-colors"
-        >
-          <HelpCircle className="w-4 h-4" /> Raise Attendance Query
-        </button>
+        {activeTab === 'attendance' && (
+          <button
+            onClick={() => openRegModal()}
+            className="flex items-center gap-2 px-4 py-2 text-sm font-medium bg-amber-500 text-white rounded-lg hover:bg-amber-600 transition-colors"
+          >
+            <HelpCircle className="w-4 h-4" /> Raise Attendance Query
+          </button>
+        )}
       </div>
 
+      {/* ── Tab bar ── */}
+      <div className="flex gap-1 border-b">
+        {[
+          { key: 'attendance', label: 'Attendance', icon: CalendarIcon },
+          { key: 'my-queries', label: 'My Queries', icon: ListChecks, badge: myRegRequests.filter(r => r.status === 'PENDING').length },
+          ...(can('MANAGER') ? [{ key: 'team-requests', label: 'Team Requests', icon: Users, badge: teamRequests.filter(r => r.status === 'PENDING').length }] : []),
+        ].map(({ key, label, icon: Icon, badge }) => (
+          <button
+            key={key}
+            onClick={() => setActiveTab(key as any)}
+            className={cn(
+              'flex items-center gap-2 px-4 py-2.5 text-sm font-medium border-b-2 -mb-px transition-colors',
+              activeTab === key
+                ? 'border-primary text-primary'
+                : 'border-transparent text-muted-foreground hover:text-foreground'
+            )}
+          >
+            <Icon className="w-4 h-4" />
+            {label}
+            {badge != null && badge > 0 && (
+              <span className="bg-amber-500 text-white text-[10px] font-bold px-1.5 py-0.5 rounded-full leading-none">
+                {badge}
+              </span>
+            )}
+          </button>
+        ))}
+      </div>
+
+      {/* ── Global alerts ── */}
       {error && (
         <div className="flex items-center gap-3 text-red-500 p-3.5 bg-red-50 dark:bg-red-950/30 rounded-xl border border-red-200 text-sm">
           <AlertCircle className="w-4 h-4 flex-shrink-0" /> {error}
@@ -287,6 +365,236 @@ export default function AttendancePage() {
           <CheckCircle className="w-4 h-4 flex-shrink-0" /> {success}
         </div>
       )}
+
+      {/* ═══════════════════════════════════════════════════
+          TAB: MY QUERIES
+          ═══════════════════════════════════════════════════ */}
+      {activeTab === 'my-queries' && (
+        <div className="space-y-4">
+          <div className="flex items-center justify-between">
+            <p className="text-sm text-muted-foreground">
+              {myRegRequests.length === 0
+                ? 'No queries raised yet.'
+                : `${myRegRequests.length} request${myRegRequests.length > 1 ? 's' : ''} total`}
+            </p>
+            <button
+              onClick={() => openRegModal()}
+              className="flex items-center gap-2 px-3 py-1.5 text-sm font-medium bg-amber-500 text-white rounded-lg hover:bg-amber-600 transition-colors"
+            >
+              <HelpCircle className="w-3.5 h-3.5" /> Raise New Query
+            </button>
+          </div>
+
+          {myRegRequests.length === 0 ? (
+            <div className="text-center py-16 text-muted-foreground">
+              <HelpCircle className="w-10 h-10 mx-auto mb-3 opacity-20" />
+              <p className="font-medium">No attendance queries raised</p>
+              <p className="text-sm mt-1">Use "Raise New Query" to report a missing or wrong attendance record</p>
+            </div>
+          ) : (
+            <div className="bg-card border rounded-xl overflow-hidden">
+              {myRegRequests.map((r, i) => {
+                const cfg = REG_STATUS_CFG[r.status];
+                return (
+                  <div key={r.id} className={cn('px-5 py-4', i !== 0 && 'border-t')}>
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <p className="text-sm font-semibold">
+                            {new Date(r.date).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}
+                          </p>
+                          <span className={cn('text-[10px] font-bold px-2 py-0.5 rounded-full', cfg.bg, cfg.text)}>
+                            {r.status}
+                          </span>
+                          {r.requestedStatus && (
+                            <span className="text-[10px] text-muted-foreground border px-2 py-0.5 rounded-full">
+                              Requested: {r.requestedStatus.replace('_', ' ')}
+                            </span>
+                          )}
+                        </div>
+                        {(r.requestedCheckIn || r.requestedCheckOut) && (
+                          <p className="text-xs text-muted-foreground mt-1">
+                            {r.requestedCheckIn && <>In: {r.requestedCheckIn}</>}
+                            {r.requestedCheckIn && r.requestedCheckOut && ' · '}
+                            {r.requestedCheckOut && <>Out: {r.requestedCheckOut}</>}
+                          </p>
+                        )}
+                        <p className="text-sm text-muted-foreground mt-1 leading-relaxed">{r.reason}</p>
+                        {r.managerNote && (
+                          <p className="text-xs mt-1.5 italic text-muted-foreground bg-muted/40 px-3 py-1.5 rounded-lg">
+                            Manager note: {r.managerNote}
+                          </p>
+                        )}
+                      </div>
+                      <p className="text-[11px] text-muted-foreground whitespace-nowrap mt-0.5 flex-shrink-0">
+                        {new Date(r.createdAt).toLocaleDateString('en-IN', { day: '2-digit', month: 'short' })}
+                      </p>
+                    </div>
+                    {r.actedAt && (
+                      <p className="text-[11px] text-muted-foreground mt-1">
+                        {r.status === 'APPROVED' ? '✓ Approved' : '✗ Rejected'} on {new Date(r.actedAt).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}
+                      </p>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ═══════════════════════════════════════════════════
+          TAB: TEAM REQUESTS (manager only)
+          ═══════════════════════════════════════════════════ */}
+      {activeTab === 'team-requests' && can('MANAGER') && (
+        <div className="space-y-4">
+          {/* Filter bar */}
+          <div className="flex items-center gap-2 flex-wrap">
+            {(['ALL', 'PENDING', 'APPROVED', 'REJECTED'] as const).map((f) => (
+              <button
+                key={f}
+                onClick={() => setTeamFilter(f)}
+                className={cn(
+                  'px-3 py-1.5 text-xs font-medium rounded-lg border transition-colors',
+                  teamFilter === f
+                    ? 'bg-primary text-primary-foreground border-primary'
+                    : 'border-border text-muted-foreground hover:text-foreground hover:bg-muted'
+                )}
+              >
+                {f === 'ALL' ? 'All' : f.charAt(0) + f.slice(1).toLowerCase()}
+                {f === 'PENDING' && teamRequests.filter(r => r.status === 'PENDING').length > 0 && (
+                  <span className="ml-1.5 bg-amber-500 text-white text-[9px] font-bold px-1.5 py-0.5 rounded-full">
+                    {teamRequests.filter(r => r.status === 'PENDING').length}
+                  </span>
+                )}
+              </button>
+            ))}
+            <button
+              onClick={() => fetchTeamRequests(teamFilter)}
+              className="ml-auto px-3 py-1.5 text-xs text-muted-foreground hover:text-foreground border rounded-lg hover:bg-muted transition-colors"
+            >
+              Refresh
+            </button>
+          </div>
+
+          {teamLoading ? (
+            <div className="flex items-center justify-center py-16">
+              <Loader2 className="w-6 h-6 animate-spin text-muted-foreground" />
+            </div>
+          ) : teamRequests.length === 0 ? (
+            <div className="text-center py-16 text-muted-foreground">
+              <Users className="w-10 h-10 mx-auto mb-3 opacity-20" />
+              <p className="font-medium">No {teamFilter !== 'ALL' ? teamFilter.toLowerCase() : ''} requests</p>
+            </div>
+          ) : (
+            <div className="bg-card border rounded-xl overflow-hidden">
+              {teamRequests.map((r, i) => {
+                const cfg = REG_STATUS_CFG[r.status];
+                const isActing = teamActionId === r.id;
+                return (
+                  <div key={r.id} className={cn('px-5 py-4', i !== 0 && 'border-t')}>
+                    <div className="flex items-start justify-between gap-4">
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <p className="text-sm font-semibold">
+                            {r.employee.firstName} {r.employee.lastName}
+                          </p>
+                          <span className="text-xs text-muted-foreground">{r.employee.employeeCode}</span>
+                          <span className={cn('text-[10px] font-bold px-2 py-0.5 rounded-full', cfg.bg, cfg.text)}>
+                            {r.status}
+                          </span>
+                        </div>
+                        <p className="text-xs text-muted-foreground mt-1">
+                          Date: <strong>{new Date(r.date).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}</strong>
+                          {r.requestedCheckIn && <> · In: {r.requestedCheckIn}</>}
+                          {r.requestedCheckOut && <> · Out: {r.requestedCheckOut}</>}
+                          {' · '}Requested: {r.requestedStatus.replace('_', ' ')}
+                        </p>
+                        <p className="text-sm text-muted-foreground mt-1">{r.reason}</p>
+                        {r.managerNote && (
+                          <p className="text-xs italic text-muted-foreground mt-1">Your note: {r.managerNote}</p>
+                        )}
+                        {r.actedAt && (
+                          <p className="text-[11px] text-muted-foreground mt-1">
+                            {r.status === 'APPROVED' ? '✓ Approved' : '✗ Rejected'} on {new Date(r.actedAt).toLocaleDateString('en-IN')}
+                          </p>
+                        )}
+                      </div>
+
+                      {r.status === 'PENDING' && (
+                        <div className="flex gap-2 flex-shrink-0">
+                          <button
+                            disabled={isActing}
+                            onClick={() => { setNoteModal({ id: r.id, action: 'approve' }); setNoteText(''); }}
+                            className="px-3 py-1.5 text-xs bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50 font-medium transition-colors"
+                          >
+                            {isActing ? <Loader2 className="w-3 h-3 animate-spin" /> : 'Approve'}
+                          </button>
+                          <button
+                            disabled={isActing}
+                            onClick={() => { setNoteModal({ id: r.id, action: 'reject' }); setNoteText(''); }}
+                            className="px-3 py-1.5 text-xs bg-red-100 text-red-600 dark:bg-red-950/30 dark:text-red-400 rounded-lg hover:bg-red-200 disabled:opacity-50 font-medium transition-colors"
+                          >
+                            Reject
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                    <p className="text-[11px] text-muted-foreground mt-2">
+                      Raised on {new Date(r.createdAt).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}
+                    </p>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ── Note / Confirm modal for approve or reject ── */}
+      {noteModal && (
+        <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4" onClick={() => setNoteModal(null)}>
+          <div className="bg-card border rounded-2xl p-6 w-full max-w-sm shadow-xl" onClick={e => e.stopPropagation()}>
+            <h3 className="font-semibold text-base mb-1 capitalize">{noteModal.action} Request</h3>
+            <p className="text-sm text-muted-foreground mb-4">
+              {noteModal.action === 'approve'
+                ? 'The attendance record will be corrected immediately upon approval.'
+                : 'The employee will be notified of the rejection.'}
+            </p>
+            <div className="mb-4">
+              <label className="block text-xs text-muted-foreground mb-1">Note (optional)</label>
+              <textarea
+                value={noteText}
+                onChange={e => setNoteText(e.target.value)}
+                rows={2}
+                placeholder="Add a comment for the employee…"
+                className="w-full px-3 py-2 text-sm border rounded-lg bg-background focus:outline-none focus:ring-2 focus:ring-primary/30 resize-none"
+              />
+            </div>
+            <div className="flex gap-2">
+              <button
+                onClick={() => handleTeamAction(noteModal.id, noteModal.action, noteText)}
+                disabled={!!teamActionId}
+                className={cn(
+                  'flex-1 flex items-center justify-center gap-2 px-4 py-2 rounded-lg text-sm font-medium text-white transition-colors disabled:opacity-60',
+                  noteModal.action === 'approve' ? 'bg-green-600 hover:bg-green-700' : 'bg-red-600 hover:bg-red-700'
+                )}
+              >
+                {teamActionId ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
+                Confirm {noteModal.action === 'approve' ? 'Approval' : 'Rejection'}
+              </button>
+              <button onClick={() => setNoteModal(null)} className="px-4 py-2 text-sm text-muted-foreground hover:text-foreground">
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ═══════════════════════════════════════════════════
+          TAB: ATTENDANCE (existing content below)
+          ═══════════════════════════════════════════════════ */}
+      {activeTab === 'attendance' && <>
 
       {/* ── Top row: Clock card + Today stats ── */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
@@ -390,32 +698,6 @@ export default function AttendancePage() {
                 </div>
               </div>
             ))}
-          </div>
-        </div>
-      )}
-
-      {/* ── My Attendance Queries ── */}
-      {myRegRequests.length > 0 && (
-        <div className="bg-card border rounded-xl p-5">
-          <h2 className="font-semibold text-sm mb-3 flex items-center gap-2">
-            <HelpCircle className="w-4 h-4 text-muted-foreground" /> My Attendance Queries
-          </h2>
-          <div className="space-y-2">
-            {myRegRequests.slice(0, 5).map((r) => {
-              const cfg = REG_STATUS_CFG[r.status];
-              return (
-                <div key={r.id} className="flex items-center justify-between gap-3 px-4 py-2.5 rounded-lg border bg-muted/10">
-                  <div className="min-w-0">
-                    <p className="text-sm font-medium">{new Date(r.date).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}</p>
-                    <p className="text-xs text-muted-foreground truncate">{r.reason}</p>
-                    {r.managerNote && <p className="text-xs text-muted-foreground italic truncate">Manager: {r.managerNote}</p>}
-                  </div>
-                  <span className={cn('text-[10px] font-semibold px-2 py-0.5 rounded-full flex-shrink-0', cfg.bg, cfg.text)}>
-                    {r.status}
-                  </span>
-                </div>
-              );
-            })}
           </div>
         </div>
       )}
@@ -557,6 +839,8 @@ export default function AttendancePage() {
           })()}
         </div>
       </div>
+
+      </> /* end attendance tab */}
 
       {/* ── Comp Off Request Modal ── */}
       {compOffDate && (
