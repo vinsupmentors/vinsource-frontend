@@ -109,6 +109,9 @@ export default function FinanceAdminPage() {
   const [showAdd, setShowAdd] = useState(false);
   const [editingExpense, setEditingExpense] = useState<Expense | null>(null);
   const [saving, setSaving] = useState(false);
+  const [page, setPage] = useState(1);
+  const [totalPages, setTotalPages] = useState(1);
+  const [totalCount, setTotalCount] = useState(0);
 
   // Budgets (SUPER_ADMIN manages; spenders see their own strip)
   const [budgetSummary, setBudgetSummary] = useState<BudgetSummaryRow[]>([]);
@@ -139,11 +142,11 @@ export default function FinanceAdminPage() {
   const [auditLogs, setAuditLogs] = useState<AuditLogEntry[]>([]);
   const [auditLoading, setAuditLoading] = useState(false);
 
-  const fetchAll = useCallback(async () => {
+  const fetchAll = useCallback(async (targetPage = page) => {
     setLoading(true);
     setError('');
     try {
-      const params: Record<string, string> = {};
+      const params: Record<string, string | number> = { page: targetPage, limit: 50 };
       if (search) params.search = search;
       if (statusFilter) params.status = statusFilter;
       const [listRes, statsRes] = await Promise.all([
@@ -152,13 +155,18 @@ export default function FinanceAdminPage() {
       ]);
       setExpenses(listRes.data.data);
       setStats(statsRes.data.data);
+      const meta = listRes.data.meta;
+      if (meta) {
+        setTotalPages(meta.pages ?? 1);
+        setTotalCount(meta.total ?? 0);
+      }
     } catch (err: unknown) {
       const e = err as { response?: { data?: { message?: string } } };
       setError(e.response?.data?.message || 'Failed to load expenses');
     } finally {
       setLoading(false);
     }
-  }, [search, statusFilter]);
+  }, [search, statusFilter, page]);
 
   const fetchLedger = useCallback(async () => {
     if (!canSeeAll) return;
@@ -218,7 +226,9 @@ export default function FinanceAdminPage() {
     }
   }, [reportFilters]);
 
-  useEffect(() => { if (level) fetchAll(); }, [level, fetchAll]);
+  // Reset to page 1 whenever filters change
+  useEffect(() => { setPage(1); }, [search, statusFilter]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { if (level) fetchAll(page); }, [level, page, fetchAll]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { if (level && tab === 'ledger') fetchLedger(); }, [level, tab, fetchLedger]);
   useEffect(() => { if (level && tab === 'funds') fetchFunds(); }, [level, tab, fetchFunds]);
   useEffect(() => { if (level && tab === 'summary') { fetchSummary(); fetchLedger(); } }, [level, tab, fetchSummary, fetchLedger]);
@@ -568,6 +578,31 @@ export default function FinanceAdminPage() {
               </tbody>
             </table>
           </div>
+
+          {totalPages > 1 && (
+            <div className="flex items-center justify-between text-sm">
+              <span className="text-muted-foreground">
+                Showing {expenses.length === 0 ? 0 : (page - 1) * 50 + 1}–{(page - 1) * 50 + expenses.length} of {totalCount} expenses
+              </span>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => setPage((p) => Math.max(1, p - 1))}
+                  disabled={page === 1}
+                  className="px-3 py-1.5 border rounded-lg disabled:opacity-40 hover:bg-muted disabled:cursor-not-allowed"
+                >
+                  ← Prev
+                </button>
+                <span className="px-2 font-medium">Page {page} of {totalPages}</span>
+                <button
+                  onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+                  disabled={page === totalPages}
+                  className="px-3 py-1.5 border rounded-lg disabled:opacity-40 hover:bg-muted disabled:cursor-not-allowed"
+                >
+                  Next →
+                </button>
+              </div>
+            </div>
+          )}
         </>
       )}
 
