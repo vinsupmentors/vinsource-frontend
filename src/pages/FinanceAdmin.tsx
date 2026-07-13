@@ -353,10 +353,8 @@ export default function FinanceAdminPage() {
       { id: 'recurring' as Tab, label: 'Recurring Expenses', icon: Repeat },
       { id: 'summary' as Tab, label: 'Category Summary', icon: PieChart },
     ] : []),
-    ...(isSuperAdmin ? [
-      { id: 'budgets' as Tab, label: 'Budgets', icon: PiggyBank },
-      { id: 'audit' as Tab, label: 'Audit Log', icon: History },
-    ] : []),
+    ...(isSuperAdmin ? [{ id: 'budgets' as Tab, label: 'Budgets', icon: PiggyBank }] : []),
+    ...(canSeeAll ? [{ id: 'audit' as Tab, label: 'Audit Log', icon: History }] : []),
   ];
 
   const exportReportCsv = () => {
@@ -506,7 +504,7 @@ export default function FinanceAdminPage() {
                   {canSeeAll && <th className="px-4 py-3">Spent By</th>}
                   <th className="px-4 py-3">Attachments</th>
                   <th className="px-4 py-3">Status</th>
-                  {isSuperAdmin && <th className="px-4 py-3">Actions</th>}
+                  {canSeeAll && <th className="px-4 py-3">Actions</th>}
                 </tr>
               </thead>
               <tbody className="divide-y">
@@ -541,7 +539,7 @@ export default function FinanceAdminPage() {
                       </div>
                     </td>
                     <td className="px-4 py-3">
-                      {isSuperAdmin ? (
+                      {canSeeAll ? (
                         <select
                           value={e.status}
                           onChange={(ev) => updateStatus(e.id, ev.target.value as ExpenseStatus)}
@@ -553,7 +551,7 @@ export default function FinanceAdminPage() {
                         <span className={`text-xs font-medium px-2 py-1 rounded-full ${STATUS_COLOR[e.status]}`}>{e.status}</span>
                       )}
                     </td>
-                    {isSuperAdmin && (
+                    {canSeeAll && (
                       <td className="px-4 py-3 whitespace-nowrap">
                         <div className="flex items-center gap-1">
                           <button
@@ -1020,7 +1018,7 @@ export default function FinanceAdminPage() {
         </div>
       )}
 
-      {tab === 'audit' && isSuperAdmin && (
+      {tab === 'audit' && canSeeAll && (
         <div className="space-y-4">
           <div className="flex items-center justify-between">
             <p className="text-sm text-muted-foreground">All edits and deletes made on expense entries by admin users.</p>
