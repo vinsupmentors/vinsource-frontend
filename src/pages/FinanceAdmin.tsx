@@ -5,7 +5,7 @@ import { useModuleAccess } from '@/hooks/useModuleAccess';
 import { useRole } from '@/hooks/useAuth';
 import {
   Lock, Plus, X, Wallet, Clock, CheckCircle2, BookOpen, PiggyBank, PieChart,
-  Store, Repeat, Pencil, Trash2, Sparkles, RefreshCw, FileBarChart, Download, RotateCcw,
+  Store, Repeat, Pencil, Trash2, Sparkles, RefreshCw, FileBarChart, Download, RotateCcw, History,
 } from 'lucide-react';
 
 type ExpenseStatus = 'PENDING' | 'APPROVED' | 'REJECTED' | 'PAID';
@@ -47,6 +47,15 @@ interface BudgetAllocationRow {
 }
 interface BudgetSummaryRow { employeeId: string; employee: EmployeeLite; allocated: number; spent: number; balance: number; }
 interface MyBudget { allocated: number; spent: number; balance: number; allocations: BudgetAllocationRow[]; }
+interface AuditLogEntry {
+  id: string;
+  action: string;
+  entityId?: string | null;
+  oldData?: Record<string, unknown> | null;
+  newData?: Record<string, unknown> | null;
+  createdAt: string;
+  user?: { id: string; email: string; employee?: { firstName: string; lastName: string; employeeCode?: string } | null } | null;
+}
 
 const STATUSES: ExpenseStatus[] = ['PENDING', 'APPROVED', 'REJECTED', 'PAID'];
 const STATUS_COLOR: Record<ExpenseStatus, string> = {
@@ -64,8 +73,8 @@ const EXPENSE_CATEGORIES = [
 ];
 const BACKEND_URL = (import.meta as unknown as { env: Record<string, string> }).env?.VITE_API_URL || 'http://localhost:5000';
 
-type Tab = 'register' | 'ledger' | 'funds' | 'vendors' | 'recurring' | 'summary' | 'report' | 'budgets';
-const VALID_TABS: Tab[] = ['register', 'ledger', 'funds', 'vendors', 'recurring', 'summary', 'report', 'budgets'];
+type Tab = 'register' | 'ledger' | 'funds' | 'vendors' | 'recurring' | 'summary' | 'report' | 'budgets' | 'audit';
+const VALID_TABS: Tab[] = ['register', 'ledger', 'funds', 'vendors', 'recurring', 'summary', 'report', 'budgets', 'audit'];
 const PAYMENT_MODES = ['Cash', 'Bank Transfer', 'UPI', 'Card', 'Cheque'];
 const EMPTY_REPORT_FILTERS = { from: '', to: '', category: '', paymentMode: '', status: '', vendorId: '', requestedById: '', search: '' };
 
@@ -126,6 +135,9 @@ export default function FinanceAdminPage() {
   const [reportFilters, setReportFilters] = useState(EMPTY_REPORT_FILTERS);
   const [reportData, setReportData] = useState<ReportData | null>(null);
   const [reportLoading, setReportLoading] = useState(false);
+
+  const [auditLogs, setAuditLogs] = useState<AuditLogEntry[]>([]);
+  const [auditLoading, setAuditLoading] = useState(false);
 
   const fetchAll = useCallback(async () => {
     setLoading(true);
@@ -239,6 +251,17 @@ export default function FinanceAdminPage() {
 
   useEffect(() => { if (tab === 'budgets') fetchBudgets(); }, [tab, fetchBudgets]);
 
+  const fetchAuditLogs = useCallback(async () => {
+    if (!isSuperAdmin) return;
+    setAuditLoading(true);
+    try {
+      const res = await api.get('/api/finance-admin/audit', { params: { limit: 200 } });
+      setAuditLogs(res.data.data || []);
+    } catch { /* ignore */ } finally { setAuditLoading(false); }
+  }, [isSuperAdmin]);
+
+  useEffect(() => { if (tab === 'audit') fetchAuditLogs(); }, [tab, fetchAuditLogs]);
+
   // Spender's own budget strip on the register tab
   useEffect(() => {
     if (tab !== 'register') return;
@@ -320,7 +343,10 @@ export default function FinanceAdminPage() {
       { id: 'recurring' as Tab, label: 'Recurring Expenses', icon: Repeat },
       { id: 'summary' as Tab, label: 'Category Summary', icon: PieChart },
     ] : []),
-    ...(isSuperAdmin ? [{ id: 'budgets' as Tab, label: 'Budgets', icon: PiggyBank }] : []),
+    ...(isSuperAdmin ? [
+      { id: 'budgets' as Tab, label: 'Budgets', icon: PiggyBank },
+      { id: 'audit' as Tab, label: 'Audit Log', icon: History },
+    ] : []),
   ];
 
   const exportReportCsv = () => {
@@ -955,6 +981,90 @@ export default function FinanceAdminPage() {
                 </tbody>
               </table>
             </div>
+          </div>
+        </div>
+      )}
+
+      {tab === 'audit' && isSuperAdmin && (
+        <div className="space-y-4">
+          <div className="flex items-center justify-between">
+            <p className="text-sm text-muted-foreground">All edits and deletes made on expense entries by admin users.</p>
+            <button onClick={fetchAuditLogs} className="flex items-center gap-1.5 px-3 py-1.5 text-sm border rounded-lg hover:bg-muted">
+              <RefreshCw className="w-3.5 h-3.5" /> Refresh
+            </button>
+          </div>
+          <div className="bg-card border rounded-xl overflow-hidden overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead className="bg-muted/50 text-left text-xs uppercase text-muted-foreground">
+                <tr>
+                  <th className="px-4 py-3">Date &amp; Time</th>
+                  <th className="px-4 py-3">Expense</th>
+                  <th className="px-4 py-3">Action</th>
+                  <th className="px-4 py-3">Amount</th>
+                  <th className="px-4 py-3">Done By</th>
+                  <th className="px-4 py-3">Changes</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y">
+                {auditLoading ? (
+                  <tr><td colSpan={6} className="px-4 py-8 text-center text-muted-foreground">Loading…</td></tr>
+                ) : auditLogs.length === 0 ? (
+                  <tr><td colSpan={6} className="px-4 py-8 text-center text-muted-foreground">No audit entries yet — edits and deletes will appear here.</td></tr>
+                ) : auditLogs.map((log) => {
+                  const old = log.oldData || {};
+                  const next = log.newData || {};
+                  const isDelete = log.action === 'DELETE';
+                  // For edits: find changed fields (skip timestamps, ids, relation objects)
+                  const SKIP = new Set(['updatedAt', 'createdAt', 'id', 'requestedById', 'approvedById', 'vendorId', 'recurringTemplateId', 'requestedBy', 'approvedBy', 'vendor']);
+                  const changed = isDelete ? [] : Object.keys(old).filter((k) => !SKIP.has(k) && JSON.stringify(old[k]) !== JSON.stringify(next[k]));
+                  const who = log.user?.employee
+                    ? `${log.user.employee.firstName} ${log.user.employee.lastName}`
+                    : (log.user?.email || '—');
+                  return (
+                    <tr key={log.id} className="hover:bg-muted/30 align-top">
+                      <td className="px-4 py-3 whitespace-nowrap text-muted-foreground">
+                        {new Date(log.createdAt).toLocaleDateString()}<br />
+                        <span className="text-xs">{new Date(log.createdAt).toLocaleTimeString()}</span>
+                      </td>
+                      <td className="px-4 py-3 font-medium max-w-[180px]">
+                        <span className="line-clamp-2">{String(old.title || '—')}</span>
+                        {old.category && <span className="text-xs text-muted-foreground">{String(old.category)}</span>}
+                      </td>
+                      <td className="px-4 py-3">
+                        <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold ${isDelete ? 'bg-red-100 text-red-700' : 'bg-amber-100 text-amber-700'}`}>
+                          {isDelete ? <Trash2 className="w-3 h-3" /> : <Pencil className="w-3 h-3" />}
+                          {isDelete ? 'DELETED' : 'EDITED'}
+                        </span>
+                      </td>
+                      <td className="px-4 py-3 font-semibold">{old.amount != null ? fmt(Number(old.amount)) : '—'}</td>
+                      <td className="px-4 py-3 whitespace-nowrap">
+                        {who}
+                        {log.user?.employee?.employeeCode && (
+                          <span className="block text-xs text-muted-foreground">{log.user.employee.employeeCode}</span>
+                        )}
+                      </td>
+                      <td className="px-4 py-3 text-xs max-w-[240px]">
+                        {isDelete ? (
+                          <span className="text-red-600">Expense permanently removed</span>
+                        ) : changed.length === 0 ? (
+                          <span className="text-muted-foreground">No field changes recorded</span>
+                        ) : (
+                          <ul className="space-y-0.5">
+                            {changed.map((k) => (
+                              <li key={k}>
+                                <span className="font-medium capitalize">{k.replace(/([A-Z])/g, ' $1')}</span>:{' '}
+                                <span className="text-red-600 line-through">{old[k] != null ? String(old[k]) : '—'}</span>{' '}
+                                → <span className="text-green-700">{next[k] != null ? String(next[k]) : '—'}</span>
+                              </li>
+                            ))}
+                          </ul>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
           </div>
         </div>
       )}
