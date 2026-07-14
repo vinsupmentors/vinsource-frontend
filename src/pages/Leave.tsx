@@ -321,7 +321,6 @@ export default function LeavePage() {
                 <input
                   type="date"
                   value={form.startDate}
-                  min={new Date().toISOString().slice(0, 10)}
                   onChange={(e) => setForm((f) => ({ ...f, startDate: e.target.value }))}
                   className="w-full px-3 py-2.5 text-sm border rounded-lg bg-background focus:outline-none focus:ring-2 focus:ring-primary/30"
                 />
@@ -331,7 +330,7 @@ export default function LeavePage() {
                 <input
                   type="date"
                   value={form.endDate}
-                  min={form.startDate || new Date().toISOString().slice(0, 10)}
+                  min={form.startDate}
                   onChange={(e) => setForm((f) => ({ ...f, endDate: e.target.value }))}
                   className="w-full px-3 py-2.5 text-sm border rounded-lg bg-background focus:outline-none focus:ring-2 focus:ring-primary/30"
                 />
