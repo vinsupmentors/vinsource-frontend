@@ -1196,6 +1196,14 @@ function StudentsTab({ canEdit, setError, refresh, refreshKey, batches, onEnroll
     catch (err) { setError(errMsg(err, 'Failed to update enrollment')); }
   };
 
+  const deleteStudent = async (id: string, name: string) => {
+    if (!window.confirm(`Delete ${name}? This cannot be undone.\n\nIf they have attendance or test records the server will block it — set their status to DROPPED instead.`)) return;
+    try {
+      await api.delete(`/api/production/students/${id}`);
+      fetchStudents();
+    } catch (err) { setError(errMsg(err, 'Could not delete student')); }
+  };
+
   const totalPages = Math.max(Math.ceil(total / PAGE_SIZE), 1);
 
   // A "sub-batch" is a specific BatchCourseSchedule — only resolvable once
@@ -1338,13 +1346,22 @@ function StudentsTab({ canEdit, setError, refresh, refreshKey, batches, onEnroll
                   <span className={`text-xs font-medium px-2 py-1 rounded-full ${STUDENT_STATUS_COLOR[s.status]}`}>{STUDENT_STATUS_LABEL[s.status]}</span>
                 )}
                 {canEdit && (
-                  <button
-                    onClick={(e) => { e.stopPropagation(); setEditStudent(s); }}
-                    className="p-1.5 rounded-lg hover:bg-muted"
-                    title="Edit student"
-                  >
-                    <Pencil className="w-3.5 h-3.5" />
-                  </button>
+                  <>
+                    <button
+                      onClick={(e) => { e.stopPropagation(); setEditStudent(s); }}
+                      className="p-1.5 rounded-lg hover:bg-muted"
+                      title="Edit student"
+                    >
+                      <Pencil className="w-3.5 h-3.5" />
+                    </button>
+                    <button
+                      onClick={(e) => { e.stopPropagation(); deleteStudent(s.id, `${s.firstName} ${s.lastName}`); }}
+                      className="p-1.5 rounded-lg hover:bg-red-50 text-red-500"
+                      title="Delete student"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
+                  </>
                 )}
               </div>
             </div>
