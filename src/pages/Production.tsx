@@ -2622,6 +2622,51 @@ function FeedbackFormBuilderModal({ modules, existing, onClose, setError, onSave
   const removeQuestion = (idx: number) => setQuestions((qs) => qs.filter((_, i) => i !== idx).map((q, i) => ({ ...q, order: i + 1 })));
   const updateQuestion = (idx: number, patch: Partial<FeedbackFormQuestion>) =>
     setQuestions((qs) => qs.map((q, i) => (i === idx ? { ...q, ...patch } : q)));
+
+  // ── Excel import ────────────────────────────────────────────────────────────
+  const downloadTemplate = () => {
+    const ws = XLSX.utils.aoa_to_sheet([
+      ['type', 'prompt', 'required', 'options'],
+      ['RATING', 'How would you rate the course content?', 'yes', ''],
+      ['TEXT', 'What could be improved?', 'no', ''],
+      ['MCQ', 'How was the trainer\'s explanation clarity?', 'yes', 'Excellent,Good,Average,Poor'],
+    ]);
+    ws['!cols'] = [{ wch: 10 }, { wch: 45 }, { wch: 10 }, { wch: 35 }];
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Questions');
+    XLSX.writeFile(wb, 'feedback_form_template.xlsx');
+  };
+
+  const importExcel = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (evt) => {
+      try {
+        const wb = XLSX.read(evt.target?.result, { type: 'binary' });
+        const ws = wb.Sheets[wb.SheetNames[0]];
+        const rows = XLSX.utils.sheet_to_json<Record<string, string>>(ws, { defval: '' });
+        const imported: FeedbackFormQuestion[] = rows
+          .filter((r) => r.prompt?.toString().trim())
+          .map((r, i) => {
+            const type = (['RATING', 'TEXT', 'MCQ'].includes(r.type?.toString().toUpperCase())
+              ? r.type.toString().toUpperCase()
+              : 'RATING') as FeedbackQuestionType;
+            const options = type === 'MCQ' && r.options
+              ? r.options.toString().split(',').map((o) => o.trim()).filter(Boolean)
+              : undefined;
+            const required = r.required?.toString().toLowerCase() !== 'no' && r.required?.toString().toLowerCase() !== 'false';
+            return { order: i + 1, type, prompt: r.prompt.toString().trim(), required, options };
+          });
+        if (imported.length) setQuestions(imported);
+        else setError('No valid rows found — check the type and prompt columns');
+      } catch {
+        setError('Could not read Excel file');
+      }
+    };
+    reader.readAsBinaryString(file);
+    e.target.value = '';
+  };
   const moveQuestion = (idx: number, dir: -1 | 1) => {
     setQuestions((qs) => {
       const target = idx + dir;
@@ -2686,6 +2731,19 @@ function FeedbackFormBuilderModal({ modules, existing, onClose, setError, onSave
             <label className="text-xs font-medium text-muted-foreground">Title</label>
             <input value={title} onChange={(e) => setTitle(e.target.value)} className="w-full mt-1 border rounded-lg px-3 py-2 text-sm" />
           </div>
+        </div>
+
+        {/* Excel import toolbar */}
+        <div className="flex items-center gap-2 p-2.5 bg-muted/40 rounded-lg border border-dashed">
+          <FileText className="w-4 h-4 text-muted-foreground shrink-0" />
+          <span className="text-xs text-muted-foreground flex-1">Import questions from Excel</span>
+          <button onClick={downloadTemplate} className="text-xs px-2.5 py-1 border rounded-lg hover:bg-muted flex items-center gap-1">
+            <Download className="w-3 h-3" /> Template
+          </button>
+          <label className="text-xs px-2.5 py-1 border rounded-lg hover:bg-muted flex items-center gap-1 cursor-pointer bg-white">
+            <Upload className="w-3 h-3" /> Import
+            <input type="file" accept=".xlsx,.xls" className="hidden" onChange={importExcel} />
+          </label>
         </div>
 
         <div className="space-y-3 max-h-[45vh] overflow-y-auto pr-1">
@@ -2868,6 +2926,7 @@ function OnlineTestDetailModal({ testId, canEdit, onClose, setError }: {
   const [loading, setLoading] = useState(true);
   const [showAddQ, setShowAddQ] = useState(false);
   const [showBulk, setShowBulk] = useState(false);
+  const [deleting, setDeleting] = useState(false);
 
   const refresh = useCallback(() => {
     setLoading(true);
@@ -2875,6 +2934,15 @@ function OnlineTestDetailModal({ testId, canEdit, onClose, setError }: {
   }, [testId]);
 
   useEffect(() => { refresh(); }, [refresh]);
+
+  const deleteTest = async () => {
+    if (!window.confirm('Delete this test and all its questions? This cannot be undone.')) return;
+    setDeleting(true);
+    try {
+      await api.delete(`/api/production/online-tests/${testId}`);
+      onClose();
+    } catch (err) { setError(errMsg(err, 'Could not delete test')); setDeleting(false); }
+  };
 
   const deleteQuestion = async (qId: string) => {
     if (!window.confirm('Delete this question?')) return;
@@ -2904,6 +2972,9 @@ function OnlineTestDetailModal({ testId, canEdit, onClose, setError }: {
                 </button>
                 <button onClick={() => setShowBulk(true)} className="flex items-center gap-1.5 text-xs px-3 py-2 border rounded-lg hover:bg-muted/50">
                   <Upload className="w-3 h-3" /> Bulk upload
+                </button>
+                <button onClick={deleteTest} disabled={deleting} className="ml-auto flex items-center gap-1.5 text-xs px-3 py-2 border border-red-200 text-red-600 rounded-lg hover:bg-red-50 disabled:opacity-60">
+                  <Trash2 className="w-3 h-3" /> Delete test
                 </button>
               </div>
             )}

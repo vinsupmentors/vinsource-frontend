@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import api, { BASE_URL } from '@/lib/api';
 import { formatDate } from '@/lib/utils';
-import { Loader2, Users, CalendarCheck, ClipboardList, MessageSquareText, Save, FileText, Rocket, X, CheckCircle2, XCircle, ArrowLeft, ChevronRight, Lock, Star, NotebookPen, Pencil, Trash2 } from 'lucide-react';
+import { Loader2, Users, CalendarCheck, ClipboardList, MessageSquareText, Save, FileText, Rocket, X, CheckCircle2, XCircle, ArrowLeft, ChevronRight, Lock, Star, NotebookPen, Pencil, Trash2, RotateCcw } from 'lucide-react';
 
 // Files uploaded by the backend (project submissions) come back as relative
 // paths like "/uploads/...". A bare <a href> resolves those against the
@@ -1067,10 +1067,22 @@ function ContentReleaseTab({ schedule }: { schedule: ScheduleAssignment['schedul
                   <div className="flex items-center gap-2">
                     {release ? (
                       <>
-                        <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${active ? 'bg-green-100 text-green-700' : 'bg-muted text-muted-foreground'}`}>{release.status}</span>
+                        <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${active ? 'bg-green-100 text-green-700' : 'bg-amber-100 text-amber-700'}`}>{release.status}</span>
                         <button onClick={() => setDrillTest({ releaseId: release.id, title: t.title })} className="px-3 py-1.5 rounded-lg border text-xs font-medium hover:bg-muted">Results</button>
-                        {active && (
+                        {active ? (
                           <button onClick={() => closeRelease('test', release.id)} disabled={busyId === release.id} className="px-3 py-1.5 rounded-lg border text-xs font-medium text-red-600 hover:bg-red-50 disabled:opacity-60">Close</button>
+                        ) : (
+                          <>
+                            <DeadlineInput id={t.id} />
+                            <button
+                              onClick={() => activateTest(t.id)}
+                              disabled={busyId === t.id}
+                              title="Reopen so students who missed it can take the test"
+                              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-amber-500 text-white text-xs font-medium hover:bg-amber-600 disabled:opacity-60"
+                            >
+                              {busyId === t.id ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RotateCcw className="w-3.5 h-3.5" />} Reopen
+                            </button>
+                          </>
                         )}
                       </>
                     ) : (
