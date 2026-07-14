@@ -13,6 +13,8 @@ interface ScheduleAssignment {
   id: string;
   schedule: {
     id: string;
+    code: string | null;
+    timing: string;
     course: { id: string; name: string; modules: { id: string; title: string; order: number }[] };
     batch: { id: string; code: string; startDate: string; endDate: string; status: string };
     _count: { enrollments: number };
@@ -89,7 +91,7 @@ export default function MyTraining() {
           >
             {assignments.map((a) => (
               <option key={a.schedule.id} value={a.schedule.id}>
-                {a.schedule.batch.code} — {a.schedule.course.name}
+                {a.schedule.code ?? a.schedule.batch.code} — {a.schedule.course.name} ({a.schedule.timing})
               </option>
             ))}
           </select>
@@ -120,8 +122,8 @@ function BatchesTab({ assignments }: { assignments: ScheduleAssignment[] }) {
     <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
       {assignments.map((a) => (
         <div key={a.id} className="bg-card rounded-xl border p-5">
-          <p className="text-sm font-semibold">{a.schedule.batch.code}</p>
-          <p className="text-xs text-muted-foreground mt-0.5">{a.schedule.course.name}</p>
+          <p className="text-sm font-semibold">{a.schedule.code ?? a.schedule.batch.code}</p>
+          <p className="text-xs text-muted-foreground mt-0.5">{a.schedule.course.name} · {a.schedule.timing}</p>
           <div className="flex items-center justify-between mt-3 text-xs text-muted-foreground">
             <span>{formatDate(a.schedule.batch.startDate)} – {formatDate(a.schedule.batch.endDate)}</span>
             <span className="px-2 py-0.5 rounded-full bg-muted font-medium">{a.schedule.batch.status}</span>
@@ -154,10 +156,10 @@ function AttendanceBatchPicker({ assignments, onSelect }: { assignments: Schedul
                 className="bg-card rounded-xl border p-5 text-left hover:border-blue-400 hover:shadow-sm transition"
               >
                 <div className="flex items-center justify-between">
-                  <p className="text-sm font-semibold">{a.schedule.batch.code}</p>
+                  <p className="text-sm font-semibold">{a.schedule.code ?? a.schedule.batch.code}</p>
                   <ChevronRight className="w-4 h-4 text-muted-foreground" />
                 </div>
-                <p className="text-xs text-muted-foreground mt-0.5">{a.schedule.course.name}</p>
+                <p className="text-xs text-muted-foreground mt-0.5">{a.schedule.course.name} · {a.schedule.timing}</p>
                 <div className="flex items-center justify-between mt-3 text-xs text-muted-foreground">
                   <span>{formatDate(a.schedule.batch.startDate)} – {formatDate(a.schedule.batch.endDate)}</span>
                   <span className="px-2 py-0.5 rounded-full bg-green-100 text-green-700 font-medium">ONGOING</span>
@@ -180,10 +182,10 @@ function AttendanceBatchPicker({ assignments, onSelect }: { assignments: Schedul
                 className="bg-card rounded-xl border p-5 text-left opacity-70 hover:opacity-100 hover:border-blue-400 transition"
               >
                 <div className="flex items-center justify-between">
-                  <p className="text-sm font-semibold">{a.schedule.batch.code}</p>
+                  <p className="text-sm font-semibold">{a.schedule.code ?? a.schedule.batch.code}</p>
                   <ChevronRight className="w-4 h-4 text-muted-foreground" />
                 </div>
-                <p className="text-xs text-muted-foreground mt-0.5">{a.schedule.course.name}</p>
+                <p className="text-xs text-muted-foreground mt-0.5">{a.schedule.course.name} · {a.schedule.timing}</p>
                 <span className="inline-block mt-3 px-2 py-0.5 rounded-full bg-muted text-xs font-medium text-muted-foreground">{a.schedule.batch.status}</span>
               </button>
             ))}
@@ -227,7 +229,7 @@ function AttendanceTab({ schedule, onBack }: { schedule: ScheduleAssignment['sch
     <div className="space-y-4">
       <div className="flex items-center justify-between flex-wrap gap-3">
         <button onClick={onBack} className="flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground">
-          <ArrowLeft className="w-4 h-4" /> {schedule.batch.code} — {schedule.course.name}
+          <ArrowLeft className="w-4 h-4" /> {schedule.code ?? schedule.batch.code} — {schedule.course.name} · {schedule.timing}
         </button>
         <div className="flex items-center gap-3">
           <input type="date" value={date} onChange={(e) => setDate(e.target.value)} className="px-3 py-2 rounded-lg border bg-background text-sm" />
