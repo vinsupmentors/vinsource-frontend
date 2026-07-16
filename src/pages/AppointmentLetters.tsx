@@ -252,11 +252,13 @@ function LetterForm({
 function LetterDetail({
   letter,
   canApprove,
+  canDelete,
   onAction,
   onClose,
 }: {
   letter: Letter;
   canApprove: boolean;
+  canDelete: boolean;
   onAction: (action: 'submit' | 'approve' | 'reject' | 'delete', letterId: string, extra?: Record<string, string>) => Promise<void>;
   onClose: () => void;
 }) {
@@ -421,15 +423,15 @@ function LetterDetail({
           </>
         )}
 
-        {/* Delete DRAFT */}
-        {letter.status === 'DRAFT' && (
+        {/* Delete — DRAFT always, any status for SUPER_ADMIN */}
+        {canDelete && (
           <button
             onClick={() => act('delete')}
             disabled={busy === 'delete'}
             className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-red-600 border border-red-200 rounded-md hover:bg-red-50 disabled:opacity-50"
           >
             {busy === 'delete' ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
-            Delete Draft
+            {letter.status === 'DRAFT' ? 'Delete Draft' : 'Delete Record'}
           </button>
         )}
 
@@ -526,7 +528,7 @@ export default function AppointmentLettersPage() {
         break;
       case 'delete':
         await api.delete(`/api/appointment-letters/${letterId}`);
-        showToast('Draft deleted.');
+        showToast('Letter record deleted.');
         setSelectedLetter(null);
         break;
     }
@@ -642,6 +644,7 @@ export default function AppointmentLettersPage() {
           <LetterDetail
             letter={selectedLetter}
             canApprove={canApprove}
+            canDelete={selectedLetter.status === 'DRAFT' || isSuperAdmin}
             onAction={handleAction}
             onClose={() => setSelectedLetter(null)}
           />
