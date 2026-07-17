@@ -10,17 +10,5 @@
   <body>
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
-    <script>
-      // Disable right-click context menu
-      document.addEventListener('contextmenu', function(e) { e.preventDefault(); });
-      // Disable F12, Ctrl+Shift+I, Ctrl+Shift+J, Ctrl+U
-      document.addEventListener('keydown', function(e) {
-        if (
-          e.key === 'F12' ||
-          (e.ctrlKey && e.shiftKey && ['I','i','J','j','C','c'].includes(e.key)) ||
-          (e.ctrlKey && ['U','u'].includes(e.key))
-        ) { e.preventDefault(); }
-      });
-    </script>
   </body>
 </html>
