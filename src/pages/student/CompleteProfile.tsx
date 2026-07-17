@@ -1,5 +1,5 @@
-import { useState, FormEvent, ChangeEvent } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useState, useEffect, useRef, FormEvent, ChangeEvent } from 'react';
+import { useNavigate, Navigate } from 'react-router-dom';
 import { useDispatch, useSelector } from 'react-redux';
 import { AppDispatch, RootState } from '@/store';
 import { fetchMe } from '@/store/slices/authSlice';
@@ -18,57 +18,116 @@ interface EducationRow {
   grade: string;
 }
 
+const EMPTY_EDU: EducationRow = { degree: '', institution: '', fieldOfStudy: '', year: '', grade: '' };
+
 export default function CompleteProfile() {
   const navigate = useNavigate();
   const dispatch = useDispatch<AppDispatch>();
+  const token = useSelector((s: RootState) => s.auth.token);
   const user = useSelector((s: RootState) => s.auth.user);
 
-  const passwordDone = !user?.mustChangePassword;
-  const [step, setStep] = useState<1 | 2>(passwordDone ? 2 : 1);
+  // ------------------------------------------------------------------
+  // Ensure fetchMe() runs even when this page is reached directly
+  // (e.g. browser refresh on /student/complete-profile) rather than via
+  // StudentLayout, which is where useAuth() normally triggers it.
+  // ------------------------------------------------------------------
+  useEffect(() => {
+    if (token && !user) dispatch(fetchMe());
+  }, [token, user, dispatch]);
 
-  // Step 1 — password change
+  // Step — initialised from mustChangePassword once user loads
+  const [step, setStep] = useState<1 | 2>(1);
+  useEffect(() => {
+    if (user) setStep(user.mustChangePassword ? 1 : 2);
+  }, [user?.mustChangePassword]);  // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ---- Step 1 — password change ----
   const [currentPassword, setCurrentPassword] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [pwError, setPwError] = useState('');
   const [pwLoading, setPwLoading] = useState(false);
 
-  // Step 2 — MIS
-  const s = user?.student;
-  // Production Manager only enters studentCode + email now; name/phone arrive
-  // as obvious placeholders ("Pending"/"Update"/"PENDING") that the student
-  // corrects here on first login.
-  const [firstName, setFirstName] = useState(s?.firstName && s.firstName !== 'Pending' ? s.firstName : '');
-  const [lastName, setLastName] = useState(s?.lastName && s.lastName !== 'Update' ? s.lastName : '');
-  const [phone, setPhone] = useState(s?.phone && s.phone !== 'PENDING' ? s.phone : '');
-  const [dateOfBirth, setDateOfBirth] = useState(s?.dateOfBirth?.slice(0, 10) || '');
-  const [gender, setGender] = useState(s?.gender || '');
-  const [address, setAddress] = useState(s?.address || '');
-  const [city, setCity] = useState(s?.city || '');
-  const [state, setState] = useState(s?.state || '');
-  const [pincode, setPincode] = useState(s?.pincode || '');
-  const [emergencyContactName, setEmergencyContactName] = useState(s?.emergencyContactName || '');
-  const [emergencyContactPhone, setEmergencyContactPhone] = useState(s?.emergencyContactPhone || '');
-  const [education, setEducation] = useState<EducationRow[]>(
-    (s?.education as EducationRow[] | undefined)?.length ? (s!.education as EducationRow[]) : [{ degree: '', institution: '', fieldOfStudy: '', year: '', grade: '' }]
-  );
-  const [aadharNumber, setAadharNumber] = useState(s?.aadharNumber || '');
-  const [fatherName, setFatherName] = useState(s?.fatherName || '');
-  const [fatherPhone, setFatherPhone] = useState(s?.fatherPhone || '');
-  const [motherName, setMotherName] = useState(s?.motherName || '');
-  const [motherPhone, setMotherPhone] = useState(s?.motherPhone || '');
+  // ---- Step 2 — MIS ----
+  // Use a ref flag so we pre-populate exactly once when student data first
+  // becomes available (avoids losing in-progress edits on re-renders).
+  const initialised = useRef(false);
+  const [firstName, setFirstName] = useState('');
+  const [lastName, setLastName] = useState('');
+  const [phone, setPhone] = useState('');
+  const [dateOfBirth, setDateOfBirth] = useState('');
+  const [gender, setGender] = useState('');
+  const [address, setAddress] = useState('');
+  const [city, setCity] = useState('');
+  const [state, setState] = useState('');
+  const [pincode, setPincode] = useState('');
+  const [emergencyContactName, setEmergencyContactName] = useState('');
+  const [emergencyContactPhone, setEmergencyContactPhone] = useState('');
+  const [education, setEducation] = useState<EducationRow[]>([EMPTY_EDU]);
+  const [aadharNumber, setAadharNumber] = useState('');
+  const [fatherName, setFatherName] = useState('');
+  const [fatherPhone, setFatherPhone] = useState('');
+  const [motherName, setMotherName] = useState('');
+  const [motherPhone, setMotherPhone] = useState('');
   const [misError, setMisError] = useState('');
   const [misLoading, setMisLoading] = useState(false);
 
-  // Profile photo — uploaded immediately on selection (separate endpoint from the JSON MIS save)
-  const [photoUrl, setPhotoUrl] = useState(s?.photo || '');
+  // Photos — kept separately (uploaded immediately on selection)
+  const [photoUrl, setPhotoUrl] = useState('');
   const [photoUploading, setPhotoUploading] = useState(false);
   const [photoError, setPhotoError] = useState('');
-
-  // Aadhar card photo/scan — a separate KYC document from the certificate photo above
-  const [aadharPhotoUrl, setAadharPhotoUrl] = useState(s?.aadharPhoto || '');
+  const [aadharPhotoUrl, setAadharPhotoUrl] = useState('');
   const [aadharPhotoUploading, setAadharPhotoUploading] = useState(false);
   const [aadharPhotoError, setAadharPhotoError] = useState('');
+
+  // Pre-populate form fields once when student data arrives
+  const s = user?.student;
+  useEffect(() => {
+    if (!s || initialised.current) return;
+    initialised.current = true;
+    setFirstName(s.firstName && s.firstName !== 'Pending' ? s.firstName : '');
+    setLastName(s.lastName && s.lastName !== 'Update' ? s.lastName : '');
+    setPhone(s.phone && s.phone !== 'PENDING' ? s.phone : '');
+    setDateOfBirth(s.dateOfBirth?.slice(0, 10) || '');
+    setGender(s.gender || '');
+    setAddress(s.address || '');
+    setCity(s.city || '');
+    setState(s.state || '');
+    setPincode(s.pincode || '');
+    setEmergencyContactName(s.emergencyContactName || '');
+    setEmergencyContactPhone(s.emergencyContactPhone || '');
+    const eduRows = s.education as EducationRow[] | undefined;
+    setEducation(eduRows?.length ? eduRows : [EMPTY_EDU]);
+    setAadharNumber(s.aadharNumber || '');
+    setFatherName(s.fatherName || '');
+    setFatherPhone(s.fatherPhone || '');
+    setMotherName(s.motherName || '');
+    setMotherPhone(s.motherPhone || '');
+    if (s.photo) setPhotoUrl(s.photo);
+    if (s.aadharPhoto) setAadharPhotoUrl(s.aadharPhoto);
+  }, [s]);
+
+  // ------------------------------------------------------------------
+  // Guard: if the student's profile is already complete and they don't
+  // need a password change, there's nothing to do here — send them to
+  // the dashboard. This handles the case where they reach this page
+  // directly (URL bar / bookmark) or where StudentLayout redirected
+  // them before fetchMe finished.
+  // ------------------------------------------------------------------
+  if (user && !user.mustChangePassword && user.student?.profileCompletedAt) {
+    return <Navigate to="/student/dashboard" replace />;
+  }
+
+  // Show spinner while user data is loading
+  if (!user) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-blue-50 via-white to-indigo-50">
+        <Loader2 className="w-8 h-8 animate-spin text-blue-600" />
+      </div>
+    );
+  }
+
+  // ----- handlers -----
 
   const handlePhotoChange = async (e: ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -172,6 +231,8 @@ export default function CompleteProfile() {
       setMisLoading(false);
     }
   };
+
+  const passwordDone = !user.mustChangePassword;
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-indigo-50 flex items-center justify-center p-4">
@@ -352,7 +413,7 @@ export default function CompleteProfile() {
                   <label className="text-sm font-medium">Education</label>
                   <button
                     type="button"
-                    onClick={() => setEducation((rows) => [...rows, { degree: '', institution: '', fieldOfStudy: '', year: '', grade: '' }])}
+                    onClick={() => setEducation((rows) => [...rows, EMPTY_EDU])}
                     className="text-xs flex items-center gap-1 text-blue-600 font-medium hover:underline"
                   >
                     <Plus className="w-3.5 h-3.5" /> Add another

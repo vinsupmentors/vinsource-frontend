@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { useDispatch } from 'react-redux';
-import { AppDispatch } from '@/store';
+import { useDispatch, useSelector } from 'react-redux';
+import { AppDispatch, RootState } from '@/store';
 import { fetchMe } from '@/store/slices/authSlice';
 import api from '@/lib/api';
 import { KeyRound, Eye, EyeOff, Loader2, CheckCircle } from 'lucide-react';
@@ -9,6 +9,7 @@ import { KeyRound, Eye, EyeOff, Loader2, CheckCircle } from 'lucide-react';
 export default function ChangePasswordPage() {
   const navigate = useNavigate();
   const dispatch = useDispatch<AppDispatch>();
+  const role = useSelector((s: RootState) => s.auth.user?.role);
 
   const [form, setForm] = useState({ currentPassword: '', newPassword: '', confirm: '' });
   const [show, setShow] = useState({ current: false, new: false, confirm: false });
@@ -40,7 +41,8 @@ export default function ChangePasswordPage() {
       // Refresh user so mustChangePassword becomes false in Redux
       await dispatch(fetchMe());
       setDone(true);
-      setTimeout(() => navigate('/setup'), 1500);
+      // Students go back to the student portal; employees go to onboarding setup
+      setTimeout(() => navigate(role === 'STUDENT' ? '/student/dashboard' : '/setup'), 1500);
     } catch (err: any) {
       setError(err?.response?.data?.message || 'Failed to change password.');
     } finally {
@@ -68,7 +70,7 @@ export default function ChangePasswordPage() {
             <div className="flex flex-col items-center gap-3 py-6 text-center">
               <CheckCircle className="w-12 h-12 text-green-500" />
               <p className="font-semibold text-lg">Password updated!</p>
-              <p className="text-sm text-muted-foreground">Taking you to your onboarding wizard…</p>
+              <p className="text-sm text-muted-foreground">{role === 'STUDENT' ? 'Taking you to the student portal…' : 'Taking you to your onboarding wizard…'}</p>
             </div>
           ) : (
             <form onSubmit={handleSubmit} className="space-y-5">
