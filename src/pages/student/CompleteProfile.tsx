@@ -177,11 +177,20 @@ export default function CompleteProfile() {
     setPwLoading(true);
     try {
       await api.put('/api/auth/change-password', { currentPassword, newPassword });
-      await dispatch(fetchMe());
-      setStep(2);
+      // .unwrap() so a failed refresh actually surfaces as an error below,
+      // instead of silently falling through to "fill in the MIS form".
+      const refreshed = await dispatch(fetchMe()).unwrap();
+      // This student already completed their profile before — a password
+      // reset (forced or self-service) shouldn't make them redo the whole
+      // MIS/KYC form. Send them straight to the dashboard instead.
+      if (refreshed?.student?.profileCompletedAt) {
+        navigate('/student/dashboard');
+      } else {
+        setStep(2);
+      }
     } catch (err: unknown) {
       const e2 = err as { response?: { data?: { message?: string } } };
-      setPwError(e2.response?.data?.message || 'Failed to change password');
+      setPwError(e2.response?.data?.message || 'Failed to change password. Please try again.');
     } finally {
       setPwLoading(false);
     }
