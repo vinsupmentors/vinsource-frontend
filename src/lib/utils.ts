@@ -1,17 +1,23 @@
 import { type ClassValue, clsx } from 'clsx';
 import { twMerge } from 'tailwind-merge';
-import { format, formatDistanceToNow } from 'date-fns';
+import { formatDistanceToNow } from 'date-fns';
 
 export const cn = (...inputs: ClassValue[]) => twMerge(clsx(inputs));
 
+// All check-in/check-out timestamps are stored as UTC instants. Every
+// employee/student is in India, so display always pins Asia/Kolkata rather
+// than relying on the viewing browser/OS's local timezone (which caused
+// times to drift by an inconsistent 1-2 hours depending on who was viewing).
+const IST = 'Asia/Kolkata';
+
 export const formatDate = (date: string | Date) =>
-  format(new Date(date), 'dd MMM yyyy');
+  new Date(date).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric', timeZone: IST });
 
 export const formatDateTime = (date: string | Date) =>
-  format(new Date(date), 'dd MMM yyyy, hh:mm a');
+  new Date(date).toLocaleString('en-IN', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit', hour12: true, timeZone: IST });
 
 export const formatTime = (date: string | Date) =>
-  format(new Date(date), 'hh:mm a');
+  new Date(date).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: true, timeZone: IST });
 
 export const timeAgo = (date: string | Date) =>
   formatDistanceToNow(new Date(date), { addSuffix: true });

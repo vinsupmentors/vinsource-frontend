@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { api } from '@/lib/api';
 import { Employee } from '@/types';
-import { formatDate, formatCurrency, getInitials } from '@/lib/utils';
+import { formatDate, formatTime, formatCurrency, getInitials } from '@/lib/utils';
 import {
   ArrowLeft, Mail, Phone, Building2, Briefcase, Calendar, CreditCard,
   MapPin, User, Shield, Loader2, AlertCircle, FileText, DollarSign, Clock, Edit2, Check, X,
@@ -31,11 +31,6 @@ const STATUS_COLORS: Record<string, { bg: string; text: string }> = {
   HOLIDAY:  { bg: 'bg-purple-100 dark:bg-purple-950/40', text: 'text-purple-700 dark:text-purple-400' },
   WEEKEND:  { bg: 'bg-gray-100 dark:bg-gray-800',     text: 'text-gray-500' },
 };
-
-function formatTime(iso?: string) {
-  if (!iso) return '—';
-  return new Date(iso).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: true });
-}
 
 export default function EmployeeDetail() {
   const { id } = useParams<{ id: string }>();
@@ -103,10 +98,7 @@ export default function EmployeeDetail() {
   useEffect(() => {
     if (tab !== 'attendance' || !id) return;
     setAttLoading(true);
-    api.get<{ data: AttRecord[] }>(`/api/attendance/history?month=${attMonth}&year=${attYear}&limit=60`, {
-      // Note: this fetches the logged-in user's attendance, not the viewed employee's.
-      // For HR to view another employee's attendance, a separate endpoint would be needed.
-    } as any)
+    api.get<{ data: AttRecord[] }>(`/api/attendance/history?month=${attMonth}&year=${attYear}&limit=60&employeeId=${id}`)
       .then((r) => setAttRecords(r.data.data ?? []))
       .catch(() => setAttRecords([]))
       .finally(() => setAttLoading(false));
@@ -695,10 +687,10 @@ export default function EmployeeDetail() {
                   return (
                     <tr key={a.id} className="hover:bg-muted/20 transition-colors">
                       <td className="px-5 py-3 font-medium">
-                        {new Date(a.date).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', weekday: 'short' })}
+                        {new Date(a.date).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', weekday: 'short', timeZone: 'Asia/Kolkata' })}
                       </td>
-                      <td className="px-5 py-3 text-green-600">{formatTime(a.checkIn)}</td>
-                      <td className="px-5 py-3 text-red-500">{formatTime(a.checkOut)}</td>
+                      <td className="px-5 py-3 text-green-600">{a.checkIn ? formatTime(a.checkIn) : '—'}</td>
+                      <td className="px-5 py-3 text-red-500">{a.checkOut ? formatTime(a.checkOut) : '—'}</td>
                       <td className="px-5 py-3">{a.workHours != null ? `${a.workHours.toFixed(1)}h` : '—'}</td>
                       <td className="px-5 py-3">
                         <span className={cn('text-[10px] font-semibold px-2 py-0.5 rounded-full', cfg.bg, cfg.text)}>

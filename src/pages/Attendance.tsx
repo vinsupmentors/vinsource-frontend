@@ -605,10 +605,10 @@ export default function AttendancePage() {
             <span className="text-sm font-medium">Live Clock</span>
           </div>
           <p className="text-4xl font-bold tracking-tight font-mono">
-            {currentTime.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false })}
+            {currentTime.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false, timeZone: 'Asia/Kolkata' })}
           </p>
           <p className="text-blue-200 text-sm mt-1">
-            {new Date().toLocaleDateString('en-IN', { weekday: 'long', day: '2-digit', month: 'short', year: 'numeric' })}
+            {new Date().toLocaleDateString('en-IN', { weekday: 'long', day: '2-digit', month: 'short', year: 'numeric', timeZone: 'Asia/Kolkata' })}
           </p>
 
           <div className="mt-5 flex flex-col gap-2">
@@ -1107,7 +1107,7 @@ function OwnerAttendanceView() {
           <p className="text-muted-foreground text-sm">Live company-wide attendance — owner view</p>
         </div>
         <div className="bg-slate-800 text-white rounded-xl px-5 py-3 font-mono text-xl font-bold">
-          {currentTime.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false })}
+          {currentTime.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false, timeZone: 'Asia/Kolkata' })}
         </div>
       </div>
 
@@ -1156,8 +1156,8 @@ function OwnerAttendanceView() {
                       <span className="text-xs">{row.status ?? 'ABSENT'}</span>
                     </div>
                   </td>
-                  <td className="px-4 py-2.5 text-xs">{row.checkIn ? new Date(row.checkIn).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' }) : '—'}</td>
-                  <td className="px-4 py-2.5 text-xs">{row.checkOut ? new Date(row.checkOut).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' }) : '—'}</td>
+                  <td className="px-4 py-2.5 text-xs">{row.checkIn ? new Date(row.checkIn).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Kolkata' }) : '—'}</td>
+                  <td className="px-4 py-2.5 text-xs">{row.checkOut ? new Date(row.checkOut).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Kolkata' }) : '—'}</td>
                   <td className="px-4 py-2.5 text-xs">{row.workHours != null ? `${Number(row.workHours).toFixed(1)}h` : '—'}</td>
                 </tr>
               ))}
