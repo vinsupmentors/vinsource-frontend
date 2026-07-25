@@ -1,7 +1,7 @@
 import { Fragment, useEffect, useState, useCallback } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import api from '@/lib/api';
-import { formatDate } from '@/lib/utils';
+import { formatDate, formatDateTime } from '@/lib/utils';
 import { useModuleAccess } from '@/hooks/useModuleAccess';
 import {
   Lock, Plus, X, Building2, CalendarClock, GraduationCap, TrendingUp, Users,
@@ -800,7 +800,7 @@ function InterviewList({ interviews, canEdit, onChanged, setError }: {
               {iv.companyName || iv.drive?.partner.name || 'Interview'} · Round {iv.round}
             </p>
             <p className="text-xs text-muted-foreground">
-              {new Date(iv.scheduledAt).toLocaleString()} {iv.interviewerName && `· ${iv.interviewerName}`}
+              {formatDateTime(iv.scheduledAt)} {iv.interviewerName && `· ${iv.interviewerName}`}
             </p>
             {iv.feedback && (
               <p className="text-xs mt-1 bg-muted/40 rounded px-2 py-1 max-w-md">

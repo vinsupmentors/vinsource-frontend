@@ -54,12 +54,12 @@ function exportXLSX(sheets: { name: string; rows: Record<string, any>[] }[], fil
 
 function fmtDate(d: string | Date | null | undefined) {
   if (!d) return '';
-  return new Date(d).toLocaleDateString('en-IN');
+  return new Date(d).toLocaleDateString('en-IN', { timeZone: 'Asia/Kolkata' });
 }
 
 function fmtTime(d: string | Date | null | undefined) {
   if (!d) return '';
-  return new Date(d).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' });
+  return new Date(d).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Kolkata' });
 }
 
 function fmtCur(n: number) {
