@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import api from '@/lib/api';
 import { useToast } from '@/components/ui/toaster';
-import { formatDate } from '@/lib/utils';
-import { Loader2, ClipboardList, Clock, AlertTriangle, CheckCircle2, XCircle, Lock } from 'lucide-react';
+import { formatDate, formatDateTime } from '@/lib/utils';
+import { Loader2, ClipboardList, Clock, AlertTriangle, CheckCircle2, XCircle, Lock, X, ListChecks } from 'lucide-react';
 
 // ── Offline / trainer-graded module tests (ModuleTest + ModuleMark) ─────────
 interface MarkRow {
@@ -37,6 +37,8 @@ interface TestListItem {
 
 interface AttemptQuestion { id: string; order: number; prompt: string; options: string[]; marks: number; }
 
+interface ReviewQuestion extends AttemptQuestion { correctIndex: number; selectedIndex: number | null; isCorrect: boolean; }
+
 interface ActiveAttempt {
   attemptId: string;
   releaseId: string;
@@ -44,7 +46,10 @@ interface ActiveAttempt {
   deadlineAt: string;
   questions: AttemptQuestion[];
   answers: Record<string, number>;
+  violationCount: number;
 }
+
+const MAX_WARNINGS = 2; // 1st + 2nd tab-switch = warning, 3rd ends the test
 
 function statusLabel(status: string) {
   switch (status) {
@@ -63,6 +68,7 @@ export default function StudentTest() {
   const [active, setActive] = useState<ActiveAttempt | null>(null);
   const [remainingMs, setRemainingMs] = useState(0);
   const [submitting, setSubmitting] = useState(false);
+  const [reviewAttemptId, setReviewAttemptId] = useState<string | null>(null);
   const submittedRef = useRef(false);
   const { toast } = useToast();
 
@@ -106,6 +112,7 @@ export default function StudentTest() {
         deadlineAt: attempt.deadlineAt,
         questions: questions.sort((a: AttemptQuestion, b: AttemptQuestion) => a.order - b.order),
         answers: answersMap,
+        violationCount: attempt.violationCount ?? 0,
       });
     } catch (err: unknown) {
       const e2 = err as { response?: { data?: { message?: string } } };
@@ -121,25 +128,56 @@ export default function StudentTest() {
     api.post(`/api/student-portal/online-tests/attempts/${active.attemptId}/answer`, { questionId, selectedIndex }).catch(() => {});
   };
 
-  const finishAttempt = useCallback(async (violation: boolean) => {
+  const finishAttempt = useCallback(async () => {
     if (!active || submittedRef.current) return;
     submittedRef.current = true;
     setSubmitting(true);
     try {
-      const res = await api.post(`/api/student-portal/online-tests/attempts/${active.attemptId}/submit`, { violation });
+      const res = await api.post(`/api/student-portal/online-tests/attempts/${active.attemptId}/submit`, {});
       const graded = res.data.data;
       setActive(null);
       load();
-      if (violation) {
-        toast({ title: 'Test auto-submitted', description: 'Switching tabs during a test ends your attempt immediately.', variant: 'error' });
-      } else {
-        toast({ title: 'Test submitted', description: `Score: ${graded.score} / ${graded.totalMarks}` });
-      }
+      toast({ title: 'Test submitted', description: `Score: ${graded.score} / ${graded.totalMarks}` });
     } catch {
       setActive(null);
       load();
     } finally {
       setSubmitting(false);
+    }
+  }, [active, load, toast]);
+
+  // Tab-switch / minimize policy: the server counts violations per attempt.
+  // The first two are just warnings (test keeps going); the third ends it.
+  // Server-counted rather than client-decided, so a student can't dodge the
+  // rule by editing anything running in the browser.
+  const onViolation = useCallback(async () => {
+    if (!active || submittedRef.current) return;
+    try {
+      const res = await api.post(`/api/student-portal/online-tests/attempts/${active.attemptId}/violation`, {});
+      const { action, violationCount } = res.data.data as { action: 'warning' | 'ended' | 'none'; violationCount: number };
+
+      if (action === 'warning') {
+        setActive((a) => (a ? { ...a, violationCount } : a));
+        const isFinal = violationCount >= MAX_WARNINGS;
+        toast({
+          title: isFinal ? 'Final warning' : `Warning ${violationCount} of ${MAX_WARNINGS}`,
+          description: isFinal
+            ? 'This is your last warning — switching tabs again will end your test immediately.'
+            : "Don't switch tabs or minimize the window during a test. One more after this and your test will end.",
+          variant: 'error',
+        });
+        return;
+      }
+
+      // 'ended' (3rd violation) or 'none' (attempt already ended some other way, e.g. expired) — either way it's over.
+      submittedRef.current = true;
+      setActive(null);
+      load();
+      if (action === 'ended') {
+        toast({ title: 'Test ended', description: `Your test was ended after ${MAX_WARNINGS + 1} tab-switch violations.`, variant: 'error' });
+      }
+    } catch {
+      // Transient failure recording the violation — don't punish the student for a network blip.
     }
   }, [active, load, toast]);
 
@@ -149,25 +187,25 @@ export default function StudentTest() {
     const tick = () => {
       const ms = new Date(active.deadlineAt).getTime() - Date.now();
       setRemainingMs(Math.max(0, ms));
-      if (ms <= 0) finishAttempt(false);
+      if (ms <= 0) finishAttempt();
     };
     tick();
     const id = setInterval(tick, 1000);
     return () => clearInterval(id);
   }, [active, finishAttempt]);
 
-  // Strictest tab-switch policy: any blur or visibility loss during an active attempt auto-submits immediately.
+  // Tab-switch / minimize detection — see onViolation for the warn/end policy.
   useEffect(() => {
     if (!active) return;
-    const onBlur = () => finishAttempt(true);
-    const onVisibility = () => { if (document.hidden) finishAttempt(true); };
+    const onBlur = () => onViolation();
+    const onVisibility = () => { if (document.hidden) onViolation(); };
     window.addEventListener('blur', onBlur);
     document.addEventListener('visibilitychange', onVisibility);
     return () => {
       window.removeEventListener('blur', onBlur);
       document.removeEventListener('visibilitychange', onVisibility);
     };
-  }, [active, finishAttempt]);
+  }, [active, onViolation]);
 
   if (loading) return <div className="flex justify-center py-20"><Loader2 className="w-6 h-6 animate-spin text-primary" /></div>;
 
@@ -189,7 +227,11 @@ export default function StudentTest() {
         </div>
 
         <div className="bg-amber-50 border border-amber-200 text-amber-800 text-xs rounded-lg px-3 py-2 flex items-center gap-2">
-          <AlertTriangle className="w-4 h-4 shrink-0" /> Do not switch tabs or minimize this window — doing so will immediately auto-submit your test.
+          <AlertTriangle className="w-4 h-4 shrink-0" />
+          Do not switch tabs or minimize this window. You'll get {MAX_WARNINGS} warnings — the next violation after that ends your test immediately.
+          {active.violationCount > 0 && (
+            <span className="font-semibold shrink-0">({active.violationCount} / {MAX_WARNINGS} warnings used)</span>
+          )}
         </div>
 
         <div className="space-y-4">
@@ -209,7 +251,7 @@ export default function StudentTest() {
         </div>
 
         <button
-          onClick={() => finishAttempt(false)}
+          onClick={() => finishAttempt()}
           disabled={submitting}
           className="w-full sm:w-auto px-5 py-2.5 rounded-lg text-sm font-medium bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-60"
         >
@@ -250,10 +292,18 @@ export default function StudentTest() {
                         {starting === r.releaseId ? 'Resuming...' : 'Resume attempt'}
                       </button>
                     ) : (
-                      <span className={`flex items-center gap-1.5 text-sm font-semibold ${attempt.status === 'SUBMITTED' ? 'text-green-700' : 'text-red-600'}`}>
-                        {attempt.status === 'SUBMITTED' ? <CheckCircle2 className="w-4 h-4" /> : <XCircle className="w-4 h-4" />}
-                        {attempt.score ?? 0} / {attempt.totalMarks ?? 0} · {statusLabel(attempt.status)}
-                      </span>
+                      <>
+                        <span className={`flex items-center gap-1.5 text-sm font-semibold ${attempt.status === 'SUBMITTED' ? 'text-green-700' : 'text-red-600'}`}>
+                          {attempt.status === 'SUBMITTED' ? <CheckCircle2 className="w-4 h-4" /> : <XCircle className="w-4 h-4" />}
+                          {attempt.score ?? 0} / {attempt.totalMarks ?? 0} · {statusLabel(attempt.status)}
+                        </span>
+                        <button
+                          onClick={() => setReviewAttemptId(attempt.id)}
+                          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-xs font-medium hover:bg-muted"
+                        >
+                          <ListChecks className="w-3.5 h-3.5" /> View answers
+                        </button>
+                      </>
                     )
                   ) : closed ? (
                     <span className="text-xs px-2 py-0.5 rounded-full bg-muted text-muted-foreground font-medium flex items-center gap-1"><Lock className="w-3 h-3" /> Locked</span>
@@ -289,6 +339,86 @@ export default function StudentTest() {
           })}
         </div>
       )}
+
+      {reviewAttemptId && (
+        <TestReviewModal attemptId={reviewAttemptId} onClose={() => setReviewAttemptId(null)} />
+      )}
+    </div>
+  );
+}
+
+function TestReviewModal({ attemptId, onClose }: { attemptId: string; onClose: () => void }) {
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+  const [data, setData] = useState<{
+    attempt: { score: number | null; totalMarks: number | null; startedAt: string; submittedAt: string | null };
+    testTitle: string;
+    questions: ReviewQuestion[];
+  } | null>(null);
+
+  useEffect(() => {
+    setLoading(true);
+    api.get(`/api/student-portal/online-tests/attempts/${attemptId}/review`)
+      .then((r) => setData(r.data.data))
+      .catch((e) => setError(e?.response?.data?.message || 'Could not load your answers.'))
+      .finally(() => setLoading(false));
+  }, [attemptId]);
+
+  return (
+    <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
+      <div className="bg-white rounded-xl w-full max-w-3xl p-6 space-y-4 max-h-[90vh] overflow-y-auto">
+        <div className="flex items-center justify-between">
+          <div>
+            <h3 className="text-base font-semibold">{data?.testTitle || 'Your answers'}</h3>
+            {data && (
+              <p className="text-xs text-muted-foreground mt-0.5">
+                Score: {data.attempt.score ?? 0} / {data.attempt.totalMarks ?? 0}
+                {data.attempt.submittedAt ? ` · Submitted ${formatDateTime(data.attempt.submittedAt)}` : ''}
+              </p>
+            )}
+          </div>
+          <button onClick={onClose} className="text-muted-foreground hover:text-foreground"><X className="w-4 h-4" /></button>
+        </div>
+
+        {loading ? (
+          <div className="flex justify-center py-8"><Loader2 className="w-5 h-5 animate-spin text-primary" /></div>
+        ) : error ? (
+          <p className="text-sm text-red-600">{error}</p>
+        ) : (
+          <div className="space-y-4">
+            {data!.questions.map((q, idx) => (
+              <div key={q.id} className="rounded-xl border p-4">
+                <p className="text-sm font-medium">
+                  {idx + 1}. {q.prompt}{' '}
+                  <span className="text-xs text-muted-foreground font-normal">({q.marks} mark{q.marks === 1 ? '' : 's'})</span>
+                </p>
+                <div className="mt-2 flex flex-col gap-1.5">
+                  {q.options.map((opt, i) => {
+                    const isCorrectOption = i === q.correctIndex;
+                    const isMyPick = i === q.selectedIndex;
+                    const cls = isCorrectOption
+                      ? 'bg-green-50 border-green-300 text-green-800'
+                      : isMyPick
+                        ? 'bg-red-50 border-red-300 text-red-700'
+                        : 'border-transparent';
+                    return (
+                      <div key={i} className={`flex items-center gap-2 text-sm px-2 py-1.5 rounded-lg border ${cls}`}>
+                        {isCorrectOption ? <CheckCircle2 className="w-3.5 h-3.5 shrink-0" /> : isMyPick ? <XCircle className="w-3.5 h-3.5 shrink-0" /> : <span className="w-3.5 shrink-0" />}
+                        <span>{opt}</span>
+                        {isMyPick && !isCorrectOption && <span className="text-xs ml-auto shrink-0">(your answer)</span>}
+                        {isCorrectOption && <span className="text-xs ml-auto shrink-0">(correct answer)</span>}
+                      </div>
+                    );
+                  })}
+                  {q.selectedIndex === null && (
+                    <p className="text-xs text-muted-foreground">You did not answer this question.</p>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
     </div>
   );
 }

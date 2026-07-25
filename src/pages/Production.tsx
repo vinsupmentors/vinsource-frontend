@@ -1,6 +1,7 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import api, { BASE_URL } from '@/lib/api';
+import { formatDateTime } from '@/lib/utils';
 import { useModuleAccess } from '@/hooks/useModuleAccess';
 import * as XLSX from 'xlsx';
 import {
@@ -2601,7 +2602,7 @@ function FeedbackResponsesModal({ releaseId, title, onClose }: { releaseId: stri
             <div key={r.id} className="border rounded-lg p-3">
               <div className="flex items-center justify-between">
                 <p className="text-sm font-semibold">{r.student.firstName} {r.student.lastName} <span className="text-xs text-muted-foreground font-normal">({r.student.studentCode})</span></p>
-                <span className="text-xs text-muted-foreground">{new Date(r.submittedAt).toLocaleString()}</span>
+                <span className="text-xs text-muted-foreground">{formatDateTime(r.submittedAt)}</span>
               </div>
               <div className="mt-2 space-y-1.5">
                 {questions.map((q) => {
@@ -4072,7 +4073,7 @@ function StudentReportPanel({ setError }: { setError: (s: string) => void }) {
                       {detail.placement.interviews.map((iv) => (
                         <div key={iv.id} className="text-xs border rounded-lg px-2 py-1">
                           <div className="flex items-center justify-between gap-2">
-                            <span>{iv.companyName || 'Interview'} · Round {iv.round} · {new Date(iv.scheduledAt).toLocaleString()}</span>
+                            <span>{iv.companyName || 'Interview'} · Round {iv.round} · {formatDateTime(iv.scheduledAt)}</span>
                             <span className="text-muted-foreground whitespace-nowrap">{iv.outcome}</span>
                           </div>
                           {iv.feedback && (

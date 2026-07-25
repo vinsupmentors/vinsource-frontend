@@ -1,6 +1,7 @@
 import { Fragment, useEffect, useState, useCallback } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import api from '@/lib/api';
+import { formatDate } from '@/lib/utils';
 import { useModuleAccess } from '@/hooks/useModuleAccess';
 import {
   Lock, Plus, X, Building2, CalendarClock, GraduationCap, TrendingUp, Users,
@@ -1536,7 +1537,7 @@ function PlacementStudentProfileModal({ student: poolStudent, onClose }: {
                 ))}
                 <h3 className="font-semibold text-sm uppercase text-muted-foreground tracking-wide mt-4">Portfolio</h3>
                 <div className={`rounded-xl p-4 text-sm ${s?.portfolio?.status === 'APPROVED' ? 'bg-green-50 text-green-700' : s?.portfolio?.status === 'SUBMITTED' ? 'bg-blue-50 text-blue-700' : 'bg-muted/20 text-muted-foreground'}`}>
-                  {s?.portfolio ? <span className="font-medium">{s.portfolio.status}{s.portfolio.submittedAt ? ` · ${new Date(s.portfolio.submittedAt).toLocaleDateString()}` : ''}</span> : <span>Not submitted</span>}
+                  {s?.portfolio ? <span className="font-medium">{s.portfolio.status}{s.portfolio.submittedAt ? ` · ${formatDate(s.portfolio.submittedAt)}` : ''}</span> : <span>Not submitted</span>}
                 </div>
                 {s && s.trainerFeedbacks.length > 0 && (
                   <>

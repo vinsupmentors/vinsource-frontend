@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import api, { BASE_URL } from '@/lib/api';
-import { formatDate } from '@/lib/utils';
-import { Loader2, Users, CalendarCheck, ClipboardList, MessageSquareText, Save, FileText, Rocket, X, CheckCircle2, XCircle, ArrowLeft, ChevronRight, Lock, Star, NotebookPen, Pencil, Trash2, RotateCcw } from 'lucide-react';
+import { formatDate, formatDateTime } from '@/lib/utils';
+import { Loader2, Users, CalendarCheck, ClipboardList, MessageSquareText, Save, FileText, Rocket, X, CheckCircle2, XCircle, ArrowLeft, ChevronRight, Lock, Star, NotebookPen, Pencil, Trash2, RotateCcw, RefreshCw, ListChecks } from 'lucide-react';
 
 // Files uploaded by the backend (project submissions) come back as relative
 // paths like "/uploads/...". A bare <a href> resolves those against the
@@ -1254,51 +1254,220 @@ interface TestRosterRow {
 function TestResultsModal({ schedule, releaseId, title, onClose }: { schedule: ScheduleAssignment['schedule']; releaseId: string; title: string; onClose: () => void }) {
   const [roster, setRoster] = useState<TestRosterRow[]>([]);
   const [loading, setLoading] = useState(true);
+  const [busyKey, setBusyKey] = useState<string | null>(null);
+  const [error, setError] = useState('');
+  const [reviewStudent, setReviewStudent] = useState<{ id: string; label: string } | null>(null);
 
-  useEffect(() => {
+  const errMsg = (e: unknown): string => {
+    const ax = e as { response?: { data?: { message?: string } } };
+    return ax?.response?.data?.message || 'Something went wrong';
+  };
+
+  const load = () => {
     setLoading(true);
-    api.get(`/api/trainer-portal/schedules/${schedule.id}/test-releases/${releaseId}/results`)
+    return api.get(`/api/trainer-portal/schedules/${schedule.id}/test-releases/${releaseId}/results`)
       .then((r) => setRoster(r.data.data?.roster || []))
       .finally(() => setLoading(false));
+  };
+
+  useEffect(() => {
+    load();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [schedule.id, releaseId]);
+
+  const reassign = async (studentId: string | null, label: string) => {
+    const confirmMsg = studentId
+      ? `Reassign this test to ${label}? Their previous attempt (if finished) will be cleared and they can take it again.`
+      : `Reassign this test to the whole class? Every finished attempt will be cleared and every student can take it again.`;
+    if (!window.confirm(confirmMsg)) return;
+    const key = studentId || '__all__';
+    setBusyKey(key);
+    setError('');
+    try {
+      await api.post(`/api/trainer-portal/schedules/${schedule.id}/test-releases/${releaseId}/reassign`, studentId ? { studentId } : {});
+      await load();
+    } catch (e) {
+      setError(errMsg(e));
+    } finally {
+      setBusyKey(null);
+    }
+  };
 
   return (
     <MiniModal title={`Results — ${title}`} onClose={onClose} wide>
       {loading ? (
         <div className="flex justify-center py-8"><Loader2 className="w-5 h-5 animate-spin text-primary" /></div>
       ) : (
-        <div className="bg-card rounded-xl border overflow-hidden">
-          <table className="w-full text-sm">
-            <thead className="bg-muted/40 text-xs text-muted-foreground">
-              <tr>
-                <th className="text-left px-4 py-3 font-medium">Student</th>
-                <th className="text-left px-4 py-3 font-medium">Status</th>
-                <th className="text-left px-4 py-3 font-medium">Score</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y">
-              {roster.map((row) => (
-                <tr key={row.student.id}>
-                  <td className="px-4 py-3">{row.student.firstName} {row.student.lastName} <span className="text-xs text-muted-foreground">({row.student.studentCode})</span></td>
-                  <td className="px-4 py-3">
-                    {row.attempt ? (
-                      <span className={`flex items-center gap-1 text-xs font-medium ${row.attempt.status === 'IN_PROGRESS' ? 'text-amber-600' : 'text-green-700'}`}>
-                        {row.attempt.status === 'IN_PROGRESS' ? <Loader2 className="w-3.5 h-3.5" /> : <CheckCircle2 className="w-3.5 h-3.5" />}
-                        {row.attempt.status.replace('_', ' ')}
-                      </span>
-                    ) : (
-                      <span className="flex items-center gap-1 text-xs font-medium text-muted-foreground"><XCircle className="w-3.5 h-3.5" /> Not started</span>
-                    )}
-                  </td>
-                  <td className="px-4 py-3">
-                    {row.attempt && row.attempt.score !== null ? `${row.attempt.score} / ${row.attempt.totalMarks}` : '—'}
-                  </td>
+        <div className="space-y-3">
+          <div className="flex items-center justify-between">
+            {error && <p className="text-xs text-red-600">{error}</p>}
+            <button
+              onClick={() => reassign(null, 'the whole class')}
+              disabled={busyKey !== null}
+              title="Clear every finished attempt so the whole class can retake this test"
+              className="ml-auto flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-xs font-medium text-amber-700 hover:bg-amber-50 disabled:opacity-60"
+            >
+              {busyKey === '__all__' ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RefreshCw className="w-3.5 h-3.5" />} Reassign all
+            </button>
+          </div>
+          <div className="bg-card rounded-xl border overflow-hidden">
+            <table className="w-full text-sm">
+              <thead className="bg-muted/40 text-xs text-muted-foreground">
+                <tr>
+                  <th className="text-left px-4 py-3 font-medium">Student</th>
+                  <th className="text-left px-4 py-3 font-medium">Status</th>
+                  <th className="text-left px-4 py-3 font-medium">Score</th>
+                  <th className="text-right px-4 py-3 font-medium">Action</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody className="divide-y">
+                {roster.map((row) => {
+                  const studentLabel = `${row.student.firstName} ${row.student.lastName}`;
+                  const canReassign = row.attempt && row.attempt.status !== 'IN_PROGRESS';
+                  return (
+                    <tr key={row.student.id}>
+                      <td className="px-4 py-3">{studentLabel} <span className="text-xs text-muted-foreground">({row.student.studentCode})</span></td>
+                      <td className="px-4 py-3">
+                        {row.attempt ? (
+                          <span className={`flex items-center gap-1 text-xs font-medium ${row.attempt.status === 'IN_PROGRESS' ? 'text-amber-600' : 'text-green-700'}`}>
+                            {row.attempt.status === 'IN_PROGRESS' ? <Loader2 className="w-3.5 h-3.5" /> : <CheckCircle2 className="w-3.5 h-3.5" />}
+                            {row.attempt.status.replace('_', ' ')}
+                          </span>
+                        ) : (
+                          <span className="flex items-center gap-1 text-xs font-medium text-muted-foreground"><XCircle className="w-3.5 h-3.5" /> Not started</span>
+                        )}
+                      </td>
+                      <td className="px-4 py-3">
+                        {row.attempt && row.attempt.score !== null ? `${row.attempt.score} / ${row.attempt.totalMarks}` : '—'}
+                      </td>
+                      <td className="px-4 py-3 text-right">
+                        <div className="flex items-center justify-end gap-1.5">
+                          {canReassign && (
+                            <button
+                              onClick={() => setReviewStudent({ id: row.student.id, label: studentLabel })}
+                              title="See what this student picked for each question, vs. the correct answer"
+                              className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg border text-xs font-medium hover:bg-muted"
+                            >
+                              <ListChecks className="w-3.5 h-3.5" /> View answers
+                            </button>
+                          )}
+                          {canReassign ? (
+                            <button
+                              onClick={() => reassign(row.student.id, studentLabel)}
+                              disabled={busyKey !== null}
+                              title="Clear this student's attempt so they can retake the test"
+                              className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg border text-xs font-medium hover:bg-muted disabled:opacity-60"
+                            >
+                              {busyKey === row.student.id ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RotateCcw className="w-3.5 h-3.5" />} Reassign
+                            </button>
+                          ) : (
+                            <span className="text-xs text-muted-foreground">—</span>
+                          )}
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
         </div>
       )}
+
+      {reviewStudent && (
+        <StudentAnswerReviewModal
+          schedule={schedule}
+          releaseId={releaseId}
+          studentId={reviewStudent.id}
+          studentLabel={reviewStudent.label}
+          onClose={() => setReviewStudent(null)}
+        />
+      )}
     </MiniModal>
+  );
+}
+
+function StudentAnswerReviewModal({
+  schedule, releaseId, studentId, studentLabel, onClose,
+}: {
+  schedule: ScheduleAssignment['schedule'];
+  releaseId: string;
+  studentId: string;
+  studentLabel: string;
+  onClose: () => void;
+}) {
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+  const [data, setData] = useState<{
+    attempt: { score: number | null; totalMarks: number | null; startedAt: string; submittedAt: string | null };
+    testTitle: string;
+    questions: { id: string; order: number; prompt: string; options: string[]; marks: number; correctIndex: number; selectedIndex: number | null; isCorrect: boolean }[];
+  } | null>(null);
+
+  useEffect(() => {
+    setLoading(true);
+    setError('');
+    api.get(`/api/trainer-portal/schedules/${schedule.id}/test-releases/${releaseId}/students/${studentId}/review`)
+      .then((r) => setData(r.data.data))
+      .catch((e) => setError(e?.response?.data?.message || 'Could not load this student\'s answers.'))
+      .finally(() => setLoading(false));
+  }, [schedule.id, releaseId, studentId]);
+
+  return (
+    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[60] p-4">
+      <div className="bg-white rounded-xl w-full max-w-3xl p-6 space-y-4 max-h-[90vh] overflow-y-auto">
+        <div className="flex items-center justify-between">
+          <div>
+            <h3 className="text-base font-semibold">{studentLabel}{data ? ` — ${data.testTitle}` : ''}</h3>
+            {data && (
+              <p className="text-xs text-muted-foreground mt-0.5">
+                Score: {data.attempt.score ?? 0} / {data.attempt.totalMarks ?? 0}
+                {data.attempt.submittedAt ? ` · Submitted ${formatDateTime(data.attempt.submittedAt)}` : ''}
+              </p>
+            )}
+          </div>
+          <button onClick={onClose} className="text-muted-foreground hover:text-foreground"><X className="w-4 h-4" /></button>
+        </div>
+
+        {loading ? (
+          <div className="flex justify-center py-8"><Loader2 className="w-5 h-5 animate-spin text-primary" /></div>
+        ) : error ? (
+          <p className="text-sm text-red-600">{error}</p>
+        ) : (
+          <div className="space-y-4">
+            {data!.questions.map((q, idx) => (
+              <div key={q.id} className="rounded-xl border p-4">
+                <p className="text-sm font-medium">
+                  {idx + 1}. {q.prompt}{' '}
+                  <span className="text-xs text-muted-foreground font-normal">({q.marks} mark{q.marks === 1 ? '' : 's'})</span>
+                </p>
+                <div className="mt-2 flex flex-col gap-1.5">
+                  {q.options.map((opt, i) => {
+                    const isCorrectOption = i === q.correctIndex;
+                    const isTheirPick = i === q.selectedIndex;
+                    const cls = isCorrectOption
+                      ? 'bg-green-50 border-green-300 text-green-800'
+                      : isTheirPick
+                        ? 'bg-red-50 border-red-300 text-red-700'
+                        : 'border-transparent';
+                    return (
+                      <div key={i} className={`flex items-center gap-2 text-sm px-2 py-1.5 rounded-lg border ${cls}`}>
+                        {isCorrectOption ? <CheckCircle2 className="w-3.5 h-3.5 shrink-0" /> : isTheirPick ? <XCircle className="w-3.5 h-3.5 shrink-0" /> : <span className="w-3.5 shrink-0" />}
+                        <span>{opt}</span>
+                        {isTheirPick && !isCorrectOption && <span className="text-xs ml-auto shrink-0">(their answer)</span>}
+                        {isCorrectOption && <span className="text-xs ml-auto shrink-0">(correct answer)</span>}
+                      </div>
+                    );
+                  })}
+                  {q.selectedIndex === null && (
+                    <p className="text-xs text-muted-foreground">This student did not answer this question.</p>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
   );
 }
