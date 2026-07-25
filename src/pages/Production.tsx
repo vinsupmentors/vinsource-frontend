@@ -1133,6 +1133,7 @@ function StudentsTab({ canEdit, setError, refresh, refreshKey, batches, onEnroll
   const [trackFilter, setTrackFilter] = useState('');
   const [batchFilter, setBatchFilter] = useState('');
   const [courseFilter, setCourseFilter] = useState('');
+  const [statusFilter, setStatusFilter] = useState('');
   const [phoneInput, setPhoneInput] = useState('');
   const [phoneSearch, setPhoneSearch] = useState('');
 
@@ -1152,7 +1153,7 @@ function StudentsTab({ canEdit, setError, refresh, refreshKey, batches, onEnroll
   }, [phoneInput]);
 
   // Reset to page 1 whenever a filter changes.
-  useEffect(() => { setPage(1); }, [trackFilter, batchFilter, courseFilter, phoneSearch]);
+  useEffect(() => { setPage(1); }, [trackFilter, batchFilter, courseFilter, statusFilter, phoneSearch]);
 
   useEffect(() => {
     if (batches && batches.length) { setBatchOptions(batches); return; }
@@ -1173,6 +1174,7 @@ function StudentsTab({ canEdit, setError, refresh, refreshKey, batches, onEnroll
           track: trackFilter || undefined,
           batchId: batchFilter || undefined,
           courseId: courseFilter || undefined,
+          status: statusFilter || undefined,
           phone: phoneSearch || undefined,
         },
       });
@@ -1183,7 +1185,7 @@ function StudentsTab({ canEdit, setError, refresh, refreshKey, batches, onEnroll
     } finally {
       setLoading(false);
     }
-  }, [page, trackFilter, batchFilter, courseFilter, phoneSearch]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [page, trackFilter, batchFilter, courseFilter, statusFilter, phoneSearch]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => { fetchStudents(); }, [fetchStudents, refreshKey]);
 
@@ -1259,6 +1261,10 @@ function StudentsTab({ canEdit, setError, refresh, refreshKey, batches, onEnroll
           <select value={courseFilter} onChange={(e) => setCourseFilter(e.target.value)} className="px-3 py-2 border rounded-lg text-sm">
             <option value="">All courses</option>
             {courseOptions.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+          </select>
+          <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} className="px-3 py-2 border rounded-lg text-sm">
+            <option value="">All statuses</option>
+            {STUDENT_STATUSES.map((st) => <option key={st} value={st}>{STUDENT_STATUS_LABEL[st]}</option>)}
           </select>
         </div>
         {canEdit && (
@@ -3302,7 +3308,7 @@ const EMPTY_REPORT_FILTERS: ReportFilters = { batchId: '', scheduleId: '', cours
 interface ReportBatchOption {
   id: string;
   code: string;
-  schedules: { id: string; code: string | null; course: { name: string } }[];
+  schedules: { id: string; code: string | null; course: { name: string }; trainers?: { trainerId: string }[] }[];
 }
 
 /** Shared Batch / Sub-batch / Course / Track (/ Trainer) filter row reused across report panels.
@@ -3315,7 +3321,11 @@ function ReportFilterBar({ filters, onChange, showTrainer }: { filters: ReportFi
 
   useEffect(() => {
     api.get('/api/production/batches')
-      .then((res) => setBatchOptions(res.data.data.map((b: ReportBatchOption) => ({ id: b.id, code: b.code, schedules: b.schedules || [] }))))
+      .then((res) => setBatchOptions(res.data.data.map((b: ReportBatchOption) => ({
+        id: b.id,
+        code: b.code,
+        schedules: (b.schedules || []).map((s) => ({ id: s.id, code: s.code, course: s.course, trainers: s.trainers || [] })),
+      }))))
       .catch(() => setBatchOptions([]));
     api.get('/api/production/courses').then((res) => setCourseOptions(res.data.data.map((c: AcademyCourse) => ({ id: c.id, name: c.name })))).catch(() => setCourseOptions([]));
   }, []);
@@ -3333,11 +3343,13 @@ function ReportFilterBar({ filters, onChange, showTrainer }: { filters: ReportFi
       .catch(() => setTrainerOptions([]));
   }, [showTrainer]);
 
-  // Sub-batch options: scoped to the selected batch, or every sub-batch across
-  // all batches when no batch is picked yet — so trainers/PM can jump straight
-  // to a specific sub-batch without first narrowing by batch.
+  // Sub-batch options: scoped to the selected batch (or every batch, if none
+  // picked yet) AND to the selected trainer — so picking a trainer narrows
+  // the sub-batch list down to only the sub-batches that trainer handles.
   const scheduleOptions = (filters.batchId ? batchOptions.filter((b) => b.id === filters.batchId) : batchOptions)
-    .flatMap((b) => b.schedules.map((s) => ({ id: s.id, label: `${b.code} — ${s.code ? `${s.code} · ` : ''}${s.course.name}` })));
+    .flatMap((b) => b.schedules
+      .filter((s) => !filters.trainerId || (s.trainers || []).some((t) => t.trainerId === filters.trainerId))
+      .map((s) => ({ id: s.id, label: `${b.code} — ${s.code ? `${s.code} · ` : ''}${s.course.name}` })));
 
   return (
     <div className="flex flex-wrap items-center gap-2 text-sm">
@@ -3376,7 +3388,15 @@ function ReportFilterBar({ filters, onChange, showTrainer }: { filters: ReportFi
       {showTrainer && (
         <select
           value={filters.trainerId}
-          onChange={(e) => onChange({ ...filters, trainerId: e.target.value })}
+          onChange={(e) => {
+            const trainerId = e.target.value;
+            // If a sub-batch is already selected and it isn't one of the newly-picked
+            // trainer's sub-batches, drop it — otherwise we'd silently keep filtering
+            // on a sub-batch that's no longer shown in the (now-narrowed) dropdown.
+            const keepSchedule = !filters.scheduleId || !trainerId
+              || batchOptions.some((b) => b.schedules.some((s) => s.id === filters.scheduleId && (s.trainers || []).some((t) => t.trainerId === trainerId)));
+            onChange({ ...filters, trainerId, scheduleId: keepSchedule ? filters.scheduleId : '' });
+          }}
           className="border rounded-lg px-2 py-1"
         >
           <option value="">All trainers</option>

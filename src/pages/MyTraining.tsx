@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import api, { BASE_URL } from '@/lib/api';
 import { formatDate, formatDateTime } from '@/lib/utils';
+import { useToast } from '@/components/ui/toaster';
 import { Loader2, Users, CalendarCheck, ClipboardList, MessageSquareText, Save, FileText, Rocket, X, CheckCircle2, XCircle, ArrowLeft, ChevronRight, Lock, Star, NotebookPen, Pencil, Trash2, RotateCcw, RefreshCw, ListChecks } from 'lucide-react';
 
 // Files uploaded by the backend (project submissions) come back as relative
@@ -201,6 +202,7 @@ function AttendanceTab({ schedule, onBack }: { schedule: ScheduleAssignment['sch
   const [roster, setRoster] = useState<{ student: RosterStudent; status: string | null }[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const { toast } = useToast();
 
   useEffect(() => {
     setLoading(true);
@@ -214,11 +216,24 @@ function AttendanceTab({ schedule, onBack }: { schedule: ScheduleAssignment['sch
   };
 
   const save = async () => {
+    const markedCount = roster.filter((r) => r.status).length;
     setSaving(true);
     try {
       await api.post(`/api/trainer-portal/schedules/${schedule.id}/attendance`, {
         date,
         records: roster.filter((r) => r.status).map((r) => ({ studentId: r.student.id, status: r.status })),
+      });
+      toast({
+        title: 'Attendance saved',
+        description: `${markedCount} of ${roster.length} student${roster.length === 1 ? '' : 's'} marked for ${date}.`,
+        variant: 'success',
+      });
+    } catch (e: unknown) {
+      const err = e as { response?: { data?: { message?: string } } };
+      toast({
+        title: 'Could not save attendance',
+        description: err.response?.data?.message || 'Please try again.',
+        variant: 'error',
       });
     } finally {
       setSaving(false);
