@@ -1134,8 +1134,8 @@ function StudentsTab({ canEdit, setError, refresh, refreshKey, batches, onEnroll
   const [batchFilter, setBatchFilter] = useState('');
   const [courseFilter, setCourseFilter] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
-  const [phoneInput, setPhoneInput] = useState('');
-  const [phoneSearch, setPhoneSearch] = useState('');
+  const [searchInput, setSearchInput] = useState('');
+  const [searchTerm, setSearchTerm] = useState('');
 
   const [courseOptions, setCourseOptions] = useState<{ id: string; name: string }[]>([]);
   const [batchOptions, setBatchOptions] = useState<Batch[]>(batches || []);
@@ -1146,14 +1146,14 @@ function StudentsTab({ canEdit, setError, refresh, refreshKey, batches, onEnroll
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [showBulkStatus, setShowBulkStatus] = useState(false);
 
-  // Debounce phone search input.
+  // Debounce name/code/phone search input.
   useEffect(() => {
-    const t = setTimeout(() => setPhoneSearch(phoneInput.trim()), 350);
+    const t = setTimeout(() => setSearchTerm(searchInput.trim()), 350);
     return () => clearTimeout(t);
-  }, [phoneInput]);
+  }, [searchInput]);
 
   // Reset to page 1 whenever a filter changes.
-  useEffect(() => { setPage(1); }, [trackFilter, batchFilter, courseFilter, statusFilter, phoneSearch]);
+  useEffect(() => { setPage(1); }, [trackFilter, batchFilter, courseFilter, statusFilter, searchTerm]);
 
   useEffect(() => {
     if (batches && batches.length) { setBatchOptions(batches); return; }
@@ -1175,7 +1175,7 @@ function StudentsTab({ canEdit, setError, refresh, refreshKey, batches, onEnroll
           batchId: batchFilter || undefined,
           courseId: courseFilter || undefined,
           status: statusFilter || undefined,
-          phone: phoneSearch || undefined,
+          search: searchTerm || undefined,
         },
       });
       setStudents(res.data.data);
@@ -1185,7 +1185,7 @@ function StudentsTab({ canEdit, setError, refresh, refreshKey, batches, onEnroll
     } finally {
       setLoading(false);
     }
-  }, [page, trackFilter, batchFilter, courseFilter, statusFilter, phoneSearch]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [page, trackFilter, batchFilter, courseFilter, statusFilter, searchTerm]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => { fetchStudents(); }, [fetchStudents, refreshKey]);
 
@@ -1244,10 +1244,10 @@ function StudentsTab({ canEdit, setError, refresh, refreshKey, batches, onEnroll
           <div className="relative">
             <Search className="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground" />
             <input
-              value={phoneInput}
-              onChange={(e) => setPhoneInput(e.target.value)}
-              placeholder="Search by phone..."
-              className="pl-8 pr-3 py-2 border rounded-lg text-sm w-48"
+              value={searchInput}
+              onChange={(e) => setSearchInput(e.target.value)}
+              placeholder="Search by name, code, or phone..."
+              className="pl-8 pr-3 py-2 border rounded-lg text-sm w-56"
             />
           </div>
           <select value={trackFilter} onChange={(e) => setTrackFilter(e.target.value)} className="px-3 py-2 border rounded-lg text-sm">
