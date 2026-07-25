@@ -3296,19 +3296,27 @@ function exportRowsToExcel(filename: string, rows: Record<string, unknown>[], sh
   XLSX.writeFile(wb, filename);
 }
 
-interface ReportFilters { batchId: string; courseId: string; track: string; trainerId: string; }
-const EMPTY_REPORT_FILTERS: ReportFilters = { batchId: '', courseId: '', track: '', trainerId: '' };
+interface ReportFilters { batchId: string; scheduleId: string; courseId: string; track: string; trainerId: string; }
+const EMPTY_REPORT_FILTERS: ReportFilters = { batchId: '', scheduleId: '', courseId: '', track: '', trainerId: '' };
 
-/** Shared Batch / Course / Track (/ Trainer) filter row reused across report panels. Options are
- *  loaded once from the same list endpoints the Batches & Courses tabs use. The trainer dropdown
- *  is opt-in via `showTrainer` since not every report needs it. */
+interface ReportBatchOption {
+  id: string;
+  code: string;
+  schedules: { id: string; code: string | null; course: { name: string } }[];
+}
+
+/** Shared Batch / Sub-batch / Course / Track (/ Trainer) filter row reused across report panels.
+ *  Options are loaded once from the same list endpoints the Batches & Courses tabs use. The
+ *  trainer dropdown is opt-in via `showTrainer` since not every report needs it. */
 function ReportFilterBar({ filters, onChange, showTrainer }: { filters: ReportFilters; onChange: (f: ReportFilters) => void; showTrainer?: boolean }) {
-  const [batchOptions, setBatchOptions] = useState<{ id: string; code: string }[]>([]);
+  const [batchOptions, setBatchOptions] = useState<ReportBatchOption[]>([]);
   const [courseOptions, setCourseOptions] = useState<{ id: string; name: string }[]>([]);
   const [trainerOptions, setTrainerOptions] = useState<{ id: string; firstName: string; lastName: string; employeeCode: string }[]>([]);
 
   useEffect(() => {
-    api.get('/api/production/batches').then((res) => setBatchOptions(res.data.data.map((b: { id: string; code: string }) => ({ id: b.id, code: b.code })))).catch(() => setBatchOptions([]));
+    api.get('/api/production/batches')
+      .then((res) => setBatchOptions(res.data.data.map((b: ReportBatchOption) => ({ id: b.id, code: b.code, schedules: b.schedules || [] }))))
+      .catch(() => setBatchOptions([]));
     api.get('/api/production/courses').then((res) => setCourseOptions(res.data.data.map((c: AcademyCourse) => ({ id: c.id, name: c.name })))).catch(() => setCourseOptions([]));
   }, []);
 
@@ -3325,15 +3333,29 @@ function ReportFilterBar({ filters, onChange, showTrainer }: { filters: ReportFi
       .catch(() => setTrainerOptions([]));
   }, [showTrainer]);
 
+  // Sub-batch options: scoped to the selected batch, or every sub-batch across
+  // all batches when no batch is picked yet — so trainers/PM can jump straight
+  // to a specific sub-batch without first narrowing by batch.
+  const scheduleOptions = (filters.batchId ? batchOptions.filter((b) => b.id === filters.batchId) : batchOptions)
+    .flatMap((b) => b.schedules.map((s) => ({ id: s.id, label: `${b.code} — ${s.code ? `${s.code} · ` : ''}${s.course.name}` })));
+
   return (
     <div className="flex flex-wrap items-center gap-2 text-sm">
       <select
         value={filters.batchId}
-        onChange={(e) => onChange({ ...filters, batchId: e.target.value })}
+        onChange={(e) => onChange({ ...filters, batchId: e.target.value, scheduleId: '' })}
         className="border rounded-lg px-2 py-1"
       >
         <option value="">All batches</option>
         {batchOptions.map((b) => <option key={b.id} value={b.id}>{b.code}</option>)}
+      </select>
+      <select
+        value={filters.scheduleId}
+        onChange={(e) => onChange({ ...filters, scheduleId: e.target.value })}
+        className="border rounded-lg px-2 py-1"
+      >
+        <option value="">All sub-batches</option>
+        {scheduleOptions.map((s) => <option key={s.id} value={s.id}>{s.label}</option>)}
       </select>
       <select
         value={filters.courseId}
@@ -3361,7 +3383,7 @@ function ReportFilterBar({ filters, onChange, showTrainer }: { filters: ReportFi
           {trainerOptions.map((t) => <option key={t.id} value={t.id}>{t.firstName} {t.lastName} ({t.employeeCode})</option>)}
         </select>
       )}
-      {(filters.batchId || filters.courseId || filters.track || filters.trainerId) && (
+      {(filters.batchId || filters.scheduleId || filters.courseId || filters.track || filters.trainerId) && (
         <button onClick={() => onChange(EMPTY_REPORT_FILTERS)} className="text-xs text-blue-600">Clear filters</button>
       )}
     </div>
@@ -3804,7 +3826,11 @@ function StudentReportPanel({ setError }: { setError: (s: string) => void }) {
       api.get('/api/production/reports/students', {
         params: {
           search: search || undefined,
-          batchId: filters.batchId || undefined, courseId: filters.courseId || undefined, track: filters.track || undefined,
+          batchId: filters.batchId || undefined,
+          scheduleId: filters.scheduleId || undefined,
+          courseId: filters.courseId || undefined,
+          track: filters.track || undefined,
+          trainerId: filters.trainerId || undefined,
         },
       })
         .then((res) => setList(res.data.data))
@@ -3834,7 +3860,7 @@ function StudentReportPanel({ setError }: { setError: (s: string) => void }) {
             placeholder="Search name or code..."
             className="w-full px-3 py-2 border rounded-lg text-sm"
           />
-          <ReportFilterBar filters={filters} onChange={setFilters} />
+          <ReportFilterBar filters={filters} onChange={setFilters} showTrainer />
         </div>
         <div className="max-h-[60vh] overflow-y-auto divide-y">
           {loadingList ? (
