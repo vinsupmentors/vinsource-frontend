@@ -363,6 +363,7 @@ function CoursesTab({ courses, canEdit, setError, refresh }: {
   const [showAddModule, setShowAddModule] = useState<string | null>(null);
   const [editingModule, setEditingModule] = useState<AcademyModule | null>(null);
   const [materialsFor, setMaterialsFor] = useState<AcademyCourse | null>(null);
+  const [editingCourse, setEditingCourse] = useState<AcademyCourse | null>(null);
 
   const toggleActive = async (course: AcademyCourse) => {
     try {
@@ -402,6 +403,9 @@ function CoursesTab({ courses, canEdit, setError, refresh }: {
             <div className="border-t px-4 py-3 space-y-2 bg-muted/10">
               {canEdit && (
                 <div className="flex justify-end gap-2 pb-1">
+                  <button onClick={() => setEditingCourse(c)} className="text-xs px-2 py-1 border rounded-lg hover:bg-muted/50 flex items-center gap-1">
+                    <Pencil className="w-3 h-3" /> Edit Course
+                  </button>
                   <button onClick={() => toggleActive(c)} className="text-xs px-2 py-1 border rounded-lg hover:bg-muted/50">
                     {c.isActive ? 'Mark Inactive' : 'Mark Active'}
                   </button>
@@ -451,6 +455,9 @@ function CoursesTab({ courses, canEdit, setError, refresh }: {
       )}
       {materialsFor && (
         <CourseMaterialsModal course={materialsFor} onClose={() => setMaterialsFor(null)} setError={setError} />
+      )}
+      {editingCourse && (
+        <EditCourseModal course={editingCourse} onClose={() => setEditingCourse(null)} setError={setError} onSaved={() => { setEditingCourse(null); refresh(); }} />
       )}
     </div>
   );
@@ -590,6 +597,43 @@ function AddCourseModal({ onClose, setError, onSaved }: { onClose: () => void; s
         </label>
       </div>
       <ModalFooter onClose={onClose} onSubmit={submit} saving={saving} label="Create" />
+    </Modal>
+  );
+}
+
+function EditCourseModal({ course, onClose, setError, onSaved }: {
+  course: AcademyCourse; onClose: () => void; setError: (s: string) => void; onSaved: () => void;
+}) {
+  const [form, setForm] = useState({
+    name: course.name,
+    description: course.description ?? '',
+    totalHours: course.totalHours != null ? String(course.totalHours) : '',
+    isCustom: course.isCustom,
+  });
+  const [saving, setSaving] = useState(false);
+
+  const submit = async () => {
+    if (!form.name) { setError('Course name is required'); return; }
+    setSaving(true);
+    setError('');
+    try {
+      await api.put(`/api/production/courses/${course.id}`, { ...form, totalHours: form.totalHours || undefined });
+      onSaved();
+    } catch (err) { setError(errMsg(err, 'Failed to update course')); } finally { setSaving(false); }
+  };
+
+  return (
+    <Modal title="Edit Course" onClose={onClose}>
+      <div className="space-y-3">
+        <input className="w-full px-3 py-2 border rounded-lg text-sm" placeholder="Course Name *" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
+        <textarea className="w-full px-3 py-2 border rounded-lg text-sm" placeholder="Description" rows={3} value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} />
+        <input type="number" className="w-full px-3 py-2 border rounded-lg text-sm" placeholder="Total Hours" value={form.totalHours} onChange={(e) => setForm({ ...form, totalHours: e.target.value })} />
+        <label className="flex items-center gap-2 text-sm">
+          <input type="checkbox" checked={form.isCustom} onChange={(e) => setForm({ ...form, isCustom: e.target.checked })} />
+          Custom course (modules added later)
+        </label>
+      </div>
+      <ModalFooter onClose={onClose} onSubmit={submit} saving={saving} label="Save" />
     </Modal>
   );
 }
