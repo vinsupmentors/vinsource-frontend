@@ -1,12 +1,30 @@
 import { useEffect, useState, useCallback } from 'react';
 import api from '@/lib/api';
 import { useModuleAccess } from '@/hooks/useModuleAccess';
-import { Lock, Plus, X, Phone, Mail, Calendar, Users, TrendingUp, CheckCircle2 } from 'lucide-react';
+import { formatDate, formatDateTime } from '@/lib/utils';
+import {
+  Lock, Plus, X, Phone, Mail, Calendar, Users, TrendingUp, CheckCircle2,
+  PhoneCall, Video, MapPin, RefreshCw, AlertTriangle, Settings, Trash2, Activity,
+} from 'lucide-react';
 
+// ── Types ────────────────────────────────────────────────────────────────
 type LeadStatus = 'NEW' | 'CONTACTED' | 'DEMO_SCHEDULED' | 'DEMO_DONE' | 'NEGOTIATION' | 'ENROLLED' | 'LOST';
 type LeadLostReason = 'NOT_INTERESTED' | 'INVALID_NUMBER' | 'UNREACHABLE' | 'DUPLICATE' | 'OTHER';
+type DemoMode = 'ONLINE' | 'OFFLINE';
+type DemoStatus = 'SCHEDULED' | 'COMPLETED' | 'RESCHEDULED' | 'NO_SHOW' | 'CANCELLED';
 
 interface EmployeeLite { id: string; firstName: string; lastName: string; employeeCode: string; }
+
+interface DemoLite {
+  id: string;
+  scheduledAt: string;
+  mode: DemoMode;
+  status: DemoStatus;
+  feedback?: string | null;
+  conductedBy?: EmployeeLite | null;
+  createdAt: string;
+  rescheduledFromId?: string | null;
+}
 
 interface Lead {
   id: string;
@@ -18,11 +36,39 @@ interface Lead {
   status: LeadStatus;
   lostReason?: LeadLostReason | null;
   notes?: string | null;
+  lastContactAt?: string | null;
+  nextFollowUpAt?: string | null;
   createdAt: string;
   assignedTo?: EmployeeLite | null;
   campaign?: { id: string; name: string } | null;
-  _count?: { demos: number };
+  demos?: DemoLite[]; // latest one only, from the list endpoint
+  _count?: { demos: number; callLogs: number };
 }
+
+interface CallLog {
+  id: string;
+  notes: string;
+  nextFollowUpAt?: string | null;
+  calledAt: string;
+  calledBy?: EmployeeLite | null;
+}
+
+interface Pulse {
+  callsMadeToday: number;
+  leadsCreatedToday: number;
+  demosBookedToday: number;
+  demosScheduledForToday: number;
+  demosConductedToday: number;
+  demosRescheduledToday: number;
+  demosNoShowToday: number;
+  demosPendingToday: number;
+  followUpsDueToday: number;
+  overdueFollowUps: number;
+  enrolledToday: number;
+  lostToday: number;
+}
+
+interface ReportRecipient { id: string; email: string; name: string | null; }
 
 interface Stats {
   totalLeads: number;
@@ -31,6 +77,7 @@ interface Stats {
   enrolledThisMonth: number;
 }
 
+// ── Constants ────────────────────────────────────────────────────────────
 const STATUS_COLOR: Record<LeadStatus, string> = {
   NEW: 'bg-slate-100 text-slate-700',
   CONTACTED: 'bg-blue-100 text-blue-700',
@@ -52,20 +99,54 @@ const LOST_REASONS: { value: LeadLostReason; label: string }[] = [
 ];
 const LOST_REASON_LABEL: Record<LeadLostReason, string> = Object.fromEntries(LOST_REASONS.map((r) => [r.value, r.label])) as Record<LeadLostReason, string>;
 
+const DEMO_MODES: DemoMode[] = ['ONLINE', 'OFFLINE'];
+const DEMO_MODE_LABEL: Record<DemoMode, string> = { ONLINE: 'Online', OFFLINE: 'Offline' };
+const DEMO_STATUS_LABEL: Record<DemoStatus, string> = {
+  SCHEDULED: 'Scheduled', COMPLETED: 'Conducted', RESCHEDULED: 'Rescheduled', NO_SHOW: 'No Show', CANCELLED: 'Cancelled',
+};
+const DEMO_STATUS_COLOR: Record<DemoStatus, string> = {
+  SCHEDULED: 'bg-amber-100 text-amber-700',
+  COMPLETED: 'bg-green-100 text-green-700',
+  RESCHEDULED: 'bg-slate-100 text-slate-600',
+  NO_SHOW: 'bg-red-100 text-red-700',
+  CANCELLED: 'bg-slate-100 text-slate-500',
+};
+
+function leadAgeLabel(createdAt: string): string {
+  const days = Math.floor((Date.now() - new Date(createdAt).getTime()) / 86400000);
+  if (days <= 0) return 'Today';
+  if (days === 1) return '1 day';
+  return `${days} days`;
+}
+
+function reminderColor(nextFollowUpAt?: string | null): string {
+  if (!nextFollowUpAt) return 'text-muted-foreground';
+  const today = new Date(); today.setHours(0, 0, 0, 0);
+  const due = new Date(nextFollowUpAt); due.setHours(0, 0, 0, 0);
+  if (due < today) return 'text-red-600 font-semibold';
+  if (due.getTime() === today.getTime()) return 'text-amber-600 font-semibold';
+  return 'text-foreground';
+}
+
+// ── Main page ────────────────────────────────────────────────────────────
+type Tab = 'leads' | 'pulse';
+
 export default function SalesPage() {
   const { modules, loaded, hasModule } = useModuleAccess();
   const level = modules.SALES;
   const canEdit = hasModule('SALES', 'EDIT');
 
+  const [tab, setTab] = useState<Tab>('leads');
   const [leads, setLeads] = useState<Lead[]>([]);
   const [stats, setStats] = useState<Stats | null>(null);
   const [employees, setEmployees] = useState<EmployeeLite[]>([]);
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>('');
+  const [followUpFilter, setFollowUpFilter] = useState<string>('');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [showAdd, setShowAdd] = useState(false);
-  const [demoLead, setDemoLead] = useState<Lead | null>(null);
+  const [detailLeadId, setDetailLeadId] = useState<string | null>(null);
   const [lostReasonLead, setLostReasonLead] = useState<Lead | null>(null);
   const [saving, setSaving] = useState(false);
 
@@ -73,9 +154,10 @@ export default function SalesPage() {
     setLoading(true);
     setError('');
     try {
-      const params: Record<string, string> = {};
+      const params: Record<string, string> = { limit: '200' };
       if (search) params.search = search;
       if (statusFilter) params.status = statusFilter;
+      if (followUpFilter) params.followUp = followUpFilter;
       const [leadsRes, statsRes] = await Promise.all([
         api.get('/api/sales/leads', { params }),
         api.get('/api/sales/stats'),
@@ -88,9 +170,9 @@ export default function SalesPage() {
     } finally {
       setLoading(false);
     }
-  }, [search, statusFilter]);
+  }, [search, statusFilter, followUpFilter]);
 
-  useEffect(() => { if (level) fetchAll(); }, [level, fetchAll]);
+  useEffect(() => { if (level && tab === 'leads') fetchAll(); }, [level, tab, fetchAll]);
 
   useEffect(() => {
     if (!level) return;
@@ -114,6 +196,16 @@ export default function SalesPage() {
     updateLeadStatus(lead.id, status);
   };
 
+  const reassignLead = async (id: string, assignedToId: string) => {
+    try {
+      await api.put(`/api/sales/leads/${id}`, { assignedToId: assignedToId || null });
+      fetchAll();
+    } catch (err: unknown) {
+      const e = err as { response?: { data?: { message?: string } } };
+      setError(e.response?.data?.message || 'Failed to reassign lead');
+    }
+  };
+
   if (loaded && !level) {
     return (
       <div className="flex flex-col items-center justify-center h-64 text-center gap-3">
@@ -128,14 +220,16 @@ export default function SalesPage() {
     );
   }
 
+  const detailLead = leads.find((l) => l.id === detailLeadId) || null;
+
   return (
     <div className="space-y-6">
       <div className="flex items-start justify-between">
         <div>
           <h1 className="text-2xl font-bold">Sales</h1>
-          <p className="text-muted-foreground text-sm">Leads, demos, and conversion pipeline</p>
+          <p className="text-muted-foreground text-sm">Leads, calls, demos, and conversion pipeline</p>
         </div>
-        {canEdit && (
+        {canEdit && tab === 'leads' && (
           <button
             onClick={() => setShowAdd(true)}
             className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 transition-colors"
@@ -145,106 +239,161 @@ export default function SalesPage() {
         )}
       </div>
 
+      <div className="flex items-center gap-1 border-b">
+        {([
+          { id: 'leads' as Tab, label: 'Leads', icon: Users },
+          { id: 'pulse' as Tab, label: 'Sales Pulse', icon: Activity },
+        ]).map((t) => {
+          const Icon = t.icon;
+          return (
+            <button
+              key={t.id}
+              onClick={() => setTab(t.id)}
+              className={`flex items-center gap-2 px-4 py-2 text-sm font-medium border-b-2 -mb-px transition-colors ${
+                tab === t.id ? 'border-blue-600 text-blue-600' : 'border-transparent text-muted-foreground hover:text-foreground'
+              }`}
+            >
+              <Icon className="w-4 h-4" /> {t.label}
+            </button>
+          );
+        })}
+      </div>
+
       {error && (
         <div className="bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg px-4 py-3">{error}</div>
       )}
 
-      {/* Stats */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-        <StatCard icon={Users} label="Total Leads" value={stats?.totalLeads ?? '—'} />
-        <StatCard icon={Calendar} label="Upcoming Demos" value={stats?.upcomingDemos ?? '—'} />
-        <StatCard icon={CheckCircle2} label="Enrolled this month" value={stats?.enrolledThisMonth ?? '—'} />
-        <StatCard icon={TrendingUp} label="In Negotiation" value={stats?.statusCounts?.NEGOTIATION ?? 0} />
-      </div>
+      {tab === 'leads' && (
+        <>
+          {/* Stats */}
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+            <StatCard icon={Users} label="Total Leads" value={stats?.totalLeads ?? '—'} />
+            <StatCard icon={Calendar} label="Upcoming Demos" value={stats?.upcomingDemos ?? '—'} />
+            <StatCard icon={CheckCircle2} label="Enrolled this month" value={stats?.enrolledThisMonth ?? '—'} />
+            <StatCard icon={TrendingUp} label="In Negotiation" value={stats?.statusCounts?.NEGOTIATION ?? 0} />
+          </div>
 
-      {/* Filters */}
-      <div className="flex flex-wrap items-center gap-3">
-        <input
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          placeholder="Search name, phone, email..."
-          className="px-3 py-2 border rounded-lg text-sm w-64"
-        />
-        <select
-          value={statusFilter}
-          onChange={(e) => setStatusFilter(e.target.value)}
-          className="px-3 py-2 border rounded-lg text-sm"
-        >
-          <option value="">All statuses</option>
-          {STATUSES.map((s) => <option key={s} value={s}>{s.replace(/_/g, ' ')}</option>)}
-        </select>
-      </div>
+          {/* Filters */}
+          <div className="flex flex-wrap items-center gap-3">
+            <input
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Search name, phone, email..."
+              className="px-3 py-2 border rounded-lg text-sm w-64"
+            />
+            <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} className="px-3 py-2 border rounded-lg text-sm">
+              <option value="">All statuses</option>
+              {STATUSES.map((s) => <option key={s} value={s}>{s.replace(/_/g, ' ')}</option>)}
+            </select>
+            <select value={followUpFilter} onChange={(e) => setFollowUpFilter(e.target.value)} className="px-3 py-2 border rounded-lg text-sm">
+              <option value="">All reminders</option>
+              <option value="today">Due today</option>
+              <option value="overdue">Overdue</option>
+            </select>
+          </div>
 
-      {/* Leads table */}
-      <div className="bg-card border rounded-xl overflow-hidden">
-        <table className="w-full text-sm">
-          <thead className="bg-muted/50 text-left text-xs uppercase text-muted-foreground">
-            <tr>
-              <th className="px-4 py-3">Lead</th>
-              <th className="px-4 py-3">Contact</th>
-              <th className="px-4 py-3">Course Interest</th>
-              <th className="px-4 py-3">Assigned To</th>
-              <th className="px-4 py-3">Status</th>
-              <th className="px-4 py-3">Demos</th>
-              {canEdit && <th className="px-4 py-3" />}
-            </tr>
-          </thead>
-          <tbody className="divide-y">
-            {loading ? (
-              <tr><td colSpan={7} className="px-4 py-8 text-center text-muted-foreground">Loading...</td></tr>
-            ) : leads.length === 0 ? (
-              <tr><td colSpan={7} className="px-4 py-8 text-center text-muted-foreground">No leads found</td></tr>
-            ) : leads.map((lead) => (
-              <tr key={lead.id} className="hover:bg-muted/30">
-                <td className="px-4 py-3 font-medium">{lead.name}</td>
-                <td className="px-4 py-3">
-                  <div className="flex items-center gap-1 text-xs text-muted-foreground">
-                    <Phone className="w-3 h-3" /> {lead.phone}
-                  </div>
-                  {lead.email && (
-                    <div className="flex items-center gap-1 text-xs text-muted-foreground">
-                      <Mail className="w-3 h-3" /> {lead.email}
-                    </div>
-                  )}
-                </td>
-                <td className="px-4 py-3">{lead.courseInterest || '—'}</td>
-                <td className="px-4 py-3">
-                  {lead.assignedTo ? `${lead.assignedTo.firstName} ${lead.assignedTo.lastName}` : '—'}
-                </td>
-                <td className="px-4 py-3">
-                  {canEdit ? (
-                    <select
-                      value={lead.status}
-                      onChange={(e) => onStatusChange(lead, e.target.value as LeadStatus)}
-                      className={`text-xs font-medium rounded-full px-2 py-1 border-0 ${STATUS_COLOR[lead.status]}`}
-                    >
-                      {STATUSES.map((s) => <option key={s} value={s}>{s.replace(/_/g, ' ')}</option>)}
-                    </select>
-                  ) : (
-                    <span className={`text-xs font-medium rounded-full px-2 py-1 ${STATUS_COLOR[lead.status]}`}>
-                      {lead.status.replace(/_/g, ' ')}
-                    </span>
-                  )}
-                  {lead.status === 'LOST' && lead.lostReason && (
-                    <p className="text-[10px] text-muted-foreground mt-1">{LOST_REASON_LABEL[lead.lostReason]}</p>
-                  )}
-                </td>
-                <td className="px-4 py-3 text-muted-foreground">{lead._count?.demos ?? 0}</td>
-                {canEdit && (
-                  <td className="px-4 py-3 text-right">
-                    <button
-                      onClick={() => setDemoLead(lead)}
-                      className="text-xs font-medium text-blue-600 hover:underline"
-                    >
-                      Schedule Demo
-                    </button>
-                  </td>
-                )}
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
+          {/* Leads table */}
+          <div className="bg-card border rounded-xl overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead className="bg-muted/50 text-left text-xs uppercase text-muted-foreground">
+                <tr>
+                  <th className="px-3 py-3">#</th>
+                  <th className="px-3 py-3">Name</th>
+                  <th className="px-3 py-3">Phone</th>
+                  <th className="px-3 py-3">Email</th>
+                  <th className="px-3 py-3">Status</th>
+                  <th className="px-3 py-3">Assigned</th>
+                  <th className="px-3 py-3">Source</th>
+                  <th className="px-3 py-3">Demo</th>
+                  <th className="px-3 py-3">Reminder</th>
+                  <th className="px-3 py-3">Last Contact</th>
+                  <th className="px-3 py-3">Created</th>
+                  <th className="px-3 py-3">Lead Age</th>
+                  <th className="px-3 py-3">Date Of Demo</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y">
+                {loading ? (
+                  <tr><td colSpan={13} className="px-4 py-8 text-center text-muted-foreground">Loading...</td></tr>
+                ) : leads.length === 0 ? (
+                  <tr><td colSpan={13} className="px-4 py-8 text-center text-muted-foreground">No leads found</td></tr>
+                ) : leads.map((lead, i) => {
+                  const latestDemo = lead.demos?.[0];
+                  return (
+                    <tr key={lead.id} className="hover:bg-muted/30">
+                      <td className="px-3 py-3 text-muted-foreground">{i + 1}</td>
+                      <td className="px-3 py-3 font-medium whitespace-nowrap">
+                        <button onClick={() => setDetailLeadId(lead.id)} className="text-blue-600 hover:underline text-left">
+                          {lead.name}
+                        </button>
+                      </td>
+                      <td className="px-3 py-3 whitespace-nowrap">
+                        <div className="flex items-center gap-1 text-xs text-muted-foreground"><Phone className="w-3 h-3" /> {lead.phone}</div>
+                      </td>
+                      <td className="px-3 py-3 whitespace-nowrap">
+                        {lead.email ? (
+                          <div className="flex items-center gap-1 text-xs text-muted-foreground"><Mail className="w-3 h-3" /> {lead.email}</div>
+                        ) : '—'}
+                      </td>
+                      <td className="px-3 py-3">
+                        {canEdit ? (
+                          <select
+                            value={lead.status}
+                            onChange={(e) => onStatusChange(lead, e.target.value as LeadStatus)}
+                            className={`text-xs font-medium rounded-full px-2 py-1 border-0 ${STATUS_COLOR[lead.status]}`}
+                          >
+                            {STATUSES.map((s) => <option key={s} value={s}>{s.replace(/_/g, ' ')}</option>)}
+                          </select>
+                        ) : (
+                          <span className={`text-xs font-medium rounded-full px-2 py-1 ${STATUS_COLOR[lead.status]}`}>{lead.status.replace(/_/g, ' ')}</span>
+                        )}
+                        {lead.status === 'LOST' && lead.lostReason && (
+                          <p className="text-[10px] text-muted-foreground mt-1">{LOST_REASON_LABEL[lead.lostReason]}</p>
+                        )}
+                      </td>
+                      <td className="px-3 py-3 whitespace-nowrap">
+                        {canEdit ? (
+                          <select
+                            value={lead.assignedTo?.id || ''}
+                            onChange={(e) => reassignLead(lead.id, e.target.value)}
+                            className="text-xs px-2 py-1 border rounded-lg bg-white"
+                          >
+                            <option value="">Unassigned</option>
+                            {employees.map((e) => <option key={e.id} value={e.id}>{e.firstName} {e.lastName}</option>)}
+                          </select>
+                        ) : (
+                          lead.assignedTo ? `${lead.assignedTo.firstName} ${lead.assignedTo.lastName}` : '—'
+                        )}
+                      </td>
+                      <td className="px-3 py-3 text-muted-foreground whitespace-nowrap">{lead.source || '—'}</td>
+                      <td className="px-3 py-3 whitespace-nowrap">
+                        {latestDemo ? (
+                          <span className={`text-xs font-medium rounded-full px-2 py-1 ${DEMO_STATUS_COLOR[latestDemo.status]}`}>
+                            {DEMO_MODE_LABEL[latestDemo.mode]} · {DEMO_STATUS_LABEL[latestDemo.status]}
+                          </span>
+                        ) : <span className="text-muted-foreground text-xs">Not booked</span>}
+                      </td>
+                      <td className={`px-3 py-3 text-xs whitespace-nowrap ${reminderColor(lead.nextFollowUpAt)}`}>
+                        {lead.nextFollowUpAt ? formatDate(lead.nextFollowUpAt) : '—'}
+                      </td>
+                      <td className="px-3 py-3 text-xs text-muted-foreground whitespace-nowrap">
+                        {lead.lastContactAt ? formatDateTime(lead.lastContactAt) : 'Never'}
+                      </td>
+                      <td className="px-3 py-3 text-xs text-muted-foreground whitespace-nowrap">{formatDate(lead.createdAt)}</td>
+                      <td className="px-3 py-3 text-xs text-muted-foreground whitespace-nowrap">{leadAgeLabel(lead.createdAt)}</td>
+                      <td className="px-3 py-3 text-xs text-muted-foreground whitespace-nowrap">
+                        {latestDemo ? formatDate(latestDemo.scheduledAt) : '—'}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </>
+      )}
+
+      {tab === 'pulse' && <SalesPulsePanel canEdit={canEdit} />}
 
       {showAdd && (
         <AddLeadModal
@@ -253,18 +402,6 @@ export default function SalesPage() {
           setSaving={setSaving}
           onClose={() => setShowAdd(false)}
           onSaved={() => { setShowAdd(false); fetchAll(); }}
-          setError={setError}
-        />
-      )}
-
-      {demoLead && (
-        <ScheduleDemoModal
-          lead={demoLead}
-          employees={employees}
-          saving={saving}
-          setSaving={setSaving}
-          onClose={() => setDemoLead(null)}
-          onSaved={() => { setDemoLead(null); fetchAll(); }}
           setError={setError}
         />
       )}
@@ -281,6 +418,17 @@ export default function SalesPage() {
             setSaving(false);
             setLostReasonLead(null);
           }}
+        />
+      )}
+
+      {detailLead && (
+        <LeadDetailModal
+          lead={detailLead}
+          employees={employees}
+          canEdit={canEdit}
+          onClose={() => setDetailLeadId(null)}
+          onChanged={fetchAll}
+          setGlobalError={setError}
         />
       )}
     </div>
@@ -362,55 +510,6 @@ function AddLeadModal({ employees, saving, setSaving, onClose, onSaved, setError
   );
 }
 
-function ScheduleDemoModal({ lead, employees, saving, setSaving, onClose, onSaved, setError }: ModalProps & { lead: Lead }) {
-  const [form, setForm] = useState({ scheduledAt: '', conductedById: '' });
-
-  const submit = async () => {
-    if (!form.scheduledAt) { setError('Demo date/time is required'); return; }
-    setSaving(true);
-    setError('');
-    try {
-      await api.post('/api/sales/demos', {
-        leadId: lead.id,
-        scheduledAt: new Date(form.scheduledAt).toISOString(),
-        conductedById: form.conductedById || undefined,
-      });
-      onSaved();
-    } catch (err: unknown) {
-      const e = err as { response?: { data?: { message?: string } } };
-      setError(e.response?.data?.message || 'Failed to schedule demo');
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  return (
-    <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
-      <div className="bg-white rounded-xl w-full max-w-md p-6 space-y-4">
-        <div className="flex items-center justify-between">
-          <h2 className="font-semibold text-lg">Schedule Demo — {lead.name}</h2>
-          <button onClick={onClose}><X className="w-4 h-4" /></button>
-        </div>
-        <div className="space-y-3">
-          <input type="datetime-local" className="w-full px-3 py-2 border rounded-lg text-sm" value={form.scheduledAt} onChange={(e) => setForm({ ...form, scheduledAt: e.target.value })} />
-          {employees.length > 0 && (
-            <select className="w-full px-3 py-2 border rounded-lg text-sm" value={form.conductedById} onChange={(e) => setForm({ ...form, conductedById: e.target.value })}>
-              <option value="">Conducted by...</option>
-              {employees.map((e) => <option key={e.id} value={e.id}>{e.firstName} {e.lastName}</option>)}
-            </select>
-          )}
-        </div>
-        <div className="flex justify-end gap-2">
-          <button onClick={onClose} className="px-4 py-2 text-sm rounded-lg border">Cancel</button>
-          <button onClick={submit} disabled={saving} className="px-4 py-2 text-sm rounded-lg bg-blue-600 text-white disabled:opacity-50">
-            {saving ? 'Saving...' : 'Schedule'}
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
 function LostReasonModal({ lead, saving, setSaving, onClose, onConfirm }: {
   lead: Lead; saving: boolean; setSaving: (v: boolean) => void; onClose: () => void; onConfirm: (reason: LeadLostReason) => void;
 }) {
@@ -444,6 +543,455 @@ function LostReasonModal({ lead, saving, setSaving, onClose, onConfirm }: {
           </button>
         </div>
       </div>
+    </div>
+  );
+}
+
+// ── Lead detail modal: call log timeline + demo actions + reassignment ────
+function LeadDetailModal({ lead, employees, canEdit, onClose, onChanged, setGlobalError }: {
+  lead: Lead; employees: EmployeeLite[]; canEdit: boolean; onClose: () => void; onChanged: () => void; setGlobalError: (s: string) => void;
+}) {
+  const [callLogs, setCallLogs] = useState<CallLog[]>([]);
+  const [demos, setDemos] = useState<DemoLite[]>([]);
+  const [loadingHistory, setLoadingHistory] = useState(true);
+  const [localError, setLocalError] = useState('');
+
+  const [callNotes, setCallNotes] = useState('');
+  const [callFollowUp, setCallFollowUp] = useState('');
+  const [callStatus, setCallStatus] = useState<LeadStatus | ''>('');
+  const [callLostReason, setCallLostReason] = useState<LeadLostReason | ''>('');
+  const [savingCall, setSavingCall] = useState(false);
+
+  const [showScheduleForm, setShowScheduleForm] = useState(false);
+  const [demoScheduledAt, setDemoScheduledAt] = useState('');
+  const [demoMode, setDemoMode] = useState<DemoMode>('ONLINE');
+  const [savingDemo, setSavingDemo] = useState(false);
+
+  const [actingDemo, setActingDemo] = useState<{ id: string; type: 'complete' | 'reschedule' | 'noshow' | 'cancel' } | null>(null);
+  const [actionFeedback, setActionFeedback] = useState('');
+  const [actionConductedById, setActionConductedById] = useState('');
+  const [actionNewScheduledAt, setActionNewScheduledAt] = useState('');
+  const [actionNewMode, setActionNewMode] = useState<DemoMode>('ONLINE');
+  const [savingAction, setSavingAction] = useState(false);
+
+  const [reassignSaving, setReassignSaving] = useState(false);
+
+  const load = useCallback(async () => {
+    setLoadingHistory(true);
+    setLocalError('');
+    try {
+      const [callsRes, demosRes] = await Promise.all([
+        api.get(`/api/sales/leads/${lead.id}/calls`),
+        api.get('/api/sales/demos', { params: { leadId: lead.id } }),
+      ]);
+      setCallLogs(callsRes.data.data);
+      setDemos(demosRes.data.data);
+    } catch (err: unknown) {
+      const e = err as { response?: { data?: { message?: string } } };
+      setLocalError(e.response?.data?.message || 'Failed to load lead history');
+    } finally {
+      setLoadingHistory(false);
+    }
+  }, [lead.id]);
+
+  useEffect(() => { load(); }, [load]);
+
+  const submitCall = async () => {
+    if (!callNotes.trim()) { setLocalError('Call notes are required'); return; }
+    if (callStatus === 'LOST' && !callLostReason) { setLocalError('Pick a reason for marking this lead Lost'); return; }
+    setSavingCall(true);
+    setLocalError('');
+    try {
+      await api.post(`/api/sales/leads/${lead.id}/calls`, {
+        notes: callNotes.trim(),
+        nextFollowUpAt: callFollowUp ? new Date(callFollowUp).toISOString() : undefined,
+        status: callStatus || undefined,
+        lostReason: callStatus === 'LOST' ? callLostReason : undefined,
+      });
+      setCallNotes(''); setCallFollowUp(''); setCallStatus(''); setCallLostReason('');
+      await load();
+      onChanged();
+    } catch (err: unknown) {
+      const e = err as { response?: { data?: { message?: string } } };
+      setLocalError(e.response?.data?.message || 'Failed to log call');
+    } finally {
+      setSavingCall(false);
+    }
+  };
+
+  const reassign = async (assignedToId: string) => {
+    setReassignSaving(true);
+    try {
+      await api.put(`/api/sales/leads/${lead.id}`, { assignedToId: assignedToId || null });
+      onChanged();
+    } catch (err: unknown) {
+      const e = err as { response?: { data?: { message?: string } } };
+      setGlobalError(e.response?.data?.message || 'Failed to reassign lead');
+    } finally {
+      setReassignSaving(false);
+    }
+  };
+
+  const submitScheduleDemo = async () => {
+    if (!demoScheduledAt) { setLocalError('Pick a date/time for the demo'); return; }
+    setSavingDemo(true);
+    setLocalError('');
+    try {
+      await api.post('/api/sales/demos', {
+        leadId: lead.id,
+        scheduledAt: new Date(demoScheduledAt).toISOString(),
+        mode: demoMode,
+      });
+      setDemoScheduledAt(''); setDemoMode('ONLINE'); setShowScheduleForm(false);
+      await load();
+      onChanged();
+    } catch (err: unknown) {
+      const e = err as { response?: { data?: { message?: string } } };
+      setLocalError(e.response?.data?.message || 'Failed to schedule demo');
+    } finally {
+      setSavingDemo(false);
+    }
+  };
+
+  const closeAction = () => {
+    setActingDemo(null); setActionFeedback(''); setActionConductedById('');
+    setActionNewScheduledAt(''); setActionNewMode('ONLINE');
+  };
+
+  const submitAction = async () => {
+    if (!actingDemo) return;
+    setSavingAction(true);
+    setLocalError('');
+    try {
+      if (actingDemo.type === 'complete') {
+        await api.put(`/api/sales/demos/${actingDemo.id}`, { status: 'COMPLETED', feedback: actionFeedback || undefined, conductedById: actionConductedById || undefined });
+      } else if (actingDemo.type === 'noshow') {
+        await api.put(`/api/sales/demos/${actingDemo.id}`, { status: 'NO_SHOW', feedback: actionFeedback || undefined });
+      } else if (actingDemo.type === 'cancel') {
+        await api.put(`/api/sales/demos/${actingDemo.id}`, { status: 'CANCELLED', feedback: actionFeedback || undefined });
+      } else if (actingDemo.type === 'reschedule') {
+        if (!actionNewScheduledAt) { setLocalError('Pick the new date/time'); setSavingAction(false); return; }
+        await api.post(`/api/sales/demos/${actingDemo.id}/reschedule`, { scheduledAt: new Date(actionNewScheduledAt).toISOString(), mode: actionNewMode });
+      }
+      closeAction();
+      await load();
+      onChanged();
+    } catch (err: unknown) {
+      const e = err as { response?: { data?: { message?: string } } };
+      setLocalError(e.response?.data?.message || 'Failed to update demo');
+    } finally {
+      setSavingAction(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
+      <div className="bg-white rounded-xl w-full max-w-2xl max-h-[90vh] overflow-y-auto p-6 space-y-6">
+        <div className="flex items-start justify-between">
+          <div>
+            <h2 className="font-semibold text-lg">{lead.name}</h2>
+            <div className="flex flex-wrap items-center gap-3 mt-1 text-xs text-muted-foreground">
+              <span className="flex items-center gap-1"><Phone className="w-3 h-3" /> {lead.phone}</span>
+              {lead.email && <span className="flex items-center gap-1"><Mail className="w-3 h-3" /> {lead.email}</span>}
+              {lead.source && <span>Source: {lead.source}</span>}
+              {lead.courseInterest && <span>Interested: {lead.courseInterest}</span>}
+              <span>Lead Age: {leadAgeLabel(lead.createdAt)}</span>
+            </div>
+          </div>
+          <button onClick={onClose}><X className="w-4 h-4" /></button>
+        </div>
+
+        <div className="flex flex-wrap items-center gap-4">
+          <span className={`text-xs font-medium rounded-full px-2 py-1 ${STATUS_COLOR[lead.status]}`}>{lead.status.replace(/_/g, ' ')}</span>
+          {lead.status === 'LOST' && lead.lostReason && (
+            <span className="text-xs text-muted-foreground">({LOST_REASON_LABEL[lead.lostReason]})</span>
+          )}
+          <div className="flex items-center gap-2 text-sm">
+            <span className="text-muted-foreground">Assigned to:</span>
+            {canEdit ? (
+              <select
+                value={lead.assignedTo?.id || ''}
+                disabled={reassignSaving}
+                onChange={(e) => reassign(e.target.value)}
+                className="text-xs px-2 py-1 border rounded-lg"
+              >
+                <option value="">Unassigned</option>
+                {employees.map((e) => <option key={e.id} value={e.id}>{e.firstName} {e.lastName}</option>)}
+              </select>
+            ) : (
+              <span>{lead.assignedTo ? `${lead.assignedTo.firstName} ${lead.assignedTo.lastName}` : '—'}</span>
+            )}
+          </div>
+        </div>
+
+        {localError && <div className="bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg px-3 py-2">{localError}</div>}
+
+        {/* Log a call */}
+        {canEdit && (
+          <div className="border rounded-xl p-4 space-y-3 bg-muted/20">
+            <h3 className="font-semibold text-sm flex items-center gap-2"><PhoneCall className="w-4 h-4" /> Log a Call</h3>
+            <textarea
+              className="w-full px-3 py-2 border rounded-lg text-sm"
+              placeholder="What happened on this call?"
+              rows={2}
+              value={callNotes}
+              onChange={(e) => setCallNotes(e.target.value)}
+            />
+            <div className="flex flex-wrap items-center gap-3">
+              <label className="text-xs text-muted-foreground flex items-center gap-2">
+                Next follow-up:
+                <input type="date" className="px-2 py-1 border rounded-lg text-sm" value={callFollowUp} onChange={(e) => setCallFollowUp(e.target.value)} />
+              </label>
+              <label className="text-xs text-muted-foreground flex items-center gap-2">
+                Update status:
+                <select className="px-2 py-1 border rounded-lg text-sm" value={callStatus} onChange={(e) => setCallStatus(e.target.value as LeadStatus | '')}>
+                  <option value="">No change</option>
+                  {STATUSES.map((s) => <option key={s} value={s}>{s.replace(/_/g, ' ')}</option>)}
+                </select>
+              </label>
+              {callStatus === 'LOST' && (
+                <select className="px-2 py-1 border rounded-lg text-sm" value={callLostReason} onChange={(e) => setCallLostReason(e.target.value as LeadLostReason)}>
+                  <option value="">Reason...</option>
+                  {LOST_REASONS.map((r) => <option key={r.value} value={r.value}>{r.label}</option>)}
+                </select>
+              )}
+            </div>
+            <div className="flex justify-end">
+              <button onClick={submitCall} disabled={savingCall} className="px-4 py-2 text-sm rounded-lg bg-blue-600 text-white disabled:opacity-50">
+                {savingCall ? 'Saving...' : 'Log Call'}
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* Call history */}
+        <div>
+          <h3 className="font-semibold text-sm mb-2">Call History {lead._count?.callLogs ? `(${lead._count.callLogs})` : ''}</h3>
+          {loadingHistory ? (
+            <p className="text-sm text-muted-foreground">Loading...</p>
+          ) : callLogs.length === 0 ? (
+            <p className="text-sm text-muted-foreground">No calls logged yet.</p>
+          ) : (
+            <div className="space-y-2 max-h-56 overflow-y-auto pr-1">
+              {callLogs.map((c) => (
+                <div key={c.id} className="border rounded-lg p-3 text-sm">
+                  <div className="flex items-center justify-between text-xs text-muted-foreground mb-1">
+                    <span>{c.calledBy ? `${c.calledBy.firstName} ${c.calledBy.lastName}` : 'Unknown'}</span>
+                    <span>{formatDateTime(c.calledAt)}</span>
+                  </div>
+                  <p>{c.notes}</p>
+                  {c.nextFollowUpAt && <p className="text-xs text-amber-600 mt-1">Next follow-up: {formatDate(c.nextFollowUpAt)}</p>}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {/* Demos */}
+        <div>
+          <div className="flex items-center justify-between mb-2">
+            <h3 className="font-semibold text-sm">Demos</h3>
+            {canEdit && !showScheduleForm && (
+              <button onClick={() => setShowScheduleForm(true)} className="text-xs font-medium text-blue-600 hover:underline">+ Schedule Demo</button>
+            )}
+          </div>
+
+          {showScheduleForm && (
+            <div className="border rounded-lg p-3 mb-3 space-y-2 bg-muted/20">
+              <div className="flex flex-wrap items-center gap-2">
+                <input type="datetime-local" className="px-2 py-1 border rounded-lg text-sm" value={demoScheduledAt} onChange={(e) => setDemoScheduledAt(e.target.value)} />
+                <select className="px-2 py-1 border rounded-lg text-sm" value={demoMode} onChange={(e) => setDemoMode(e.target.value as DemoMode)}>
+                  {DEMO_MODES.map((m) => <option key={m} value={m}>{DEMO_MODE_LABEL[m]}</option>)}
+                </select>
+                <button onClick={submitScheduleDemo} disabled={savingDemo} className="px-3 py-1.5 text-xs rounded-lg bg-blue-600 text-white disabled:opacity-50">
+                  {savingDemo ? 'Saving...' : 'Schedule'}
+                </button>
+                <button onClick={() => setShowScheduleForm(false)} className="px-3 py-1.5 text-xs rounded-lg border">Cancel</button>
+              </div>
+            </div>
+          )}
+
+          {loadingHistory ? (
+            <p className="text-sm text-muted-foreground">Loading...</p>
+          ) : demos.length === 0 ? (
+            <p className="text-sm text-muted-foreground">No demos booked yet.</p>
+          ) : (
+            <div className="space-y-2">
+              {demos.map((d) => (
+                <div key={d.id} className="border rounded-lg p-3 text-sm space-y-2">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      {d.mode === 'ONLINE' ? <Video className="w-3.5 h-3.5 text-muted-foreground" /> : <MapPin className="w-3.5 h-3.5 text-muted-foreground" />}
+                      <span className="font-medium">{formatDateTime(d.scheduledAt)}</span>
+                      <span className="text-xs text-muted-foreground">{DEMO_MODE_LABEL[d.mode]}</span>
+                    </div>
+                    <span className={`text-xs font-medium rounded-full px-2 py-1 ${DEMO_STATUS_COLOR[d.status]}`}>{DEMO_STATUS_LABEL[d.status]}</span>
+                  </div>
+                  {d.conductedBy && <p className="text-xs text-muted-foreground">Conducted by {d.conductedBy.firstName} {d.conductedBy.lastName}</p>}
+                  {d.feedback && <p className="text-xs text-muted-foreground">{d.feedback}</p>}
+
+                  {canEdit && d.status === 'SCHEDULED' && actingDemo?.id !== d.id && (
+                    <div className="flex flex-wrap gap-2 pt-1">
+                      <button onClick={() => setActingDemo({ id: d.id, type: 'complete' })} className="text-xs font-medium text-green-600 hover:underline">Mark Conducted</button>
+                      <button onClick={() => setActingDemo({ id: d.id, type: 'reschedule' })} className="text-xs font-medium text-amber-600 hover:underline">Reschedule</button>
+                      <button onClick={() => setActingDemo({ id: d.id, type: 'noshow' })} className="text-xs font-medium text-red-600 hover:underline">No Show</button>
+                      <button onClick={() => setActingDemo({ id: d.id, type: 'cancel' })} className="text-xs font-medium text-muted-foreground hover:underline">Cancel</button>
+                    </div>
+                  )}
+
+                  {actingDemo?.id === d.id && (
+                    <div className="border-t pt-2 mt-1 space-y-2">
+                      {actingDemo.type === 'reschedule' ? (
+                        <div className="flex flex-wrap items-center gap-2">
+                          <input type="datetime-local" className="px-2 py-1 border rounded-lg text-xs" value={actionNewScheduledAt} onChange={(e) => setActionNewScheduledAt(e.target.value)} />
+                          <select className="px-2 py-1 border rounded-lg text-xs" value={actionNewMode} onChange={(e) => setActionNewMode(e.target.value as DemoMode)}>
+                            {DEMO_MODES.map((m) => <option key={m} value={m}>{DEMO_MODE_LABEL[m]}</option>)}
+                          </select>
+                        </div>
+                      ) : (
+                        <div className="flex flex-wrap items-center gap-2">
+                          <input
+                            className="px-2 py-1 border rounded-lg text-xs flex-1 min-w-[160px]"
+                            placeholder={actingDemo.type === 'complete' ? 'What did you cover / outcome?' : 'Notes (optional)'}
+                            value={actionFeedback}
+                            onChange={(e) => setActionFeedback(e.target.value)}
+                          />
+                          {actingDemo.type === 'complete' && employees.length > 0 && (
+                            <select className="px-2 py-1 border rounded-lg text-xs" value={actionConductedById} onChange={(e) => setActionConductedById(e.target.value)}>
+                              <option value="">Conducted by...</option>
+                              {employees.map((e) => <option key={e.id} value={e.id}>{e.firstName} {e.lastName}</option>)}
+                            </select>
+                          )}
+                        </div>
+                      )}
+                      <div className="flex gap-2">
+                        <button onClick={submitAction} disabled={savingAction} className="px-3 py-1.5 text-xs rounded-lg bg-blue-600 text-white disabled:opacity-50">
+                          {savingAction ? 'Saving...' : 'Confirm'}
+                        </button>
+                        <button onClick={closeAction} className="px-3 py-1.5 text-xs rounded-lg border">Cancel</button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── Sales Pulse tab: live snapshot + recipient settings ────────────────────
+function SalesPulsePanel({ canEdit }: { canEdit: boolean }) {
+  const [pulse, setPulse] = useState<Pulse | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+  const [recipients, setRecipients] = useState<ReportRecipient[]>([]);
+  const [newEmail, setNewEmail] = useState('');
+  const [newName, setNewName] = useState('');
+  const [savingRecipient, setSavingRecipient] = useState(false);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    setError('');
+    try {
+      const [pulseRes, recipRes] = await Promise.all([
+        api.get('/api/sales/pulse'),
+        api.get('/api/sales/report-recipients'),
+      ]);
+      setPulse(pulseRes.data.data);
+      setRecipients(recipRes.data.data);
+    } catch (err: unknown) {
+      const e = err as { response?: { data?: { message?: string } } };
+      setError(e.response?.data?.message || 'Failed to load sales pulse');
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => { load(); }, [load]);
+
+  const addRecipient = async () => {
+    if (!newEmail.trim()) return;
+    setSavingRecipient(true);
+    try {
+      await api.post('/api/sales/report-recipients', { email: newEmail.trim(), name: newName.trim() || undefined });
+      setNewEmail(''); setNewName('');
+      load();
+    } catch (err: unknown) {
+      const e = err as { response?: { data?: { message?: string } } };
+      setError(e.response?.data?.message || 'Failed to add recipient');
+    } finally {
+      setSavingRecipient(false);
+    }
+  };
+
+  const removeRecipient = async (id: string) => {
+    try {
+      await api.delete(`/api/sales/report-recipients/${id}`);
+      load();
+    } catch (err: unknown) {
+      const e = err as { response?: { data?: { message?: string } } };
+      setError(e.response?.data?.message || 'Failed to remove recipient');
+    }
+  };
+
+  return (
+    <div className="space-y-6">
+      {error && <div className="bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg px-4 py-3">{error}</div>}
+
+      <div className="flex items-center justify-between">
+        <p className="text-sm text-muted-foreground">
+          Live as of right now — the same numbers go out by email at 11, 12, 1, 2, 4, 5 and 6 (6 PM is the day's End of Day report).
+        </p>
+        <button onClick={load} disabled={loading} className="flex items-center gap-2 px-3 py-2 border rounded-lg text-sm font-medium hover:bg-muted/50 disabled:opacity-50">
+          <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} /> Refresh
+        </button>
+      </div>
+
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+        <StatCard icon={PhoneCall} label="Calls Made Today" value={pulse?.callsMadeToday ?? 0} />
+        <StatCard icon={Users} label="New Leads Today" value={pulse?.leadsCreatedToday ?? 0} />
+        <StatCard icon={Calendar} label="Demos Booked Today" value={pulse?.demosBookedToday ?? 0} />
+        <StatCard icon={Calendar} label="Demos Scheduled Today" value={pulse?.demosScheduledForToday ?? 0} />
+        <StatCard icon={CheckCircle2} label="Conducted" value={pulse?.demosConductedToday ?? 0} />
+        <StatCard icon={RefreshCw} label="Rescheduled" value={pulse?.demosRescheduledToday ?? 0} />
+        <StatCard icon={AlertTriangle} label="No-Show" value={pulse?.demosNoShowToday ?? 0} />
+        <StatCard icon={AlertTriangle} label="Still Pending Today" value={pulse?.demosPendingToday ?? 0} />
+        <StatCard icon={Calendar} label="Follow-ups Due Today" value={pulse?.followUpsDueToday ?? 0} />
+        <StatCard icon={AlertTriangle} label="Overdue Follow-ups" value={pulse?.overdueFollowUps ?? 0} />
+        <StatCard icon={CheckCircle2} label="Enrolled Today" value={pulse?.enrolledToday ?? 0} />
+        <StatCard icon={TrendingUp} label="Lost Today" value={pulse?.lostToday ?? 0} />
+      </div>
+
+      {canEdit && (
+        <div className="bg-card border rounded-xl p-5 space-y-3">
+          <h3 className="font-semibold text-sm flex items-center gap-2"><Settings className="w-4 h-4" /> Email Recipients</h3>
+          <p className="text-xs text-muted-foreground">Who gets the Sales Pulse / EOD emails at 11, 12, 1, 2, 4, 5 and 6.</p>
+          <div className="flex flex-wrap gap-2">
+            <input className="px-3 py-2 border rounded-lg text-sm flex-1 min-w-[180px]" placeholder="Email *" value={newEmail} onChange={(e) => setNewEmail(e.target.value)} />
+            <input className="px-3 py-2 border rounded-lg text-sm flex-1 min-w-[140px]" placeholder="Name (optional)" value={newName} onChange={(e) => setNewName(e.target.value)} />
+            <button onClick={addRecipient} disabled={savingRecipient || !newEmail.trim()} className="px-4 py-2 text-sm rounded-lg bg-blue-600 text-white disabled:opacity-50">
+              {savingRecipient ? 'Adding...' : 'Add'}
+            </button>
+          </div>
+          {recipients.length === 0 ? (
+            <p className="text-xs text-muted-foreground px-1 py-2">No recipients configured yet.</p>
+          ) : (
+            <div className="divide-y border rounded-lg">
+              {recipients.map((r) => (
+                <div key={r.id} className="flex items-center justify-between px-3 py-2 text-sm">
+                  <span>{r.name ? `${r.name} — ${r.email}` : r.email}</span>
+                  <button onClick={() => removeRecipient(r.id)} className="text-muted-foreground hover:text-red-600">
+                    <Trash2 className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }
