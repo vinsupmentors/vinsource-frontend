@@ -2,7 +2,7 @@ import { NavLink, useNavigate, useLocation } from 'react-router-dom';
 import { cn } from '@/lib/utils';
 import { useRole, useAuth } from '@/hooks/useAuth';
 import { useModuleAccess } from '@/hooks/useModuleAccess';
-import { Role, ModuleName } from '@/types';
+import { Role, ModuleName, AccessLevel } from '@/types';
 import { useState } from 'react';
 import { useSidebarContext } from './SidebarContext';
 import {
@@ -12,8 +12,10 @@ import {
   ClipboardList, ShieldAlert, UserPlus, DoorOpen, TrendingUp,
   Wallet, GraduationCap, Target, Megaphone, KeyRound,
   BookOpen, PiggyBank, Store, Repeat, PieChart, X, Receipt, CheckCircle2,
-  Presentation, CalendarClock, Handshake, ListChecks, Mic2, Network, FileBadge, Percent, Activity,
+  Presentation, CalendarClock, Handshake, ListChecks, Mic2, Network, FileBadge, Percent, Activity, RefreshCw,
 } from 'lucide-react';
+
+const LEVEL_RANK: Record<AccessLevel, number> = { NONE: 0, VIEW: 1, EDIT: 2, ADMIN: 3 };
 
 interface NavItem {
   label: string;
@@ -65,6 +67,12 @@ interface ModuleChild {
    * Marketing / Placements living under Finance (Admin)) stay visible based
    * on their own access grant, independent of the parent's module. */
   module: ModuleName;
+  /** Only show when the module's access level is at least this (e.g. Sales
+   * Pulse / Lead Quality are ADMIN-only, cross-rep aggregate views). */
+  minLevel?: AccessLevel;
+  /** Only show when the module's access level is strictly below this (e.g.
+   * the BDA-only Demo tabs, hidden once someone has ADMIN on Sales). */
+  belowLevel?: AccessLevel;
 }
 
 interface ModuleNavItem {
@@ -99,9 +107,14 @@ const moduleNavItems: ModuleNavItem[] = [
     icon: TrendingUp,
     module: 'SALES',
     children: [
-      { label: 'Leads',         to: '/sales?tab=leads',       icon: Users,    module: 'SALES' },
-      { label: 'Sales Pulse',   to: '/sales?tab=pulse',       icon: Activity, module: 'SALES' },
-      { label: 'Lead Quality',  to: '/sales?tab=leadQuality', icon: Percent,  module: 'SALES' },
+      { label: 'Leads',             to: '/sales?tab=leads',            icon: Users,        module: 'SALES' },
+      // Sales Pulse / Lead Quality are cross-rep aggregate views — admin only.
+      { label: 'Sales Pulse',       to: '/sales?tab=pulse',            icon: Activity,     module: 'SALES', minLevel: 'ADMIN' },
+      { label: 'Lead Quality',      to: '/sales?tab=leadQuality',      icon: Percent,      module: 'SALES', minLevel: 'ADMIN' },
+      // BDAs (SALES=EDIT, not ADMIN) get their own demo pipeline views instead.
+      { label: 'Demo Booked',       to: '/sales?tab=demoBooked',       icon: Calendar,     module: 'SALES', belowLevel: 'ADMIN' },
+      { label: 'Demo Rescheduled',  to: '/sales?tab=demoRescheduled',  icon: RefreshCw,    module: 'SALES', belowLevel: 'ADMIN' },
+      { label: 'Demo Conducted',    to: '/sales?tab=demoConducted',    icon: CheckCircle2, module: 'SALES', belowLevel: 'ADMIN' },
     ],
   },
   { label: 'Finance (Sales)',    to: '/finance/sales',     icon: Wallet,        module: 'FINANCE_SALES' },
@@ -194,7 +207,13 @@ export function Sidebar() {
       if (!item.children) {
         return modules[item.module] ? item : null;
       }
-      const visibleChildren = item.children.filter((child) => !!modules[child.module]);
+      const visibleChildren = item.children.filter((child) => {
+        const level = modules[child.module];
+        if (!level) return false;
+        if (child.minLevel && LEVEL_RANK[level] < LEVEL_RANK[child.minLevel]) return false;
+        if (child.belowLevel && LEVEL_RANK[level] >= LEVEL_RANK[child.belowLevel]) return false;
+        return true;
+      });
       if (visibleChildren.length === 0) return null;
       return { ...item, children: visibleChildren };
     })

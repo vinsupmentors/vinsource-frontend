@@ -75,6 +75,17 @@ interface Pulse {
 
 interface ReportRecipient { id: string; email: string; name: string | null; }
 
+// Row shape for the BDA's Demo Booked / Demo Rescheduled / Demo Conducted
+// tabs — same Demo record as DemoLite, but with the lead summary joined in
+// since these tabs aren't scoped to one lead's detail view.
+interface DemoRow {
+  id: string;
+  scheduledAt: string;
+  mode: DemoMode;
+  status: DemoStatus;
+  lead: { id: string; name: string; phone: string };
+}
+
 interface Stats {
   totalLeads: number;
   statusCounts: Record<string, number>;
@@ -180,13 +191,18 @@ function pctLabel(pct: number | null): string {
 }
 
 // ── Main page ────────────────────────────────────────────────────────────
-type Tab = 'leads' | 'pulse' | 'leadQuality';
-const VALID_TABS: Tab[] = ['leads', 'pulse', 'leadQuality'];
+type Tab = 'leads' | 'pulse' | 'leadQuality' | 'demoBooked' | 'demoRescheduled' | 'demoConducted';
+const VALID_TABS: Tab[] = ['leads', 'pulse', 'leadQuality', 'demoBooked', 'demoRescheduled', 'demoConducted'];
+// Sales Pulse / Lead Quality are aggregate, cross-rep views — admin only.
+// BDAs get Demo Booked/Rescheduled/Conducted instead, scoped to their own leads.
+const ADMIN_ONLY_TABS: Tab[] = ['pulse', 'leadQuality'];
+const BDA_ONLY_TABS: Tab[] = ['demoBooked', 'demoRescheduled', 'demoConducted'];
 
 export default function SalesPage() {
   const { modules, loaded, hasModule } = useModuleAccess();
   const level = modules.SALES;
   const canEdit = hasModule('SALES', 'EDIT');
+  const isAdmin = hasModule('SALES', 'ADMIN');
 
   const [searchParams, setSearchParams] = useSearchParams();
   const tabFromUrl = searchParams.get('tab') as Tab | null;
@@ -195,6 +211,14 @@ export default function SalesPage() {
   useEffect(() => {
     if (tabFromUrl && VALID_TABS.includes(tabFromUrl) && tabFromUrl !== tab) setTabState(tabFromUrl);
   }, [tabFromUrl]);
+
+  // Once access has loaded, bounce off any tab this role isn't allowed to
+  // see (e.g. a BDA following an old ?tab=pulse link, or vice versa).
+  useEffect(() => {
+    if (!loaded) return;
+    if (!isAdmin && ADMIN_ONLY_TABS.includes(tab)) setTab('leads');
+    if (isAdmin && BDA_ONLY_TABS.includes(tab)) setTab('leads');
+  }, [loaded, isAdmin, tab]);
 
   const [leads, setLeads] = useState<Lead[]>([]);
   const [meta, setMeta] = useState<ListMeta | null>(null);
@@ -209,6 +233,11 @@ export default function SalesPage() {
   const [showAdd, setShowAdd] = useState(false);
   const [showBulkUpload, setShowBulkUpload] = useState(false);
   const [detailLeadId, setDetailLeadId] = useState<string | null>(null);
+  // Populated when the detail modal is opened from somewhere other than the
+  // Leads tab (e.g. a Demo Booked row), where we don't already have the full
+  // lead object in memory — falls back to `leads.find(...)` first, which stays
+  // live-refreshed off fetchAll for the Leads tab's own click-through.
+  const [fetchedDetailLead, setFetchedDetailLead] = useState<Lead | null>(null);
   const [lostReasonLead, setLostReasonLead] = useState<Lead | null>(null);
   const [saving, setSaving] = useState(false);
 
@@ -245,6 +274,32 @@ export default function SalesPage() {
     if (!level) return;
     api.get('/api/employees').then((res) => setEmployees(res.data.data)).catch(() => setEmployees([]));
   }, [level]);
+
+  const openLeadDetail = async (id: string) => {
+    setDetailLeadId(id);
+    if (leads.some((l) => l.id === id)) { setFetchedDetailLead(null); return; }
+    try {
+      const res = await api.get(`/api/sales/leads/${id}`);
+      setFetchedDetailLead(res.data.data);
+    } catch (err: unknown) {
+      const e = err as { response?: { data?: { message?: string } } };
+      setError(e.response?.data?.message || 'Failed to load lead');
+      setDetailLeadId(null);
+    }
+  };
+
+  const closeLeadDetail = () => { setDetailLeadId(null); setFetchedDetailLead(null); };
+
+  const refreshDetailLead = async () => {
+    if (tab === 'leads') fetchAll();
+    if (!detailLeadId) return;
+    try {
+      const res = await api.get(`/api/sales/leads/${detailLeadId}`);
+      setFetchedDetailLead(res.data.data);
+    } catch {
+      // Detail modal keeps showing its last-known state; not worth surfacing an error for a background refresh.
+    }
+  };
 
   const updateLeadStatus = async (id: string, status: LeadStatus, lostReason?: LeadLostReason) => {
     try {
@@ -287,7 +342,7 @@ export default function SalesPage() {
     );
   }
 
-  const detailLead = leads.find((l) => l.id === detailLeadId) || null;
+  const detailLead = (detailLeadId && leads.find((l) => l.id === detailLeadId)) || fetchedDetailLead;
 
   return (
     <div className="space-y-6">
@@ -315,11 +370,19 @@ export default function SalesPage() {
       </div>
 
       <div className="flex items-center gap-1 border-b">
-        {([
-          { id: 'leads' as Tab, label: 'Leads', icon: Users },
-          { id: 'pulse' as Tab, label: 'Sales Pulse', icon: Activity },
-          { id: 'leadQuality' as Tab, label: 'Lead Quality', icon: Percent },
-        ]).map((t) => {
+        {(isAdmin
+          ? [
+              { id: 'leads' as Tab, label: 'Leads', icon: Users },
+              { id: 'pulse' as Tab, label: 'Sales Pulse', icon: Activity },
+              { id: 'leadQuality' as Tab, label: 'Lead Quality', icon: Percent },
+            ]
+          : [
+              { id: 'leads' as Tab, label: 'Leads', icon: Users },
+              { id: 'demoBooked' as Tab, label: 'Demo Booked', icon: Calendar },
+              { id: 'demoRescheduled' as Tab, label: 'Demo Rescheduled', icon: RefreshCw },
+              { id: 'demoConducted' as Tab, label: 'Demo Conducted', icon: CheckCircle2 },
+            ]
+        ).map((t) => {
           const Icon = t.icon;
           return (
             <button
@@ -399,7 +462,7 @@ export default function SalesPage() {
                     <tr key={lead.id} className="hover:bg-muted/30">
                       <td className="px-3 py-3 text-muted-foreground">{(page - 1) * PAGE_SIZE + i + 1}</td>
                       <td className="px-3 py-3 font-medium whitespace-nowrap">
-                        <button onClick={() => setDetailLeadId(lead.id)} className="text-blue-600 hover:underline text-left">
+                        <button onClick={() => openLeadDetail(lead.id)} className="text-blue-600 hover:underline text-left">
                           {lead.name}
                         </button>
                       </td>
@@ -491,9 +554,15 @@ export default function SalesPage() {
         </>
       )}
 
-      {tab === 'pulse' && <SalesPulsePanel canEdit={canEdit} />}
+      {tab === 'pulse' && isAdmin && <SalesPulsePanel canEdit={canEdit} />}
 
-      {tab === 'leadQuality' && <LeadQualityPanel />}
+      {tab === 'leadQuality' && isAdmin && <LeadQualityPanel />}
+
+      {tab === 'demoBooked' && !isAdmin && <DemoListPanel status="SCHEDULED" emptyLabel="No demos booked" onOpenLead={openLeadDetail} />}
+
+      {tab === 'demoRescheduled' && !isAdmin && <DemoListPanel status="RESCHEDULED" emptyLabel="No demos rescheduled" onOpenLead={openLeadDetail} />}
+
+      {tab === 'demoConducted' && !isAdmin && <DemoListPanel status="COMPLETED" emptyLabel="No demos conducted yet" onOpenLead={openLeadDetail} />}
 
       {showAdd && (
         <AddLeadModal
@@ -534,8 +603,8 @@ export default function SalesPage() {
           lead={detailLead}
           employees={employees}
           canEdit={canEdit}
-          onClose={() => setDetailLeadId(null)}
-          onChanged={fetchAll}
+          onClose={closeLeadDetail}
+          onChanged={refreshDetailLead}
           setGlobalError={setError}
         />
       )}
@@ -1354,6 +1423,85 @@ function LeadQualityPanel() {
                 <td className="px-3 py-3">{c.doesntWork}</td>
                 <td className="px-3 py-3">{c.enrolled}</td>
                 <td className={`px-3 py-3 font-semibold ${qualityColor(c.qualityPct)}`}>{pctLabel(c.qualityPct)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+// ── BDA self-view: Demo Booked / Demo Rescheduled / Demo Conducted ─────────
+// Same underlying /api/sales/demos endpoint for all three, just a different
+// ?status= — the backend already scopes results to the caller's own assigned
+// leads for anyone below SALES=ADMIN, so this component doesn't need to know
+// whose leads it's showing.
+function DemoListPanel({ status, emptyLabel, onOpenLead }: {
+  status: DemoStatus; emptyLabel: string; onOpenLead: (id: string) => void;
+}) {
+  const [demos, setDemos] = useState<DemoRow[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    setError('');
+    try {
+      const res = await api.get('/api/sales/demos', { params: { status } });
+      setDemos(res.data.data);
+    } catch (err: unknown) {
+      const e = err as { response?: { data?: { message?: string } } };
+      setError(e.response?.data?.message || 'Failed to load demos');
+    } finally {
+      setLoading(false);
+    }
+  }, [status]);
+
+  useEffect(() => { load(); }, [load]);
+
+  return (
+    <div className="space-y-4">
+      {error && <div className="bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg px-4 py-3">{error}</div>}
+
+      <div className="flex items-center justify-between">
+        <p className="text-sm text-muted-foreground">{demos.length} demo{demos.length === 1 ? '' : 's'}</p>
+        <button onClick={load} disabled={loading} className="flex items-center gap-2 px-3 py-2 border rounded-lg text-sm font-medium hover:bg-muted/50 disabled:opacity-50">
+          <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} /> Refresh
+        </button>
+      </div>
+
+      <div className="bg-card border rounded-xl overflow-x-auto">
+        <table className="w-full text-sm">
+          <thead className="bg-muted/50 text-left text-xs uppercase text-muted-foreground">
+            <tr>
+              <th className="px-3 py-3">Lead</th>
+              <th className="px-3 py-3">Phone</th>
+              <th className="px-3 py-3">Scheduled</th>
+              <th className="px-3 py-3">Mode</th>
+              <th className="px-3 py-3">Status</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y">
+            {loading ? (
+              <tr><td colSpan={5} className="px-4 py-8 text-center text-muted-foreground">Loading...</td></tr>
+            ) : demos.length === 0 ? (
+              <tr><td colSpan={5} className="px-4 py-8 text-center text-muted-foreground">{emptyLabel}</td></tr>
+            ) : demos.map((d) => (
+              <tr key={d.id} className="hover:bg-muted/30">
+                <td className="px-3 py-3 font-medium whitespace-nowrap">
+                  <button onClick={() => onOpenLead(d.lead.id)} className="text-blue-600 hover:underline text-left">
+                    {d.lead.name}
+                  </button>
+                </td>
+                <td className="px-3 py-3 whitespace-nowrap text-xs text-muted-foreground">
+                  <div className="flex items-center gap-1"><Phone className="w-3 h-3" /> {d.lead.phone}</div>
+                </td>
+                <td className="px-3 py-3 text-xs text-muted-foreground whitespace-nowrap">{formatDateTime(d.scheduledAt)}</td>
+                <td className="px-3 py-3 text-xs whitespace-nowrap">{DEMO_MODE_LABEL[d.mode]}</td>
+                <td className="px-3 py-3 whitespace-nowrap">
+                  <span className={`text-xs font-medium rounded-full px-2 py-1 ${DEMO_STATUS_COLOR[d.status]}`}>{DEMO_STATUS_LABEL[d.status]}</span>
+                </td>
               </tr>
             ))}
           </tbody>
