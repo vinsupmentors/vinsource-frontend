@@ -1,11 +1,16 @@
 import { useEffect, useState, useCallback } from 'react';
+import { useSearchParams } from 'react-router-dom';
+import * as XLSX from 'xlsx';
 import api from '@/lib/api';
 import { useModuleAccess } from '@/hooks/useModuleAccess';
 import { formatDate, formatDateTime } from '@/lib/utils';
 import {
   Lock, Plus, X, Phone, Mail, Calendar, Users, TrendingUp, CheckCircle2,
   PhoneCall, Video, MapPin, RefreshCw, AlertTriangle, Settings, Trash2, Activity,
+  ChevronLeft, ChevronRight, Upload, Download, Percent,
 } from 'lucide-react';
+
+const PAGE_SIZE = 100;
 
 // ── Types ────────────────────────────────────────────────────────────────
 type LeadStatus = 'NEW' | 'CONTACTED' | 'DEMO_SCHEDULED' | 'DEMO_DONE' | 'NEGOTIATION' | 'ENROLLED' | 'LOST';
@@ -77,6 +82,41 @@ interface Stats {
   enrolledThisMonth: number;
 }
 
+interface ListMeta { total: number; page: number; limit: number; totalPages: number; }
+
+interface LeadQualityRow {
+  campaignId: string;
+  campaignName: string;
+  channel: string;
+  campaignStatus: string;
+  leadsReceived: number;
+  leadsGivenToSales: number;
+  leadsAssigned: number;
+  totalLeads: number;
+  notInterested: number;
+  doesntWork: number;
+  totalLost: number;
+  enrolled: number;
+  qualityPct: number | null;
+}
+
+interface LeadQualityOverall {
+  leadsReceived: number;
+  leadsGivenToSales: number;
+  leadsAssigned: number;
+  totalLeads: number;
+  notInterested: number;
+  doesntWork: number;
+  totalLost: number;
+  enrolled: number;
+  qualityPct: number | null;
+}
+
+interface LeadQualityData {
+  campaigns: LeadQualityRow[];
+  overall: LeadQualityOverall;
+}
+
 // ── Constants ────────────────────────────────────────────────────────────
 const STATUS_COLOR: Record<LeadStatus, string> = {
   NEW: 'bg-slate-100 text-slate-700',
@@ -128,16 +168,37 @@ function reminderColor(nextFollowUpAt?: string | null): string {
   return 'text-foreground';
 }
 
+function qualityColor(pct: number | null): string {
+  if (pct === null) return 'text-muted-foreground';
+  if (pct >= 70) return 'text-green-600';
+  if (pct >= 40) return 'text-amber-600';
+  return 'text-red-600';
+}
+
+function pctLabel(pct: number | null): string {
+  return pct === null ? '—' : `${pct.toFixed(1)}%`;
+}
+
 // ── Main page ────────────────────────────────────────────────────────────
-type Tab = 'leads' | 'pulse';
+type Tab = 'leads' | 'pulse' | 'leadQuality';
+const VALID_TABS: Tab[] = ['leads', 'pulse', 'leadQuality'];
 
 export default function SalesPage() {
   const { modules, loaded, hasModule } = useModuleAccess();
   const level = modules.SALES;
   const canEdit = hasModule('SALES', 'EDIT');
 
-  const [tab, setTab] = useState<Tab>('leads');
+  const [searchParams, setSearchParams] = useSearchParams();
+  const tabFromUrl = searchParams.get('tab') as Tab | null;
+  const [tab, setTabState] = useState<Tab>(tabFromUrl && VALID_TABS.includes(tabFromUrl) ? tabFromUrl : 'leads');
+  const setTab = (t: Tab) => { setTabState(t); setSearchParams({ tab: t }, { replace: true }); };
+  useEffect(() => {
+    if (tabFromUrl && VALID_TABS.includes(tabFromUrl) && tabFromUrl !== tab) setTabState(tabFromUrl);
+  }, [tabFromUrl]);
+
   const [leads, setLeads] = useState<Lead[]>([]);
+  const [meta, setMeta] = useState<ListMeta | null>(null);
+  const [page, setPage] = useState(1);
   const [stats, setStats] = useState<Stats | null>(null);
   const [employees, setEmployees] = useState<EmployeeLite[]>([]);
   const [search, setSearch] = useState('');
@@ -146,15 +207,20 @@ export default function SalesPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [showAdd, setShowAdd] = useState(false);
+  const [showBulkUpload, setShowBulkUpload] = useState(false);
   const [detailLeadId, setDetailLeadId] = useState<string | null>(null);
   const [lostReasonLead, setLostReasonLead] = useState<Lead | null>(null);
   const [saving, setSaving] = useState(false);
+
+  // Any filter change resets to page 1 — otherwise you can land on a page
+  // number that no longer exists once the result set shrinks.
+  useEffect(() => { setPage(1); }, [search, statusFilter, followUpFilter]);
 
   const fetchAll = useCallback(async () => {
     setLoading(true);
     setError('');
     try {
-      const params: Record<string, string> = { limit: '200' };
+      const params: Record<string, string> = { page: String(page), limit: String(PAGE_SIZE) };
       if (search) params.search = search;
       if (statusFilter) params.status = statusFilter;
       if (followUpFilter) params.followUp = followUpFilter;
@@ -163,6 +229,7 @@ export default function SalesPage() {
         api.get('/api/sales/stats'),
       ]);
       setLeads(leadsRes.data.data);
+      setMeta(leadsRes.data.meta);
       setStats(statsRes.data.data);
     } catch (err: unknown) {
       const e = err as { response?: { data?: { message?: string } } };
@@ -170,7 +237,7 @@ export default function SalesPage() {
     } finally {
       setLoading(false);
     }
-  }, [search, statusFilter, followUpFilter]);
+  }, [page, search, statusFilter, followUpFilter]);
 
   useEffect(() => { if (level && tab === 'leads') fetchAll(); }, [level, tab, fetchAll]);
 
@@ -230,12 +297,20 @@ export default function SalesPage() {
           <p className="text-muted-foreground text-sm">Leads, calls, demos, and conversion pipeline</p>
         </div>
         {canEdit && tab === 'leads' && (
-          <button
-            onClick={() => setShowAdd(true)}
-            className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 transition-colors"
-          >
-            <Plus className="w-4 h-4" /> New Lead
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => setShowBulkUpload(true)}
+              className="flex items-center gap-2 px-4 py-2 border rounded-lg text-sm font-medium hover:bg-muted/50 transition-colors"
+            >
+              <Upload className="w-4 h-4" /> Bulk Upload
+            </button>
+            <button
+              onClick={() => setShowAdd(true)}
+              className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 transition-colors"
+            >
+              <Plus className="w-4 h-4" /> New Lead
+            </button>
+          </div>
         )}
       </div>
 
@@ -243,6 +318,7 @@ export default function SalesPage() {
         {([
           { id: 'leads' as Tab, label: 'Leads', icon: Users },
           { id: 'pulse' as Tab, label: 'Sales Pulse', icon: Activity },
+          { id: 'leadQuality' as Tab, label: 'Lead Quality', icon: Percent },
         ]).map((t) => {
           const Icon = t.icon;
           return (
@@ -321,7 +397,7 @@ export default function SalesPage() {
                   const latestDemo = lead.demos?.[0];
                   return (
                     <tr key={lead.id} className="hover:bg-muted/30">
-                      <td className="px-3 py-3 text-muted-foreground">{i + 1}</td>
+                      <td className="px-3 py-3 text-muted-foreground">{(page - 1) * PAGE_SIZE + i + 1}</td>
                       <td className="px-3 py-3 font-medium whitespace-nowrap">
                         <button onClick={() => setDetailLeadId(lead.id)} className="text-blue-600 hover:underline text-left">
                           {lead.name}
@@ -390,10 +466,34 @@ export default function SalesPage() {
               </tbody>
             </table>
           </div>
+
+          {!loading && meta && meta.total > 0 && (
+            <div className="flex items-center justify-between pt-1 text-sm text-muted-foreground">
+              <span>{meta.total} lead{meta.total === 1 ? '' : 's'} · page {meta.page} of {meta.totalPages}</span>
+              <div className="flex items-center gap-2">
+                <button
+                  disabled={page <= 1}
+                  onClick={() => setPage((p) => Math.max(p - 1, 1))}
+                  className="flex items-center gap-1 px-2 py-1.5 border rounded-lg disabled:opacity-40 hover:bg-muted/50"
+                >
+                  <ChevronLeft className="w-3.5 h-3.5" /> Prev
+                </button>
+                <button
+                  disabled={page >= meta.totalPages}
+                  onClick={() => setPage((p) => Math.min(p + 1, meta.totalPages))}
+                  className="flex items-center gap-1 px-2 py-1.5 border rounded-lg disabled:opacity-40 hover:bg-muted/50"
+                >
+                  Next <ChevronRight className="w-3.5 h-3.5" />
+                </button>
+              </div>
+            </div>
+          )}
         </>
       )}
 
       {tab === 'pulse' && <SalesPulsePanel canEdit={canEdit} />}
+
+      {tab === 'leadQuality' && <LeadQualityPanel />}
 
       {showAdd && (
         <AddLeadModal
@@ -403,6 +503,14 @@ export default function SalesPage() {
           onClose={() => setShowAdd(false)}
           onSaved={() => { setShowAdd(false); fetchAll(); }}
           setError={setError}
+        />
+      )}
+
+      {showBulkUpload && (
+        <BulkUploadLeadsModal
+          onClose={() => setShowBulkUpload(false)}
+          setError={setError}
+          onSaved={() => { fetchAll(); }}
         />
       )}
 
@@ -510,6 +618,145 @@ function AddLeadModal({ employees, saving, setSaving, onClose, onSaved, setError
   );
 }
 
+type BulkRow = Record<string, string>;
+type BulkResult = { row: number; status: 'created' | 'error'; message?: string; leadId?: string };
+
+function BulkUploadLeadsModal({ onClose, setError, onSaved }: {
+  onClose: () => void; setError: (s: string) => void; onSaved: () => void;
+}) {
+  const [rows, setRows] = useState<BulkRow[]>([]);
+  const [fileName, setFileName] = useState('');
+  const [uploading, setUploading] = useState(false);
+  const [results, setResults] = useState<BulkResult[] | null>(null);
+
+  const downloadTemplate = () => {
+    const ws = XLSX.utils.json_to_sheet([
+      { name: 'John Doe', phone: '9876543210', email: 'john@example.com', source: 'Instagram', courseInterest: 'Data Analytics', assignedToCode: '', campaign: '', notes: '' },
+      { name: 'Jane S', phone: '9876543211', email: '', source: 'Referral', courseInterest: 'MERN Stack', assignedToCode: '', campaign: '', notes: '' },
+    ]);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Leads');
+    XLSX.writeFile(wb, 'lead_bulk_upload_template.xlsx');
+  };
+
+  const onFile = (file: File) => {
+    setFileName(file.name);
+    setResults(null);
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      try {
+        const data = e.target?.result;
+        const wb = XLSX.read(data, { type: 'binary' });
+        const sheet = wb.Sheets[wb.SheetNames[0]];
+        const json = XLSX.utils.sheet_to_json<BulkRow>(sheet, { defval: '' });
+        setRows(json);
+      } catch {
+        setError('Could not parse the file. Please use the template format.');
+      }
+    };
+    reader.readAsBinaryString(file);
+  };
+
+  const submit = async () => {
+    if (!rows.length) { setError('Choose a file with lead rows first'); return; }
+    setUploading(true);
+    setError('');
+    try {
+      const res = await api.post('/api/sales/leads/bulk', { leads: rows });
+      setResults(res.data.data.results);
+      onSaved();
+    } catch (err: unknown) {
+      const e = err as { response?: { data?: { message?: string } } };
+      setError(e.response?.data?.message || 'Bulk upload failed');
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  const createdCount = results?.filter((r) => r.status === 'created').length ?? 0;
+  const errorCount = results ? results.length - createdCount : 0;
+
+  return (
+    <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
+      <div className="bg-white rounded-xl w-full max-w-lg p-6 space-y-4">
+        <div className="flex items-center justify-between">
+          <h2 className="font-semibold text-lg">Bulk Upload Leads</h2>
+          <button onClick={onClose}><X className="w-4 h-4" /></button>
+        </div>
+
+        <div className="space-y-3 max-h-[65vh] overflow-y-auto pr-1">
+          <p className="text-xs text-muted-foreground">
+            Upload an Excel/CSV file with columns: <code>name, phone, email, source, courseInterest, assignedToCode, campaign, notes</code>.
+            {' '}<code>assignedToCode</code> is the employee code of the BDA to assign to (leave blank for unassigned).
+            {' '}<code>campaign</code> is the campaign name (leave blank if not from a tracked campaign). Leads with a phone number
+            that already exists in the system are skipped and reported as errors, so it's safe to re-upload the same file.
+          </p>
+          <button onClick={downloadTemplate} className="text-xs px-3 py-2 border rounded-lg hover:bg-muted/50 flex items-center gap-1">
+            <Download className="w-3 h-3" /> Download template
+          </button>
+          <input
+            type="file"
+            accept=".xlsx,.xls,.csv"
+            onChange={(e) => { const f = e.target.files?.[0]; if (f) onFile(f); }}
+            className="w-full text-sm border rounded-lg px-3 py-2"
+          />
+          {fileName && !results && (
+            <p className="text-xs text-muted-foreground">{fileName} — {rows.length} row{rows.length === 1 ? '' : 's'} parsed.</p>
+          )}
+
+          {rows.length > 0 && !results && (
+            <div className="border rounded-lg max-h-44 overflow-auto">
+              <table className="w-full text-[11px]">
+                <thead className="bg-muted/40 text-left sticky top-0">
+                  <tr>{['Name', 'Phone', 'Email', 'Source'].map((h) => <th key={h} className="px-2 py-1 whitespace-nowrap">{h}</th>)}</tr>
+                </thead>
+                <tbody className="divide-y">
+                  {rows.slice(0, 10).map((r, i) => (
+                    <tr key={i}>
+                      <td className="px-2 py-1 whitespace-nowrap">{String(r.name || '')}</td>
+                      <td className="px-2 py-1">{String(r.phone || '') || <span className="text-red-500">missing</span>}</td>
+                      <td className="px-2 py-1 whitespace-nowrap">{String(r.email || '') || '—'}</td>
+                      <td className="px-2 py-1 whitespace-nowrap">{String(r.source || '') || '—'}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              {rows.length > 10 && <p className="text-[10px] text-muted-foreground px-2 py-1">...and {rows.length - 10} more row(s)</p>}
+            </div>
+          )}
+
+          {results && (
+            <div className="space-y-2">
+              <p className="text-sm font-medium">
+                <span className="text-green-600">{createdCount} created</span>
+                {errorCount > 0 && <span className="text-red-600"> · {errorCount} skipped</span>}
+              </p>
+              {errorCount > 0 && (
+                <div className="border rounded-lg max-h-40 overflow-auto divide-y">
+                  {results.filter((r) => r.status === 'error').map((r) => (
+                    <div key={r.row} className="px-2 py-1.5 text-xs">
+                      <span className="font-medium">Row {r.row}:</span> {r.message}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+
+        <div className="flex justify-end gap-2">
+          <button onClick={onClose} className="px-4 py-2 text-sm rounded-lg border">{results ? 'Close' : 'Cancel'}</button>
+          {!results && (
+            <button onClick={submit} disabled={uploading || !rows.length} className="px-4 py-2 text-sm rounded-lg bg-blue-600 text-white disabled:opacity-50">
+              {uploading ? 'Uploading...' : `Upload ${rows.length || ''} Lead${rows.length === 1 ? '' : 's'}`}
+            </button>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function LostReasonModal({ lead, saving, setSaving, onClose, onConfirm }: {
   lead: Lead; saving: boolean; setSaving: (v: boolean) => void; onClose: () => void; onConfirm: (reason: LeadLostReason) => void;
 }) {
@@ -522,7 +769,7 @@ function LostReasonModal({ lead, saving, setSaving, onClose, onConfirm }: {
           <h2 className="font-semibold text-lg">Mark Lost — {lead.name}</h2>
           <button onClick={onClose}><X className="w-4 h-4" /></button>
         </div>
-        <p className="text-sm text-muted-foreground">Why is this lead being marked Lost? This feeds the Lead Quality report in Digital Marketing.</p>
+        <p className="text-sm text-muted-foreground">Why is this lead being marked Lost? This feeds the Lead Quality report.</p>
         <select
           autoFocus
           className="w-full px-3 py-2 border rounded-lg text-sm"
@@ -992,6 +1239,94 @@ function SalesPulsePanel({ canEdit }: { canEdit: boolean }) {
           )}
         </div>
       )}
+    </div>
+  );
+}
+
+// ── Lead Quality tab: campaign funnel (Received → Given to Sales → Assigned)
+// against outcomes (Not Interested / Doesn't Work / Enrolled), with a % score.
+function LeadQualityPanel() {
+  const [data, setData] = useState<LeadQualityData | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    setError('');
+    try {
+      const res = await api.get('/api/sales/lead-quality');
+      setData(res.data.data);
+    } catch (err: unknown) {
+      const e = err as { response?: { data?: { message?: string } } };
+      setError(e.response?.data?.message || 'Failed to load lead quality report');
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => { load(); }, [load]);
+
+  const overall = data?.overall;
+
+  return (
+    <div className="space-y-6">
+      {error && <div className="bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg px-4 py-3">{error}</div>}
+
+      <div className="flex items-center justify-between">
+        <p className="text-sm text-muted-foreground">
+          How many leads from each campaign actually convert vs. get marked Not Interested or Doesn't Work.
+        </p>
+        <button onClick={load} disabled={loading} className="flex items-center gap-2 px-3 py-2 border rounded-lg text-sm font-medium hover:bg-muted/50 disabled:opacity-50">
+          <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} /> Refresh
+        </button>
+      </div>
+
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+        <StatCard icon={Users} label="Leads Received" value={overall?.leadsReceived ?? '—'} />
+        <StatCard icon={Users} label="Given to Sales" value={overall?.leadsGivenToSales ?? '—'} />
+        <StatCard icon={Users} label="Assigned to Rep" value={overall?.leadsAssigned ?? '—'} />
+        <StatCard icon={CheckCircle2} label="Enrolled" value={overall?.enrolled ?? '—'} />
+        <StatCard icon={AlertTriangle} label="Not Interested" value={overall?.notInterested ?? '—'} />
+        <StatCard icon={AlertTriangle} label="Doesn't Work" value={overall?.doesntWork ?? '—'} />
+        <StatCard icon={Percent} label="Overall Lead Quality" value={pctLabel(overall?.qualityPct ?? null)} />
+      </div>
+
+      <div className="bg-card border rounded-xl overflow-x-auto">
+        <table className="w-full text-sm">
+          <thead className="bg-muted/50 text-left text-xs uppercase text-muted-foreground">
+            <tr>
+              <th className="px-3 py-3">Campaign</th>
+              <th className="px-3 py-3">Status</th>
+              <th className="px-3 py-3">Received</th>
+              <th className="px-3 py-3">Given to Sales</th>
+              <th className="px-3 py-3">Assigned</th>
+              <th className="px-3 py-3">Not Interested</th>
+              <th className="px-3 py-3">Doesn't Work</th>
+              <th className="px-3 py-3">Enrolled</th>
+              <th className="px-3 py-3">Quality %</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y">
+            {loading ? (
+              <tr><td colSpan={9} className="px-4 py-8 text-center text-muted-foreground">Loading...</td></tr>
+            ) : !data || data.campaigns.length === 0 ? (
+              <tr><td colSpan={9} className="px-4 py-8 text-center text-muted-foreground">No campaign data yet</td></tr>
+            ) : data.campaigns.map((c) => (
+              <tr key={c.campaignId} className="hover:bg-muted/30">
+                <td className="px-3 py-3 font-medium whitespace-nowrap">{c.campaignName}</td>
+                <td className="px-3 py-3 text-xs text-muted-foreground whitespace-nowrap">{c.campaignStatus}</td>
+                <td className="px-3 py-3">{c.leadsReceived}</td>
+                <td className="px-3 py-3">{c.leadsGivenToSales}</td>
+                <td className="px-3 py-3">{c.leadsAssigned}</td>
+                <td className="px-3 py-3">{c.notInterested}</td>
+                <td className="px-3 py-3">{c.doesntWork}</td>
+                <td className="px-3 py-3">{c.enrolled}</td>
+                <td className={`px-3 py-3 font-semibold ${qualityColor(c.qualityPct)}`}>{pctLabel(c.qualityPct)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
     </div>
   );
 }

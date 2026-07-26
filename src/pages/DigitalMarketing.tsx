@@ -6,7 +6,7 @@ import { useModuleAccess } from '@/hooks/useModuleAccess';
 import {
   Lock, Plus, X, Megaphone, Wallet, TrendingDown, Users, Receipt,
   ClipboardList, CheckCircle2, PieChart, ExternalLink, Target,
-  ChevronLeft, ChevronRight, Download, ChevronDown, Percent, ThumbsDown,
+  ChevronLeft, ChevronRight, Download, ChevronDown,
 } from 'lucide-react';
 
 type CampaignStatus = 'PLANNED' | 'ACTIVE' | 'PAUSED' | 'COMPLETED';
@@ -40,12 +40,6 @@ interface Totals {
 interface FullCampaign extends Campaign {
   recharges: Recharge[]; dailyReports: DailyReport[]; totals: Totals;
 }
-interface LeadQualityRow {
-  campaignId: string; campaignName: string; channel?: string | null; campaignStatus?: CampaignStatus;
-  leadsReceived: number; leadsGivenToSales: number; leadsAssigned: number; totalLeads: number;
-  notInterested: number; doesntWork: number; totalLost: number; enrolled: number; qualityPct: number | null;
-}
-interface LeadQualityData { campaigns: LeadQualityRow[]; overall: Omit<LeadQualityRow, 'campaignId' | 'campaignName' | 'channel' | 'campaignStatus'>; }
 
 const STATUSES: CampaignStatus[] = ['PLANNED', 'ACTIVE', 'PAUSED', 'COMPLETED'];
 const CHANNELS = ['Google Ads', 'Meta Ads (Facebook/Instagram)', 'LinkedIn Ads', 'YouTube Ads', 'Twitter/X Ads', 'WhatsApp', 'SMS', 'Email Marketing', 'SEO/Organic', 'Other'];
@@ -97,13 +91,12 @@ function exportXLSX(sheets: { name: string; rows: Record<string, unknown>[] }[],
   XLSX.writeFile(wb, filename);
 }
 
-type Tab = 'campaigns' | 'recharges' | 'reports' | 'leadQuality' | 'closed' | 'summary';
-const VALID_TABS: Tab[] = ['campaigns', 'recharges', 'reports', 'leadQuality', 'closed', 'summary'];
+type Tab = 'campaigns' | 'recharges' | 'reports' | 'closed' | 'summary';
+const VALID_TABS: Tab[] = ['campaigns', 'recharges', 'reports', 'closed', 'summary'];
 const TABS: { id: Tab; label: string; icon: React.ComponentType<{ className?: string }> }[] = [
   { id: 'campaigns', label: 'Campaigns', icon: Megaphone },
   { id: 'recharges', label: 'Recharges', icon: Receipt },
   { id: 'reports', label: 'Daily Reports', icon: ClipboardList },
-  { id: 'leadQuality', label: 'Lead Quality', icon: Percent },
   { id: 'closed', label: 'Closed Campaigns', icon: CheckCircle2 },
   { id: 'summary', label: 'Spend Summary', icon: PieChart },
 ];
@@ -127,7 +120,6 @@ export default function DigitalMarketingPage() {
   const [reports, setReports] = useState<DailyReport[]>([]);
   const [activeReportCampaigns, setActiveReportCampaigns] = useState<Campaign[]>([]);
   const [allCampaigns, setAllCampaigns] = useState<Campaign[]>([]);
-  const [leadQuality, setLeadQuality] = useState<LeadQualityData | null>(null);
   const [stats, setStats] = useState<Stats | null>(null);
   const [employees, setEmployees] = useState<EmployeeLite[]>([]);
   const [statusFilter, setStatusFilter] = useState('');
@@ -167,9 +159,6 @@ export default function DigitalMarketingPage() {
         setReports(reportsRes.data.data);
         setActiveReportCampaigns(activeRes.data.data);
         setAllCampaigns(allRes.data.data);
-      } else if (tab === 'leadQuality') {
-        const res = await api.get('/api/digital-marketing/lead-quality');
-        setLeadQuality(res.data.data);
       }
       const statsRes = await api.get('/api/digital-marketing/stats');
       setStats(statsRes.data.data);
@@ -436,10 +425,6 @@ export default function DigitalMarketingPage() {
             </div>
           </div>
         </div>
-      )}
-
-      {tab === 'leadQuality' && (
-        <LeadQualityPanel loading={loading} data={leadQuality} />
       )}
 
       {tab === 'closed' && (
@@ -735,102 +720,6 @@ function ReportsCalendar({ month, setMonth, campaigns, reports, onSelectDay }: {
 }
 
 // ── Closed Campaigns: month-filterable cards with inline expand ───────────
-
-const qualityColor = (pct: number | null) => {
-  if (pct == null) return 'text-muted-foreground';
-  if (pct >= 70) return 'text-green-600';
-  if (pct >= 40) return 'text-amber-600';
-  return 'text-red-600';
-};
-const pctLabel = (pct: number | null) => (pct == null ? '—' : `${pct.toFixed(0)}%`);
-
-function LeadQualityPanel({ loading, data }: { loading: boolean; data: LeadQualityData | null }) {
-  const overall = data?.overall;
-  const rows = data?.campaigns ?? [];
-
-  return (
-    <div className="space-y-6">
-      <div>
-        <h3 className="font-semibold text-sm mb-3">Overall — all campaigns</h3>
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-          <StatCard icon={Users} label="Leads Received" value={overall?.leadsReceived ?? 0} />
-          <StatCard icon={Users} label="Given to Sales" value={overall?.leadsGivenToSales ?? 0} />
-          <StatCard icon={Target} label="Assigned to Rep" value={overall?.leadsAssigned ?? 0} />
-          <StatCard icon={CheckCircle2} label="Enrolled" value={overall?.enrolled ?? 0} />
-          <StatCard icon={ThumbsDown} label="Not Interested" value={overall?.notInterested ?? 0} />
-          <StatCard icon={ThumbsDown} label="Doesn't Work" value={overall?.doesntWork ?? 0} />
-          <div className="bg-card border rounded-xl p-4 flex items-center gap-3 col-span-2">
-            <div className="w-9 h-9 rounded-lg bg-pink-100 flex items-center justify-center flex-shrink-0">
-              <Percent className="w-4 h-4 text-pink-600" />
-            </div>
-            <div>
-              <p className="text-xs text-muted-foreground">Overall Lead Quality</p>
-              <p className={`text-lg font-bold ${qualityColor(overall?.qualityPct ?? null)}`}>{pctLabel(overall?.qualityPct ?? null)}</p>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <div>
-        <h3 className="font-semibold text-sm mb-3">By Campaign</h3>
-        <div className="bg-card border rounded-xl overflow-hidden">
-          <table className="w-full text-sm">
-            <thead className="bg-muted/50 text-left text-xs uppercase text-muted-foreground">
-              <tr>
-                <th className="px-4 py-3">Campaign</th>
-                <th className="px-4 py-3">Received</th>
-                <th className="px-4 py-3">Given to Sales</th>
-                <th className="px-4 py-3">Assigned</th>
-                <th className="px-4 py-3">Not Interested</th>
-                <th className="px-4 py-3">Doesn't Work</th>
-                <th className="px-4 py-3">Enrolled</th>
-                <th className="px-4 py-3">Quality %</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y">
-              {loading ? (
-                <tr><td colSpan={8} className="px-4 py-8 text-center text-muted-foreground">Loading...</td></tr>
-              ) : rows.length === 0 ? (
-                <tr><td colSpan={8} className="px-4 py-8 text-center text-muted-foreground">No campaigns yet</td></tr>
-              ) : rows.map((r) => (
-                <tr key={r.campaignId} className="hover:bg-muted/30">
-                  <td className="px-4 py-3 font-medium">
-                    <Link to={`/digital-marketing/${r.campaignId}`} className="text-blue-600 hover:underline">{r.campaignName}</Link>
-                    <p className="text-xs text-muted-foreground font-normal">{r.channel || '—'}</p>
-                  </td>
-                  <td className="px-4 py-3">{r.leadsReceived}</td>
-                  <td className="px-4 py-3">{r.leadsGivenToSales}</td>
-                  <td className="px-4 py-3">{r.leadsAssigned}</td>
-                  <td className="px-4 py-3">{r.notInterested}</td>
-                  <td className="px-4 py-3">{r.doesntWork}</td>
-                  <td className="px-4 py-3">{r.enrolled}</td>
-                  <td className={`px-4 py-3 font-semibold ${qualityColor(r.qualityPct)}`}>{pctLabel(r.qualityPct)}</td>
-                </tr>
-              ))}
-            </tbody>
-            {rows.length > 0 && overall && (
-              <tfoot>
-                <tr className="border-t-2 font-semibold bg-muted/30">
-                  <td className="px-4 py-3">Total</td>
-                  <td className="px-4 py-3">{overall.leadsReceived}</td>
-                  <td className="px-4 py-3">{overall.leadsGivenToSales}</td>
-                  <td className="px-4 py-3">{overall.leadsAssigned}</td>
-                  <td className="px-4 py-3">{overall.notInterested}</td>
-                  <td className="px-4 py-3">{overall.doesntWork}</td>
-                  <td className="px-4 py-3">{overall.enrolled}</td>
-                  <td className={`px-4 py-3 ${qualityColor(overall.qualityPct)}`}>{pctLabel(overall.qualityPct)}</td>
-                </tr>
-              </tfoot>
-            )}
-          </table>
-        </div>
-        <p className="text-xs text-muted-foreground mt-2">
-          Quality % = (Leads Assigned − Not Interested − Doesn't Work) ÷ Leads Assigned. "Received" and "Given to Sales" come from Daily Reports; "Assigned", "Not Interested", "Doesn't Work" and "Enrolled" come from lead outcomes in Sales.
-        </p>
-      </div>
-    </div>
-  );
-}
 
 function ClosedCampaignsPanel({
   loading, closedCampaigns, closedMonth, setClosedMonth, expandedClosed, setExpandedClosed, closedDetail, setClosedDetail, onExport,
