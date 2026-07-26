@@ -4,6 +4,7 @@ import { useModuleAccess } from '@/hooks/useModuleAccess';
 import { Lock, Plus, X, Phone, Mail, Calendar, Users, TrendingUp, CheckCircle2 } from 'lucide-react';
 
 type LeadStatus = 'NEW' | 'CONTACTED' | 'DEMO_SCHEDULED' | 'DEMO_DONE' | 'NEGOTIATION' | 'ENROLLED' | 'LOST';
+type LeadLostReason = 'NOT_INTERESTED' | 'INVALID_NUMBER' | 'UNREACHABLE' | 'DUPLICATE' | 'OTHER';
 
 interface EmployeeLite { id: string; firstName: string; lastName: string; employeeCode: string; }
 
@@ -15,6 +16,7 @@ interface Lead {
   source?: string | null;
   courseInterest?: string | null;
   status: LeadStatus;
+  lostReason?: LeadLostReason | null;
   notes?: string | null;
   createdAt: string;
   assignedTo?: EmployeeLite | null;
@@ -41,6 +43,15 @@ const STATUS_COLOR: Record<LeadStatus, string> = {
 
 const STATUSES: LeadStatus[] = ['NEW', 'CONTACTED', 'DEMO_SCHEDULED', 'DEMO_DONE', 'NEGOTIATION', 'ENROLLED', 'LOST'];
 
+const LOST_REASONS: { value: LeadLostReason; label: string }[] = [
+  { value: 'NOT_INTERESTED', label: 'Not Interested' },
+  { value: 'INVALID_NUMBER', label: 'Invalid Number' },
+  { value: 'UNREACHABLE', label: 'Unreachable / No Response' },
+  { value: 'DUPLICATE', label: 'Duplicate Lead' },
+  { value: 'OTHER', label: 'Other' },
+];
+const LOST_REASON_LABEL: Record<LeadLostReason, string> = Object.fromEntries(LOST_REASONS.map((r) => [r.value, r.label])) as Record<LeadLostReason, string>;
+
 export default function SalesPage() {
   const { modules, loaded, hasModule } = useModuleAccess();
   const level = modules.SALES;
@@ -55,6 +66,7 @@ export default function SalesPage() {
   const [error, setError] = useState('');
   const [showAdd, setShowAdd] = useState(false);
   const [demoLead, setDemoLead] = useState<Lead | null>(null);
+  const [lostReasonLead, setLostReasonLead] = useState<Lead | null>(null);
   const [saving, setSaving] = useState(false);
 
   const fetchAll = useCallback(async () => {
@@ -85,14 +97,21 @@ export default function SalesPage() {
     api.get('/api/employees').then((res) => setEmployees(res.data.data)).catch(() => setEmployees([]));
   }, [level]);
 
-  const updateLeadStatus = async (id: string, status: LeadStatus) => {
+  const updateLeadStatus = async (id: string, status: LeadStatus, lostReason?: LeadLostReason) => {
     try {
-      await api.put(`/api/sales/leads/${id}`, { status });
+      await api.put(`/api/sales/leads/${id}`, { status, lostReason });
       fetchAll();
     } catch (err: unknown) {
       const e = err as { response?: { data?: { message?: string } } };
       setError(e.response?.data?.message || 'Failed to update lead');
     }
+  };
+
+  // Marking a lead LOST requires picking a reason first — every other status
+  // change applies immediately.
+  const onStatusChange = (lead: Lead, status: LeadStatus) => {
+    if (status === 'LOST') { setLostReasonLead(lead); return; }
+    updateLeadStatus(lead.id, status);
   };
 
   if (loaded && !level) {
@@ -196,7 +215,7 @@ export default function SalesPage() {
                   {canEdit ? (
                     <select
                       value={lead.status}
-                      onChange={(e) => updateLeadStatus(lead.id, e.target.value as LeadStatus)}
+                      onChange={(e) => onStatusChange(lead, e.target.value as LeadStatus)}
                       className={`text-xs font-medium rounded-full px-2 py-1 border-0 ${STATUS_COLOR[lead.status]}`}
                     >
                       {STATUSES.map((s) => <option key={s} value={s}>{s.replace(/_/g, ' ')}</option>)}
@@ -205,6 +224,9 @@ export default function SalesPage() {
                     <span className={`text-xs font-medium rounded-full px-2 py-1 ${STATUS_COLOR[lead.status]}`}>
                       {lead.status.replace(/_/g, ' ')}
                     </span>
+                  )}
+                  {lead.status === 'LOST' && lead.lostReason && (
+                    <p className="text-[10px] text-muted-foreground mt-1">{LOST_REASON_LABEL[lead.lostReason]}</p>
                   )}
                 </td>
                 <td className="px-4 py-3 text-muted-foreground">{lead._count?.demos ?? 0}</td>
@@ -244,6 +266,21 @@ export default function SalesPage() {
           onClose={() => setDemoLead(null)}
           onSaved={() => { setDemoLead(null); fetchAll(); }}
           setError={setError}
+        />
+      )}
+
+      {lostReasonLead && (
+        <LostReasonModal
+          lead={lostReasonLead}
+          saving={saving}
+          setSaving={setSaving}
+          onClose={() => setLostReasonLead(null)}
+          onConfirm={async (reason) => {
+            setSaving(true);
+            await updateLeadStatus(lostReasonLead.id, 'LOST', reason);
+            setSaving(false);
+            setLostReasonLead(null);
+          }}
         />
       )}
     </div>
@@ -367,6 +404,43 @@ function ScheduleDemoModal({ lead, employees, saving, setSaving, onClose, onSave
           <button onClick={onClose} className="px-4 py-2 text-sm rounded-lg border">Cancel</button>
           <button onClick={submit} disabled={saving} className="px-4 py-2 text-sm rounded-lg bg-blue-600 text-white disabled:opacity-50">
             {saving ? 'Saving...' : 'Schedule'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function LostReasonModal({ lead, saving, setSaving, onClose, onConfirm }: {
+  lead: Lead; saving: boolean; setSaving: (v: boolean) => void; onClose: () => void; onConfirm: (reason: LeadLostReason) => void;
+}) {
+  const [reason, setReason] = useState<LeadLostReason | ''>('');
+
+  return (
+    <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
+      <div className="bg-white rounded-xl w-full max-w-sm p-6 space-y-4">
+        <div className="flex items-center justify-between">
+          <h2 className="font-semibold text-lg">Mark Lost — {lead.name}</h2>
+          <button onClick={onClose}><X className="w-4 h-4" /></button>
+        </div>
+        <p className="text-sm text-muted-foreground">Why is this lead being marked Lost? This feeds the Lead Quality report in Digital Marketing.</p>
+        <select
+          autoFocus
+          className="w-full px-3 py-2 border rounded-lg text-sm"
+          value={reason}
+          onChange={(e) => setReason(e.target.value as LeadLostReason)}
+        >
+          <option value="">Select a reason...</option>
+          {LOST_REASONS.map((r) => <option key={r.value} value={r.value}>{r.label}</option>)}
+        </select>
+        <div className="flex justify-end gap-2">
+          <button onClick={onClose} className="px-4 py-2 text-sm rounded-lg border">Cancel</button>
+          <button
+            onClick={() => reason && onConfirm(reason)}
+            disabled={!reason || saving}
+            className="px-4 py-2 text-sm rounded-lg bg-red-600 text-white disabled:opacity-50"
+          >
+            {saving ? 'Saving...' : 'Mark Lost'}
           </button>
         </div>
       </div>
