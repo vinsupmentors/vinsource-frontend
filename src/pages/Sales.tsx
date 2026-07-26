@@ -621,6 +621,22 @@ function AddLeadModal({ employees, saving, setSaving, onClose, onSaved, setError
 type BulkRow = Record<string, string>;
 type BulkResult = { row: number; status: 'created' | 'error'; message?: string; leadId?: string };
 
+// Case/space-insensitive column lookup, mirroring the backend's `field()` —
+// lets the preview table read both the simple manual-entry template (name,
+// phone, ...) and a direct export from a legacy CRM (Name, Phone, Assigned,
+// Status, ...) without the user having to rename any columns.
+function bulkField(row: BulkRow, ...aliases: string[]): string {
+  const normalized: Record<string, string> = {};
+  for (const key of Object.keys(row)) {
+    normalized[key.trim().toLowerCase().replace(/\s+/g, '')] = String(row[key] ?? '');
+  }
+  for (const alias of aliases) {
+    const v = normalized[alias];
+    if (v && v.trim()) return v.trim();
+  }
+  return '';
+}
+
 function BulkUploadLeadsModal({ onClose, setError, onSaved }: {
   onClose: () => void; setError: (s: string) => void; onSaved: () => void;
 }) {
@@ -686,10 +702,14 @@ function BulkUploadLeadsModal({ onClose, setError, onSaved }: {
 
         <div className="space-y-3 max-h-[65vh] overflow-y-auto pr-1">
           <p className="text-xs text-muted-foreground">
-            Upload an Excel/CSV file with columns: <code>name, phone, email, source, courseInterest, assignedToCode, campaign, notes</code>.
-            {' '}<code>assignedToCode</code> is the employee code of the BDA to assign to (leave blank for unassigned).
-            {' '}<code>campaign</code> is the campaign name (leave blank if not from a tracked campaign). Leads with a phone number
-            that already exists in the system are skipped and reported as errors, so it's safe to re-upload the same file.
+            Two formats work here. Either the simple template below (<code>name, phone, email, source, courseInterest,
+            assignedToCode, campaign, notes</code>), or a direct export from your old CRM with columns like
+            <code> Name, Phone, Status, Assigned, Source, Demo, Reminder, Last Contact, Created, Date Of Demo</code> —
+            upload that file exactly as exported, no renaming needed. For the CRM export, old status text (e.g. "Followup",
+            "Not Interested", "Demo conducted - Positive") is automatically mapped into the pipeline, <code>Assigned</code> is
+            matched by rep name, and <code>Created</code>/<code>Reminder</code>/<code>Last Contact</code> are preserved so Lead
+            Age stays accurate. Leads with a phone number that already exists are skipped and reported as errors, so it's safe
+            to re-upload the same file.
           </p>
           <button onClick={downloadTemplate} className="text-xs px-3 py-2 border rounded-lg hover:bg-muted/50 flex items-center gap-1">
             <Download className="w-3 h-3" /> Download template
@@ -708,15 +728,15 @@ function BulkUploadLeadsModal({ onClose, setError, onSaved }: {
             <div className="border rounded-lg max-h-44 overflow-auto">
               <table className="w-full text-[11px]">
                 <thead className="bg-muted/40 text-left sticky top-0">
-                  <tr>{['Name', 'Phone', 'Email', 'Source'].map((h) => <th key={h} className="px-2 py-1 whitespace-nowrap">{h}</th>)}</tr>
+                  <tr>{['Name', 'Phone', 'Status', 'Assigned'].map((h) => <th key={h} className="px-2 py-1 whitespace-nowrap">{h}</th>)}</tr>
                 </thead>
                 <tbody className="divide-y">
                   {rows.slice(0, 10).map((r, i) => (
                     <tr key={i}>
-                      <td className="px-2 py-1 whitespace-nowrap">{String(r.name || '')}</td>
-                      <td className="px-2 py-1">{String(r.phone || '') || <span className="text-red-500">missing</span>}</td>
-                      <td className="px-2 py-1 whitespace-nowrap">{String(r.email || '') || '—'}</td>
-                      <td className="px-2 py-1 whitespace-nowrap">{String(r.source || '') || '—'}</td>
+                      <td className="px-2 py-1 whitespace-nowrap">{bulkField(r, 'name') || '—'}</td>
+                      <td className="px-2 py-1">{bulkField(r, 'phone', 'phonenumber', 'mobile') || <span className="text-red-500">missing</span>}</td>
+                      <td className="px-2 py-1 whitespace-nowrap">{bulkField(r, 'status') || '—'}</td>
+                      <td className="px-2 py-1 whitespace-nowrap">{bulkField(r, 'assigned', 'assignedto') || bulkField(r, 'assignedtocode') || '—'}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -738,6 +758,18 @@ function BulkUploadLeadsModal({ onClose, setError, onSaved }: {
                       <span className="font-medium">Row {r.row}:</span> {r.message}
                     </div>
                   ))}
+                </div>
+              )}
+              {results.some((r) => r.status === 'created' && r.message) && (
+                <div>
+                  <p className="text-xs text-amber-700 font-medium mb-1">Created with notes:</p>
+                  <div className="border rounded-lg max-h-40 overflow-auto divide-y">
+                    {results.filter((r) => r.status === 'created' && r.message).map((r) => (
+                      <div key={r.row} className="px-2 py-1.5 text-xs text-amber-700">
+                        <span className="font-medium">Row {r.row}:</span> {r.message}
+                      </div>
+                    ))}
+                  </div>
                 </div>
               )}
             </div>
