@@ -12,7 +12,7 @@ import {
   ClipboardList, ShieldAlert, UserPlus, DoorOpen, TrendingUp,
   Wallet, GraduationCap, Target, Megaphone, KeyRound,
   BookOpen, PiggyBank, Store, Repeat, PieChart, X, Receipt, CheckCircle2,
-  Presentation, CalendarClock, Handshake, ListChecks, Mic2, Network, FileBadge,
+  Presentation, CalendarClock, Handshake, ListChecks, Mic2, Network, FileBadge, Percent,
 } from 'lucide-react';
 
 interface NavItem {
@@ -117,6 +117,7 @@ const moduleNavItems: ModuleNavItem[] = [
       { label: 'Campaigns',        to: '/digital-marketing?tab=campaigns', icon: Megaphone,     module: 'DIGITAL_MARKETING' },
       { label: 'Recharges',        to: '/digital-marketing?tab=recharges', icon: Receipt,       module: 'DIGITAL_MARKETING' },
       { label: 'Daily Reports',    to: '/digital-marketing?tab=reports',   icon: ClipboardList, module: 'DIGITAL_MARKETING' },
+      { label: 'Lead Quality',     to: '/digital-marketing?tab=leadQuality', icon: Percent,     module: 'DIGITAL_MARKETING' },
       { label: 'Closed Campaigns', to: '/digital-marketing?tab=closed',    icon: CheckCircle2,  module: 'DIGITAL_MARKETING' },
       { label: 'Spend Summary',    to: '/digital-marketing?tab=summary',   icon: PieChart,      module: 'DIGITAL_MARKETING' },
     ],
