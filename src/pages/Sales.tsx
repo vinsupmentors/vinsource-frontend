@@ -1,7 +1,7 @@
 import { useEffect, useState, useCallback } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import * as XLSX from 'xlsx';
-import api from '@/lib/api';
+import api, { BASE_URL } from '@/lib/api';
 import { useModuleAccess } from '@/hooks/useModuleAccess';
 import { formatDate, formatDateTime } from '@/lib/utils';
 import {
@@ -17,18 +17,33 @@ type LeadStatus = 'NEW' | 'CONTACTED' | 'DEMO_SCHEDULED' | 'DEMO_DONE' | 'NEGOTI
 type LeadLostReason = 'NOT_INTERESTED' | 'INVALID_NUMBER' | 'UNREACHABLE' | 'DUPLICATE' | 'OTHER';
 type DemoMode = 'ONLINE' | 'OFFLINE';
 type DemoStatus = 'SCHEDULED' | 'COMPLETED' | 'RESCHEDULED' | 'NO_SHOW' | 'CANCELLED';
+type DemoOutcome = 'NOT_INTERESTED' | 'INTERESTED' | 'FIFTY_FIFTY' | 'NEED_FOLLOWUP';
 
 interface EmployeeLite { id: string; firstName: string; lastName: string; employeeCode: string; }
 
 interface DemoLite {
   id: string;
+  bookingNumber: string;
   scheduledAt: string;
   mode: DemoMode;
   status: DemoStatus;
   feedback?: string | null;
   conductedBy?: EmployeeLite | null;
+  coConductedBy?: EmployeeLite | null;
   createdAt: string;
   rescheduledFromId?: string | null;
+  // Captured at booking time
+  city?: string | null;
+  educationQualification?: string | null;
+  collegeName?: string | null;
+  passedOutYear?: number | null;
+  currentStatus?: string | null;
+  courseEnquired?: string | null;
+  bookingComments?: string | null;
+  // Captured on reschedule / conduct
+  rescheduleReason?: string | null;
+  proofUrl?: string | null;
+  outcome?: DemoOutcome | null;
 }
 
 interface Lead {
@@ -80,9 +95,12 @@ interface ReportRecipient { id: string; email: string; name: string | null; }
 // since these tabs aren't scoped to one lead's detail view.
 interface DemoRow {
   id: string;
+  bookingNumber: string;
   scheduledAt: string;
   mode: DemoMode;
   status: DemoStatus;
+  outcome?: DemoOutcome | null;
+  rescheduleReason?: string | null;
   lead: { id: string; name: string; phone: string };
 }
 
@@ -161,6 +179,17 @@ const DEMO_STATUS_COLOR: Record<DemoStatus, string> = {
   RESCHEDULED: 'bg-slate-100 text-slate-600',
   NO_SHOW: 'bg-red-100 text-red-700',
   CANCELLED: 'bg-slate-100 text-slate-500',
+};
+
+const DEMO_OUTCOMES: DemoOutcome[] = ['NOT_INTERESTED', 'INTERESTED', 'FIFTY_FIFTY', 'NEED_FOLLOWUP'];
+const DEMO_OUTCOME_LABEL: Record<DemoOutcome, string> = {
+  NOT_INTERESTED: 'Not Interested', INTERESTED: 'Interested', FIFTY_FIFTY: '50-50', NEED_FOLLOWUP: 'Need Follow-up',
+};
+const DEMO_OUTCOME_COLOR: Record<DemoOutcome, string> = {
+  NOT_INTERESTED: 'bg-red-100 text-red-700',
+  INTERESTED: 'bg-green-100 text-green-700',
+  FIFTY_FIFTY: 'bg-amber-100 text-amber-700',
+  NEED_FOLLOWUP: 'bg-blue-100 text-blue-700',
 };
 
 function leadAgeLabel(createdAt: string): string {
@@ -507,7 +536,10 @@ export default function SalesPage() {
                       <td className="px-3 py-3 text-muted-foreground whitespace-nowrap">{lead.source || '—'}</td>
                       <td className="px-3 py-3 whitespace-nowrap">
                         {latestDemo ? (
-                          <span className={`text-xs font-medium rounded-full px-2 py-1 ${DEMO_STATUS_COLOR[latestDemo.status]}`}>
+                          <span
+                            className={`text-xs font-medium rounded-full px-2 py-1 ${DEMO_STATUS_COLOR[latestDemo.status]}`}
+                            title={latestDemo.bookingNumber}
+                          >
                             {DEMO_MODE_LABEL[latestDemo.mode]} · {DEMO_STATUS_LABEL[latestDemo.status]}
                           </span>
                         ) : <span className="text-muted-foreground text-xs">Not booked</span>}
@@ -913,6 +945,14 @@ function LeadDetailModal({ lead, employees, canEdit, onClose, onChanged, setGlob
   const [showScheduleForm, setShowScheduleForm] = useState(false);
   const [demoScheduledAt, setDemoScheduledAt] = useState('');
   const [demoMode, setDemoMode] = useState<DemoMode>('ONLINE');
+  // Student intake, captured once at booking time.
+  const [demoCity, setDemoCity] = useState('');
+  const [demoEducation, setDemoEducation] = useState('');
+  const [demoCollege, setDemoCollege] = useState('');
+  const [demoPassedOutYear, setDemoPassedOutYear] = useState('');
+  const [demoCurrentStatus, setDemoCurrentStatus] = useState('');
+  const [demoCourseEnquired, setDemoCourseEnquired] = useState(lead.courseInterest || '');
+  const [demoBookingComments, setDemoBookingComments] = useState('');
   const [savingDemo, setSavingDemo] = useState(false);
 
   const [actingDemo, setActingDemo] = useState<{ id: string; type: 'complete' | 'reschedule' | 'noshow' | 'cancel' } | null>(null);
@@ -920,6 +960,11 @@ function LeadDetailModal({ lead, employees, canEdit, onClose, onChanged, setGlob
   const [actionConductedById, setActionConductedById] = useState('');
   const [actionNewScheduledAt, setActionNewScheduledAt] = useState('');
   const [actionNewMode, setActionNewMode] = useState<DemoMode>('ONLINE');
+  const [actionRescheduleReason, setActionRescheduleReason] = useState('');
+  // Mark Conducted specifics.
+  const [actionOutcome, setActionOutcome] = useState<DemoOutcome | ''>('');
+  const [actionCoConductedById, setActionCoConductedById] = useState('');
+  const [actionProofFile, setActionProofFile] = useState<File | null>(null);
   const [savingAction, setSavingAction] = useState(false);
 
   const [reassignSaving, setReassignSaving] = useState(false);
@@ -989,8 +1034,18 @@ function LeadDetailModal({ lead, employees, canEdit, onClose, onChanged, setGlob
         leadId: lead.id,
         scheduledAt: new Date(demoScheduledAt).toISOString(),
         mode: demoMode,
+        city: demoCity || undefined,
+        educationQualification: demoEducation || undefined,
+        collegeName: demoCollege || undefined,
+        passedOutYear: demoPassedOutYear || undefined,
+        currentStatus: demoCurrentStatus || undefined,
+        courseEnquired: demoCourseEnquired || undefined,
+        bookingComments: demoBookingComments || undefined,
       });
-      setDemoScheduledAt(''); setDemoMode('ONLINE'); setShowScheduleForm(false);
+      setDemoScheduledAt(''); setDemoMode('ONLINE');
+      setDemoCity(''); setDemoEducation(''); setDemoCollege(''); setDemoPassedOutYear('');
+      setDemoCurrentStatus(''); setDemoCourseEnquired(lead.courseInterest || ''); setDemoBookingComments('');
+      setShowScheduleForm(false);
       await load();
       onChanged();
     } catch (err: unknown) {
@@ -1003,23 +1058,43 @@ function LeadDetailModal({ lead, employees, canEdit, onClose, onChanged, setGlob
 
   const closeAction = () => {
     setActingDemo(null); setActionFeedback(''); setActionConductedById('');
-    setActionNewScheduledAt(''); setActionNewMode('ONLINE');
+    setActionNewScheduledAt(''); setActionNewMode('ONLINE'); setActionRescheduleReason('');
+    setActionOutcome(''); setActionCoConductedById(''); setActionProofFile(null);
   };
 
   const submitAction = async () => {
     if (!actingDemo) return;
+    const existingDemo = demos.find((d) => d.id === actingDemo.id);
+    if (actingDemo.type === 'complete') {
+      if (!actionOutcome) { setLocalError('Pick an outcome before marking this demo Conducted'); return; }
+      if (!actionProofFile && !existingDemo?.proofUrl) { setLocalError('Attach a photo/screenshot as proof the demo was conducted'); return; }
+    }
+    if (actingDemo.type === 'reschedule' && !actionRescheduleReason.trim()) {
+      setLocalError('A reason for rescheduling is required'); return;
+    }
     setSavingAction(true);
     setLocalError('');
     try {
       if (actingDemo.type === 'complete') {
-        await api.put(`/api/sales/demos/${actingDemo.id}`, { status: 'COMPLETED', feedback: actionFeedback || undefined, conductedById: actionConductedById || undefined });
+        const fd = new FormData();
+        fd.append('status', 'COMPLETED');
+        fd.append('outcome', actionOutcome);
+        if (actionFeedback) fd.append('feedback', actionFeedback);
+        if (actionConductedById) fd.append('conductedById', actionConductedById);
+        if (actionCoConductedById) fd.append('coConductedById', actionCoConductedById);
+        if (actionProofFile) fd.append('proof', actionProofFile);
+        await api.put(`/api/sales/demos/${actingDemo.id}`, fd, { headers: { 'Content-Type': 'multipart/form-data' } });
       } else if (actingDemo.type === 'noshow') {
         await api.put(`/api/sales/demos/${actingDemo.id}`, { status: 'NO_SHOW', feedback: actionFeedback || undefined });
       } else if (actingDemo.type === 'cancel') {
         await api.put(`/api/sales/demos/${actingDemo.id}`, { status: 'CANCELLED', feedback: actionFeedback || undefined });
       } else if (actingDemo.type === 'reschedule') {
         if (!actionNewScheduledAt) { setLocalError('Pick the new date/time'); setSavingAction(false); return; }
-        await api.post(`/api/sales/demos/${actingDemo.id}/reschedule`, { scheduledAt: new Date(actionNewScheduledAt).toISOString(), mode: actionNewMode });
+        await api.post(`/api/sales/demos/${actingDemo.id}/reschedule`, {
+          scheduledAt: new Date(actionNewScheduledAt).toISOString(),
+          mode: actionNewMode,
+          reason: actionRescheduleReason.trim(),
+        });
       }
       closeAction();
       await load();
@@ -1145,12 +1220,33 @@ function LeadDetailModal({ lead, employees, canEdit, onClose, onChanged, setGlob
           </div>
 
           {showScheduleForm && (
-            <div className="border rounded-lg p-3 mb-3 space-y-2 bg-muted/20">
+            <div className="border rounded-lg p-3 mb-3 space-y-3 bg-muted/20">
+              <p className="text-xs font-medium text-muted-foreground">Demo slot</p>
               <div className="flex flex-wrap items-center gap-2">
                 <input type="datetime-local" className="px-2 py-1 border rounded-lg text-sm" value={demoScheduledAt} onChange={(e) => setDemoScheduledAt(e.target.value)} />
                 <select className="px-2 py-1 border rounded-lg text-sm" value={demoMode} onChange={(e) => setDemoMode(e.target.value as DemoMode)}>
                   {DEMO_MODES.map((m) => <option key={m} value={m}>{DEMO_MODE_LABEL[m]}</option>)}
                 </select>
+              </div>
+
+              <p className="text-xs font-medium text-muted-foreground pt-1">Student details</p>
+              <div className="grid grid-cols-2 gap-2">
+                <input className="px-2 py-1.5 border rounded-lg text-xs" placeholder="City" value={demoCity} onChange={(e) => setDemoCity(e.target.value)} />
+                <input className="px-2 py-1.5 border rounded-lg text-xs" placeholder="Education qualification" value={demoEducation} onChange={(e) => setDemoEducation(e.target.value)} />
+                <input className="px-2 py-1.5 border rounded-lg text-xs" placeholder="College name" value={demoCollege} onChange={(e) => setDemoCollege(e.target.value)} />
+                <input type="number" className="px-2 py-1.5 border rounded-lg text-xs" placeholder="Passed out year" value={demoPassedOutYear} onChange={(e) => setDemoPassedOutYear(e.target.value)} />
+                <input className="px-2 py-1.5 border rounded-lg text-xs" placeholder="Current status (e.g. Working, Job Seeking)" value={demoCurrentStatus} onChange={(e) => setDemoCurrentStatus(e.target.value)} />
+                <input className="px-2 py-1.5 border rounded-lg text-xs" placeholder="Course enquired" value={demoCourseEnquired} onChange={(e) => setDemoCourseEnquired(e.target.value)} />
+              </div>
+              <textarea
+                className="w-full px-2 py-1.5 border rounded-lg text-xs"
+                placeholder="Comments (optional)"
+                rows={2}
+                value={demoBookingComments}
+                onChange={(e) => setDemoBookingComments(e.target.value)}
+              />
+
+              <div className="flex gap-2">
                 <button onClick={submitScheduleDemo} disabled={savingDemo} className="px-3 py-1.5 text-xs rounded-lg bg-blue-600 text-white disabled:opacity-50">
                   {savingDemo ? 'Saving...' : 'Schedule'}
                 </button>
@@ -1165,7 +1261,16 @@ function LeadDetailModal({ lead, employees, canEdit, onClose, onChanged, setGlob
             <p className="text-sm text-muted-foreground">No demos booked yet.</p>
           ) : (
             <div className="space-y-2">
-              {demos.map((d) => (
+              {demos.map((d) => {
+                const intakeParts = [
+                  d.city,
+                  d.educationQualification,
+                  d.collegeName,
+                  d.passedOutYear ? `Passed out ${d.passedOutYear}` : null,
+                  d.currentStatus,
+                  d.courseEnquired ? `Interested: ${d.courseEnquired}` : null,
+                ].filter(Boolean);
+                return (
                 <div key={d.id} className="border rounded-lg p-3 text-sm space-y-2">
                   <div className="flex items-center justify-between">
                     <div className="flex items-center gap-2">
@@ -1175,8 +1280,24 @@ function LeadDetailModal({ lead, employees, canEdit, onClose, onChanged, setGlob
                     </div>
                     <span className={`text-xs font-medium rounded-full px-2 py-1 ${DEMO_STATUS_COLOR[d.status]}`}>{DEMO_STATUS_LABEL[d.status]}</span>
                   </div>
-                  {d.conductedBy && <p className="text-xs text-muted-foreground">Conducted by {d.conductedBy.firstName} {d.conductedBy.lastName}</p>}
+                  <p className="text-[10px] text-muted-foreground font-mono">{d.bookingNumber}</p>
+                  {intakeParts.length > 0 && (
+                    <p className="text-xs text-muted-foreground">{intakeParts.join(' · ')}</p>
+                  )}
+                  {d.bookingComments && <p className="text-xs text-muted-foreground italic">"{d.bookingComments}"</p>}
+                  {d.conductedBy && <p className="text-xs text-muted-foreground">Conducted by {d.conductedBy.firstName} {d.conductedBy.lastName}{d.coConductedBy ? ` · with ${d.coConductedBy.firstName} ${d.coConductedBy.lastName}` : ''}</p>}
+                  {d.outcome && (
+                    <span className={`inline-block text-xs font-medium rounded-full px-2 py-1 ${DEMO_OUTCOME_COLOR[d.outcome]}`}>{DEMO_OUTCOME_LABEL[d.outcome]}</span>
+                  )}
                   {d.feedback && <p className="text-xs text-muted-foreground">{d.feedback}</p>}
+                  {d.proofUrl && (
+                    <a href={`${BASE_URL}${d.proofUrl}`} target="_blank" rel="noreferrer" className="text-xs text-blue-600 hover:underline inline-flex items-center gap-1">
+                      <Upload className="w-3 h-3" /> View proof
+                    </a>
+                  )}
+                  {d.status === 'RESCHEDULED' && d.rescheduleReason && (
+                    <p className="text-xs text-amber-700">Rescheduled — {d.rescheduleReason}</p>
+                  )}
 
                   {canEdit && d.status === 'SCHEDULED' && actingDemo?.id !== d.id && (
                     <div className="flex flex-wrap gap-2 pt-1">
@@ -1190,26 +1311,64 @@ function LeadDetailModal({ lead, employees, canEdit, onClose, onChanged, setGlob
                   {actingDemo?.id === d.id && (
                     <div className="border-t pt-2 mt-1 space-y-2">
                       {actingDemo.type === 'reschedule' ? (
-                        <div className="flex flex-wrap items-center gap-2">
-                          <input type="datetime-local" className="px-2 py-1 border rounded-lg text-xs" value={actionNewScheduledAt} onChange={(e) => setActionNewScheduledAt(e.target.value)} />
-                          <select className="px-2 py-1 border rounded-lg text-xs" value={actionNewMode} onChange={(e) => setActionNewMode(e.target.value as DemoMode)}>
-                            {DEMO_MODES.map((m) => <option key={m} value={m}>{DEMO_MODE_LABEL[m]}</option>)}
-                          </select>
+                        <div className="space-y-2">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <input type="datetime-local" className="px-2 py-1 border rounded-lg text-xs" value={actionNewScheduledAt} onChange={(e) => setActionNewScheduledAt(e.target.value)} />
+                            <select className="px-2 py-1 border rounded-lg text-xs" value={actionNewMode} onChange={(e) => setActionNewMode(e.target.value as DemoMode)}>
+                              {DEMO_MODES.map((m) => <option key={m} value={m}>{DEMO_MODE_LABEL[m]}</option>)}
+                            </select>
+                          </div>
+                          <input
+                            className="w-full px-2 py-1 border rounded-lg text-xs"
+                            placeholder="Reason for rescheduling *"
+                            value={actionRescheduleReason}
+                            onChange={(e) => setActionRescheduleReason(e.target.value)}
+                          />
+                        </div>
+                      ) : actingDemo.type === 'complete' ? (
+                        <div className="space-y-2">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <select className="px-2 py-1 border rounded-lg text-xs" value={actionOutcome} onChange={(e) => setActionOutcome(e.target.value as DemoOutcome)}>
+                              <option value="">Outcome *</option>
+                              {DEMO_OUTCOMES.map((o) => <option key={o} value={o}>{DEMO_OUTCOME_LABEL[o]}</option>)}
+                            </select>
+                            {employees.length > 0 && (
+                              <select className="px-2 py-1 border rounded-lg text-xs" value={actionConductedById} onChange={(e) => setActionConductedById(e.target.value)}>
+                                <option value="">Conducted by...</option>
+                                {employees.map((e) => <option key={e.id} value={e.id}>{e.firstName} {e.lastName}</option>)}
+                              </select>
+                            )}
+                            {employees.length > 0 && (
+                              <select className="px-2 py-1 border rounded-lg text-xs" value={actionCoConductedById} onChange={(e) => setActionCoConductedById(e.target.value)}>
+                                <option value="">Co-conducted by (optional)...</option>
+                                {employees.map((e) => <option key={e.id} value={e.id}>{e.firstName} {e.lastName}</option>)}
+                              </select>
+                            )}
+                          </div>
+                          <label className="text-xs text-muted-foreground flex items-center gap-2">
+                            Proof of demo {d.proofUrl ? '(already attached — pick a file to replace it)' : '*'}:
+                            <input
+                              type="file"
+                              accept="image/*"
+                              className="text-xs"
+                              onChange={(e) => setActionProofFile(e.target.files?.[0] || null)}
+                            />
+                          </label>
+                          <input
+                            className="w-full px-2 py-1 border rounded-lg text-xs"
+                            placeholder="Comments (optional)"
+                            value={actionFeedback}
+                            onChange={(e) => setActionFeedback(e.target.value)}
+                          />
                         </div>
                       ) : (
                         <div className="flex flex-wrap items-center gap-2">
                           <input
                             className="px-2 py-1 border rounded-lg text-xs flex-1 min-w-[160px]"
-                            placeholder={actingDemo.type === 'complete' ? 'What did you cover / outcome?' : 'Notes (optional)'}
+                            placeholder="Notes (optional)"
                             value={actionFeedback}
                             onChange={(e) => setActionFeedback(e.target.value)}
                           />
-                          {actingDemo.type === 'complete' && employees.length > 0 && (
-                            <select className="px-2 py-1 border rounded-lg text-xs" value={actionConductedById} onChange={(e) => setActionConductedById(e.target.value)}>
-                              <option value="">Conducted by...</option>
-                              {employees.map((e) => <option key={e.id} value={e.id}>{e.firstName} {e.lastName}</option>)}
-                            </select>
-                          )}
                         </div>
                       )}
                       <div className="flex gap-2">
@@ -1221,7 +1380,7 @@ function LeadDetailModal({ lead, employees, canEdit, onClose, onChanged, setGlob
                     </div>
                   )}
                 </div>
-              ))}
+              );})}
             </div>
           )}
         </div>
@@ -1460,6 +1619,9 @@ function DemoListPanel({ status, emptyLabel, onOpenLead }: {
 
   useEffect(() => { load(); }, [load]);
 
+  const extraCol = status === 'COMPLETED' ? 'Outcome' : status === 'RESCHEDULED' ? 'Reason' : null;
+  const colCount = extraCol ? 6 : 5;
+
   return (
     <div className="space-y-4">
       {error && <div className="bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg px-4 py-3">{error}</div>}
@@ -1475,20 +1637,22 @@ function DemoListPanel({ status, emptyLabel, onOpenLead }: {
         <table className="w-full text-sm">
           <thead className="bg-muted/50 text-left text-xs uppercase text-muted-foreground">
             <tr>
+              <th className="px-3 py-3">Booking #</th>
               <th className="px-3 py-3">Lead</th>
               <th className="px-3 py-3">Phone</th>
               <th className="px-3 py-3">Scheduled</th>
               <th className="px-3 py-3">Mode</th>
-              <th className="px-3 py-3">Status</th>
+              {extraCol && <th className="px-3 py-3">{extraCol}</th>}
             </tr>
           </thead>
           <tbody className="divide-y">
             {loading ? (
-              <tr><td colSpan={5} className="px-4 py-8 text-center text-muted-foreground">Loading...</td></tr>
+              <tr><td colSpan={colCount} className="px-4 py-8 text-center text-muted-foreground">Loading...</td></tr>
             ) : demos.length === 0 ? (
-              <tr><td colSpan={5} className="px-4 py-8 text-center text-muted-foreground">{emptyLabel}</td></tr>
+              <tr><td colSpan={colCount} className="px-4 py-8 text-center text-muted-foreground">{emptyLabel}</td></tr>
             ) : demos.map((d) => (
               <tr key={d.id} className="hover:bg-muted/30">
+                <td className="px-3 py-3 text-[11px] font-mono text-muted-foreground whitespace-nowrap">{d.bookingNumber}</td>
                 <td className="px-3 py-3 font-medium whitespace-nowrap">
                   <button onClick={() => onOpenLead(d.lead.id)} className="text-blue-600 hover:underline text-left">
                     {d.lead.name}
@@ -1499,9 +1663,18 @@ function DemoListPanel({ status, emptyLabel, onOpenLead }: {
                 </td>
                 <td className="px-3 py-3 text-xs text-muted-foreground whitespace-nowrap">{formatDateTime(d.scheduledAt)}</td>
                 <td className="px-3 py-3 text-xs whitespace-nowrap">{DEMO_MODE_LABEL[d.mode]}</td>
-                <td className="px-3 py-3 whitespace-nowrap">
-                  <span className={`text-xs font-medium rounded-full px-2 py-1 ${DEMO_STATUS_COLOR[d.status]}`}>{DEMO_STATUS_LABEL[d.status]}</span>
-                </td>
+                {extraCol === 'Outcome' && (
+                  <td className="px-3 py-3 whitespace-nowrap">
+                    {d.outcome ? (
+                      <span className={`text-xs font-medium rounded-full px-2 py-1 ${DEMO_OUTCOME_COLOR[d.outcome]}`}>{DEMO_OUTCOME_LABEL[d.outcome]}</span>
+                    ) : '—'}
+                  </td>
+                )}
+                {extraCol === 'Reason' && (
+                  <td className="px-3 py-3 text-xs text-muted-foreground max-w-[220px] truncate" title={d.rescheduleReason || ''}>
+                    {d.rescheduleReason || '—'}
+                  </td>
+                )}
               </tr>
             ))}
           </tbody>
