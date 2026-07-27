@@ -301,7 +301,7 @@ export default function SalesPage() {
 
   useEffect(() => {
     if (!level) return;
-    api.get('/api/employees').then((res) => setEmployees(res.data.data)).catch(() => setEmployees([]));
+    api.get('/api/sales/team').then((res) => setEmployees(res.data.data)).catch(() => setEmployees([]));
   }, [level]);
 
   const openLeadDetail = async (id: string) => {
