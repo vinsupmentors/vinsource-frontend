@@ -183,6 +183,7 @@ const moduleNavItems: ModuleNavItem[] = [
     children: [
       { label: 'Add Student',    to: '/student-onboarding?tab=add',       icon: UserPlus,      module: 'STUDENT_ONBOARDING' },
       { label: 'Documents',      to: '/student-onboarding?tab=documents', icon: FileText,      module: 'STUDENT_ONBOARDING' },
+      { label: 'Approval',       to: '/student-onboarding?tab=approval',  icon: CheckCircle2,  module: 'STUDENT_ONBOARDING' },
       { label: 'Reports',        to: '/student-onboarding?tab=reports',   icon: BarChart2,     module: 'STUDENT_ONBOARDING' },
     ],
   },

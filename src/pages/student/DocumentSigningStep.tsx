@@ -12,12 +12,26 @@ import { Loader2, FileText, CheckCircle2, Camera, RotateCcw, PenLine, AlertTrian
 
 pdfjs.GlobalWorkerOptions.workerSrc = workerSrc;
 
-interface OnboardingDoc {
-  templateId: string;
+interface FeeDeclarationRow {
+  date?: string;
+  totalFee?: string;
+  feesPaid?: string;
+  amountDue?: string;
+}
+
+interface OnboardingItem {
+  kind: 'template' | 'fee_declaration';
+  id: string;
   title: string;
-  fileUrl: string;
   signed: boolean;
   signedAt: string | null;
+  fileUrl?: string;
+  feeDeclaration?: {
+    guardianName: string | null;
+    courseName: string | null;
+    dueDate: string | null;
+    rows: FeeDeclarationRow[];
+  };
 }
 
 function dataUrlToBlob(dataUrl: string): Blob {
@@ -30,14 +44,14 @@ function dataUrlToBlob(dataUrl: string): Blob {
 }
 
 export default function DocumentSigningStep({ onAllSigned }: { onAllSigned: () => void }) {
-  const [docs, setDocs] = useState<OnboardingDoc[] | null>(null);
+  const [docs, setDocs] = useState<OnboardingItem[] | null>(null);
   const [loadError, setLoadError] = useState('');
   const [activeIndex, setActiveIndex] = useState(0);
 
   useEffect(() => {
     api.get('/api/student-portal/onboarding-documents')
       .then((res) => {
-        const data: OnboardingDoc[] = res.data.data;
+        const data: OnboardingItem[] = res.data.data;
         setDocs(data);
         const firstPending = data.findIndex((d) => !d.signed);
         setActiveIndex(firstPending === -1 ? 0 : firstPending);
@@ -54,7 +68,7 @@ export default function DocumentSigningStep({ onAllSigned }: { onAllSigned: () =
     return <div className="flex items-center justify-center py-12"><Loader2 className="w-6 h-6 animate-spin text-blue-600" /></div>;
   }
   if (docs.length === 0) {
-    // No documents configured yet — nothing blocks this student, move on.
+    // Nothing required yet — nothing blocks this student, move on.
     onAllSigned();
     return null;
   }
@@ -83,12 +97,62 @@ export default function DocumentSigningStep({ onAllSigned }: { onAllSigned: () =
         Please read and sign the following {pending.length === 1 ? 'document' : `${pending.length} documents`} to finish setting up your account.
         {docs.length > 1 && <span className="ml-1">({docs.filter((d) => d.signed).length}/{docs.length} completed)</span>}
       </p>
-      <SingleDocumentSigner key={current.templateId} doc={current} onSigned={handleSigned} />
+      <SingleDocumentSigner key={current.id} doc={current} onSigned={handleSigned} />
     </div>
   );
 }
 
-function SingleDocumentSigner({ doc, onSigned }: { doc: OnboardingDoc; onSigned: () => void }) {
+function formatDate(iso?: string | null) {
+  if (!iso) return '—';
+  return new Date(iso).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' });
+}
+
+/** Read-only rendering of an admin-filled fee declaration — dynamic per
+ * student, so (unlike the shared PDF templates) there's no source file to
+ * display; this is styled to match the actual paper form instead. */
+function FeeDeclarationContent({ fd }: { fd: NonNullable<OnboardingItem['feeDeclaration']> }) {
+  return (
+    <div className="bg-white rounded-lg shadow-sm p-6 max-w-xl mx-auto text-sm leading-relaxed space-y-4">
+      <h2 className="font-bold text-base text-center">Student Declaration Form for Pending Fee Payment</h2>
+      <p>
+        To<br />The Management,<br />Vinsup Skill Academy,<br />Ganapathy,<br />Coimbatore – 641006.
+      </p>
+      <p><strong>Subject:</strong> Declaration Regarding Pending Fee Payment</p>
+      <p>
+        I, S/o or D/o <strong>{fd.guardianName || '—'}</strong>, enrolled in the course{' '}
+        <strong>{fd.courseName || '—'}</strong>, hereby declare that I have pending fee dues with Vinsup Skill
+        Academy and I take full responsibility to clear the dues on or before{' '}
+        <strong>{formatDate(fd.dueDate)}</strong>.
+      </p>
+      <p>
+        I understand that non-payment of the due amount within the stipulated time may lead to consequences
+        including restriction from attending classes, withholding of certificates, or termination of enrollment.
+      </p>
+      <table className="w-full border text-xs">
+        <thead>
+          <tr className="bg-muted/50">
+            <th className="border px-2 py-1">Date</th>
+            <th className="border px-2 py-1">Total Course Fees</th>
+            <th className="border px-2 py-1">Fees Paid</th>
+            <th className="border px-2 py-1">Amount Due</th>
+          </tr>
+        </thead>
+        <tbody>
+          {(fd.rows || []).map((r, i) => (
+            <tr key={i}>
+              <td className="border px-2 py-1">{r.date || '—'}</td>
+              <td className="border px-2 py-1">{r.totalFee || '—'}</td>
+              <td className="border px-2 py-1">{r.feesPaid || '—'}</td>
+              <td className="border px-2 py-1">{r.amountDue || '—'}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+function SingleDocumentSigner({ doc, onSigned }: { doc: OnboardingItem; onSigned: () => void }) {
   const [numPages, setNumPages] = useState(0);
   const [pdfError, setPdfError] = useState('');
   const [hasReadToEnd, setHasReadToEnd] = useState(false);
@@ -164,7 +228,10 @@ function SingleDocumentSigner({ doc, onSigned }: { doc: OnboardingDoc; onSigned:
       const fd = new FormData();
       fd.append('signature', signatureBlob, 'signature.png');
       fd.append('photo', photoBlob, 'photo.jpg');
-      await api.post(`/api/student-portal/onboarding-documents/${doc.templateId}/sign`, fd, {
+      const endpoint = doc.kind === 'fee_declaration'
+        ? `/api/student-portal/fee-declarations/${doc.id}/sign`
+        : `/api/student-portal/onboarding-documents/${doc.id}/sign`;
+      await api.post(endpoint, fd, {
         headers: { 'Content-Type': 'multipart/form-data' },
       });
       onSigned();
@@ -190,6 +257,8 @@ function SingleDocumentSigner({ doc, onSigned }: { doc: OnboardingDoc; onSigned:
       >
         {pdfError ? (
           <p className="text-sm text-red-600 p-4">{pdfError}</p>
+        ) : doc.kind === 'fee_declaration' && doc.feeDeclaration ? (
+          <FeeDeclarationContent fd={doc.feeDeclaration} />
         ) : (
           <Document
             file={`${BASE_URL}${doc.fileUrl}`}

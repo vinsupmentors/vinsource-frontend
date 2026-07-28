@@ -34,6 +34,7 @@ export interface StudentProfile {
   motherPhone?: string;
   profileCompletedAt?: string | null;
   documentsCompletedAt?: string | null;
+  onboardingApprovedAt?: string | null;
 }
 
 export interface User {

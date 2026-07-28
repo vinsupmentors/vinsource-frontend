@@ -4,7 +4,7 @@ import { useDispatch, useSelector } from 'react-redux';
 import { AppDispatch, RootState } from '@/store';
 import { fetchMe } from '@/store/slices/authSlice';
 import api, { BASE_URL } from '@/lib/api';
-import { GraduationCap, Loader2, ShieldCheck, UserCircle, Plus, Trash2, CheckCircle2, Camera, Info, FileSignature } from 'lucide-react';
+import { GraduationCap, Loader2, ShieldCheck, UserCircle, Plus, Trash2, CheckCircle2, Camera, Info, FileSignature, Clock, RefreshCw } from 'lucide-react';
 import DocumentSigningStep from './DocumentSigningStep';
 
 const inputCls = 'w-full px-3 py-2.5 rounded-lg border bg-background text-sm focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary transition';
@@ -36,14 +36,15 @@ export default function CompleteProfile() {
     if (token && !user) dispatch(fetchMe());
   }, [token, user, dispatch]);
 
-  // Step — initialised from mustChangePassword / profileCompletedAt once user loads
-  const [step, setStep] = useState<1 | 2 | 3>(1);
+  // Step — initialised from mustChangePassword / profileCompletedAt / documentsCompletedAt once user loads
+  const [step, setStep] = useState<1 | 2 | 3 | 4>(1);
   useEffect(() => {
     if (!user) return;
     if (user.mustChangePassword) setStep(1);
     else if (!user.student?.profileCompletedAt) setStep(2);
-    else setStep(3);
-  }, [user?.mustChangePassword, user?.student?.profileCompletedAt]);  // eslint-disable-line react-hooks/exhaustive-deps
+    else if (!user.student?.documentsCompletedAt) setStep(3);
+    else setStep(4);
+  }, [user?.mustChangePassword, user?.student?.profileCompletedAt, user?.student?.documentsCompletedAt]);  // eslint-disable-line react-hooks/exhaustive-deps
 
   // ---- Step 1 — password change ----
   const [currentPassword, setCurrentPassword] = useState('');
@@ -118,7 +119,7 @@ export default function CompleteProfile() {
   // directly (URL bar / bookmark) or where StudentLayout redirected
   // them before fetchMe finished.
   // ------------------------------------------------------------------
-  if (user && !user.mustChangePassword && user.student?.profileCompletedAt && user.student?.documentsCompletedAt) {
+  if (user && !user.mustChangePassword && user.student?.profileCompletedAt && user.student?.documentsCompletedAt && user.student?.onboardingApprovedAt) {
     return <Navigate to="/student/dashboard" replace />;
   }
 
@@ -192,6 +193,8 @@ export default function CompleteProfile() {
         setStep(2);
       } else if (!refreshed?.student?.documentsCompletedAt) {
         setStep(3);
+      } else if (!refreshed?.student?.onboardingApprovedAt) {
+        setStep(4);
       } else {
         navigate('/student/dashboard');
       }
@@ -267,7 +270,9 @@ export default function CompleteProfile() {
           <div className="w-10 h-px bg-border" />
           <StepPill active={step === 2} done={step > 2} icon={UserCircle} label="Your details" />
           <div className="w-10 h-px bg-border" />
-          <StepPill active={step === 3} done={false} icon={FileSignature} label="Sign documents" />
+          <StepPill active={step === 3} done={step > 3} icon={FileSignature} label="Sign documents" />
+          <div className="w-10 h-px bg-border" />
+          <StepPill active={step === 4} done={false} icon={Clock} label="Awaiting approval" />
         </div>
 
         <div className="bg-card rounded-2xl shadow-xl border p-6 sm:p-8">
@@ -465,8 +470,14 @@ export default function CompleteProfile() {
           )}
 
           {step === 3 && (
-            <DocumentSigningStep onAllSigned={async () => { await dispatch(fetchMe()); navigate('/student/dashboard'); }} />
+            <DocumentSigningStep onAllSigned={async () => {
+              const refreshed = await dispatch(fetchMe()).unwrap();
+              if (refreshed?.student?.onboardingApprovedAt) navigate('/student/dashboard');
+              else setStep(4);
+            }} />
           )}
+
+          {step === 4 && <ApprovalWaitStep />}
         </div>
       </div>
     </div>
@@ -478,6 +489,46 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
     <div>
       <label className="block text-sm font-medium mb-1.5">{label}</label>
       {children}
+    </div>
+  );
+}
+
+function ApprovalWaitStep() {
+  const dispatch = useDispatch<AppDispatch>();
+  const navigate = useNavigate();
+  const [checking, setChecking] = useState(false);
+
+  const checkStatus = async () => {
+    setChecking(true);
+    try {
+      const refreshed = await dispatch(fetchMe()).unwrap();
+      if (refreshed?.student?.onboardingApprovedAt) navigate('/student/dashboard');
+    } finally {
+      setChecking(false);
+    }
+  };
+
+  return (
+    <div className="text-center py-6 space-y-4">
+      <div className="inline-flex w-14 h-14 bg-amber-100 rounded-2xl items-center justify-center">
+        <Clock className="w-7 h-7 text-amber-600" />
+      </div>
+      <div>
+        <h3 className="font-semibold">Waiting on final approval</h3>
+        <p className="text-sm text-muted-foreground max-w-sm mx-auto mt-1.5">
+          Your profile and documents have been submitted. Our team is reviewing everything —
+          you'll get access to your dashboard as soon as it's approved.
+        </p>
+      </div>
+      <button
+        type="button"
+        onClick={checkStatus}
+        disabled={checking}
+        className="inline-flex items-center gap-2 px-4 py-2 rounded-lg border text-sm font-medium hover:bg-muted transition disabled:opacity-60"
+      >
+        {checking ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
+        Check status
+      </button>
     </div>
   );
 }

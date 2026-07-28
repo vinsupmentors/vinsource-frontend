@@ -4,7 +4,7 @@ import api, { BASE_URL } from '@/lib/api';
 import { useModuleAccess } from '@/hooks/useModuleAccess';
 import {
   UserPlus, FileText, BarChart2, X, Loader2, Upload, CheckCircle2, XCircle,
-  Users, GraduationCap, MapPin,
+  Users, GraduationCap, MapPin, ShieldCheck, Search, Receipt,
 } from 'lucide-react';
 
 function errMsg(err: unknown, fallback: string) {
@@ -59,10 +59,13 @@ interface DocumentTemplate {
   fileUrl: string;
   isActive: boolean;
   order: number;
+  applicableTracks: string[] | null;
   createdAt: string;
   createdBy?: { firstName: string; lastName: string } | null;
   _count: { signatures: number };
 }
+
+const TRACKS = ['JRP', 'IOP', 'PAP'] as const;
 
 interface BatchSummary {
   id: string;
@@ -102,11 +105,12 @@ interface BatchStudent {
   documents: { templateId: string; title: string; signed: boolean; signedAt: string | null; location: string | null }[];
 }
 
-type Tab = 'add' | 'documents' | 'reports';
-const VALID_TABS: Tab[] = ['add', 'documents', 'reports'];
+type Tab = 'add' | 'documents' | 'approval' | 'reports';
+const VALID_TABS: Tab[] = ['add', 'documents', 'approval', 'reports'];
 const TABS: { id: Tab; label: string; icon: React.ComponentType<{ className?: string }> }[] = [
   { id: 'add', label: 'Add Student', icon: UserPlus },
   { id: 'documents', label: 'Documents', icon: FileText },
+  { id: 'approval', label: 'Approval', icon: ShieldCheck },
   { id: 'reports', label: 'Reports', icon: BarChart2 },
 ];
 
@@ -148,6 +152,7 @@ export default function StudentOnboardingPage() {
 
       {tab === 'add' && <AddStudentTab canEdit={canEdit} setError={setError} />}
       {tab === 'documents' && <DocumentsTab canEdit={canEdit} setError={setError} />}
+      {tab === 'approval' && <ApprovalTab canEdit={canEdit} setError={setError} />}
       {tab === 'reports' && <ReportsTab setError={setError} />}
     </div>
   );
@@ -282,6 +287,15 @@ function DocumentsTab({ canEdit, setError }: { canEdit: boolean; setError: (s: s
     } catch (err) { setError(errMsg(err, 'Failed to update document')); }
   };
 
+  const toggleTrack = async (t: DocumentTemplate, track: string) => {
+    const current = t.applicableTracks || [];
+    const next = current.includes(track) ? current.filter((x) => x !== track) : [...current, track];
+    try {
+      await api.put(`/api/student-onboarding/templates/${t.id}`, { applicableTracks: next });
+      load();
+    } catch (err) { setError(errMsg(err, 'Failed to update applicable tracks')); }
+  };
+
   if (loading) return <div className="flex justify-center py-12"><Loader2 className="w-6 h-6 animate-spin text-blue-600" /></div>;
 
   return (
@@ -308,6 +322,28 @@ function DocumentsTab({ canEdit, setError }: { canEdit: boolean; setError: (s: s
                   <p className="text-xs text-muted-foreground">
                     {t._count.signatures} signed · uploaded {formatDate(t.createdAt)}{t.createdBy ? ` by ${t.createdBy.firstName} ${t.createdBy.lastName}` : ''}
                   </p>
+                  <div className="flex items-center gap-1 mt-1.5">
+                    {(t.applicableTracks?.length ?? 0) === 0 && !canEdit && (
+                      <span className="text-[10px] font-medium px-1.5 py-0.5 rounded bg-muted text-muted-foreground">All tracks</span>
+                    )}
+                    {(canEdit || (t.applicableTracks?.length ?? 0) > 0) && TRACKS.map((tr) => {
+                      const on = (t.applicableTracks || []).includes(tr);
+                      return (
+                        <button
+                          key={tr}
+                          disabled={!canEdit}
+                          onClick={() => toggleTrack(t, tr)}
+                          title={on ? `Applies to ${tr} — click to remove` : `Doesn't apply to ${tr} — click to add`}
+                          className={`text-[10px] font-medium px-1.5 py-0.5 rounded ${on ? 'bg-blue-100 text-blue-700' : 'bg-muted text-muted-foreground'} ${canEdit ? 'hover:opacity-80 cursor-pointer' : ''}`}
+                        >
+                          {tr}
+                        </button>
+                      );
+                    })}
+                    {canEdit && (t.applicableTracks?.length ?? 0) === 0 && (
+                      <span className="text-[10px] text-muted-foreground ml-1">(all tracks — click to scope)</span>
+                    )}
+                  </div>
                 </div>
               </div>
               <div className="flex items-center gap-3 shrink-0">
@@ -335,7 +371,12 @@ function DocumentsTab({ canEdit, setError }: { canEdit: boolean; setError: (s: s
 function UploadTemplateModal({ onClose, setError, onSaved }: { onClose: () => void; setError: (s: string) => void; onSaved: () => void }) {
   const [title, setTitle] = useState('');
   const [file, setFile] = useState<File | null>(null);
+  const [tracks, setTracks] = useState<string[]>([]);
   const [saving, setSaving] = useState(false);
+
+  const toggleTrack = (tr: string) => {
+    setTracks((ts) => (ts.includes(tr) ? ts.filter((x) => x !== tr) : [...ts, tr]));
+  };
 
   const submit = async () => {
     if (!title.trim() || !file) { setError('A title and a PDF file are required'); return; }
@@ -345,6 +386,7 @@ function UploadTemplateModal({ onClose, setError, onSaved }: { onClose: () => vo
       const fd = new FormData();
       fd.append('title', title.trim());
       fd.append('file', file);
+      if (tracks.length > 0) fd.append('applicableTracks', tracks.join(','));
       await api.post('/api/student-onboarding/templates', fd, { headers: { 'Content-Type': 'multipart/form-data' } });
       onSaved();
     } catch (err) { setError(errMsg(err, 'Failed to upload document')); } finally { setSaving(false); }
@@ -355,9 +397,304 @@ function UploadTemplateModal({ onClose, setError, onSaved }: { onClose: () => vo
       <div className="space-y-3 text-left">
         <input className="w-full px-3 py-2 border rounded-lg text-sm" placeholder="Title (e.g. Enrollment Agreement)" value={title} onChange={(e) => setTitle(e.target.value)} />
         <input type="file" accept=".pdf" onChange={(e) => setFile(e.target.files?.[0] || null)} className="w-full text-sm" />
-        <p className="text-xs text-muted-foreground">PDF only, up to 20 MB. Every currently enrolling student will be required to read and sign this.</p>
+        <div>
+          <p className="text-xs font-medium mb-1.5">Applies to</p>
+          <div className="flex items-center gap-2">
+            {TRACKS.map((tr) => (
+              <button
+                key={tr}
+                type="button"
+                onClick={() => toggleTrack(tr)}
+                className={`text-xs font-medium px-2.5 py-1 rounded-full border ${tracks.includes(tr) ? 'bg-blue-600 text-white border-blue-600' : 'border-muted-foreground/30 text-muted-foreground'}`}
+              >
+                {tr}
+              </button>
+            ))}
+          </div>
+          <p className="text-[11px] text-muted-foreground mt-1">Leave all unselected to apply this document to every track.</p>
+        </div>
+        <p className="text-xs text-muted-foreground">PDF only, up to 20 MB. Every matching student will be required to read and sign this.</p>
       </div>
       <ModalFooter onClose={onClose} onSubmit={submit} saving={saving} label="Upload" />
+    </Modal>
+  );
+}
+
+// ── Approval tab ─────────────────────────────────────────────────────────────
+interface ApprovalStudent {
+  id: string;
+  studentCode: string;
+  firstName: string;
+  lastName: string;
+  phone: string;
+  email?: string | null;
+  photo?: string | null;
+  track: string;
+  profileCompletedAt: string | null;
+  documentsCompletedAt: string | null;
+  requiredCount: number;
+}
+
+interface ApprovalItem {
+  kind: 'template' | 'fee_declaration';
+  id: string;
+  title: string;
+  signed: boolean;
+  signedAt: string | null;
+}
+
+interface ApprovalStudentDetail {
+  id: string;
+  studentCode: string;
+  firstName: string;
+  lastName: string;
+  email?: string | null;
+  phone: string;
+  track: string;
+  city?: string | null;
+  state?: string | null;
+  address?: string | null;
+  fatherName?: string | null;
+  fatherPhone?: string | null;
+  motherName?: string | null;
+  motherPhone?: string | null;
+}
+
+function ApprovalTab({ canEdit, setError }: { canEdit: boolean; setError: (s: string) => void }) {
+  const [search, setSearch] = useState('');
+  const [students, setStudents] = useState<ApprovalStudent[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [openId, setOpenId] = useState<string | null>(null);
+
+  const load = useCallback(() => {
+    setLoading(true);
+    api.get('/api/student-onboarding/approvals', { params: search.trim() ? { search: search.trim() } : {} })
+      .then((res) => setStudents(res.data.data))
+      .catch((err) => setError(errMsg(err, 'Failed to load approvals')))
+      .finally(() => setLoading(false));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [search]);
+
+  useEffect(() => {
+    const t = setTimeout(load, 300);
+    return () => clearTimeout(t);
+  }, [load]);
+
+  return (
+    <div className="space-y-4">
+      <p className="text-sm text-muted-foreground">
+        Students who've completed their profile and signed every required document — review and approve before their dashboard unlocks.
+      </p>
+      <div className="relative max-w-sm">
+        <Search className="w-4 h-4 text-muted-foreground absolute left-3 top-1/2 -translate-y-1/2" />
+        <input
+          className="w-full pl-9 pr-3 py-2 border rounded-lg text-sm"
+          placeholder="Search by name or phone…"
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+        />
+      </div>
+
+      {loading ? (
+        <div className="flex justify-center py-12"><Loader2 className="w-6 h-6 animate-spin text-blue-600" /></div>
+      ) : students.length === 0 ? (
+        <p className="text-sm text-muted-foreground text-center py-8">No students waiting on approval right now.</p>
+      ) : (
+        <div className="border rounded-xl divide-y">
+          {students.map((s) => (
+            <button key={s.id} onClick={() => setOpenId(s.id)} className="w-full flex items-center justify-between p-4 text-left hover:bg-muted/30 transition">
+              <div className="flex items-center gap-3">
+                {s.photo ? (
+                  <img src={`${BASE_URL}${s.photo}`} alt="" className="w-9 h-9 rounded-full object-cover" />
+                ) : (
+                  <div className="w-9 h-9 rounded-full bg-muted flex items-center justify-center"><GraduationCap className="w-4 h-4 text-muted-foreground" /></div>
+                )}
+                <div>
+                  <p className="font-medium text-sm">{s.firstName} {s.lastName} <span className="text-muted-foreground font-normal">({s.studentCode})</span></p>
+                  <p className="text-xs text-muted-foreground">{s.phone} · {s.track} track</p>
+                </div>
+              </div>
+              <span className="text-xs px-2 py-1 rounded-full bg-amber-100 text-amber-700 font-medium shrink-0">Awaiting approval</span>
+            </button>
+          ))}
+        </div>
+      )}
+
+      {openId && (
+        <ApprovalDetailModal
+          studentId={openId}
+          canEdit={canEdit}
+          onClose={() => setOpenId(null)}
+          onApproved={() => { setOpenId(null); load(); }}
+          setError={setError}
+        />
+      )}
+    </div>
+  );
+}
+
+function ApprovalDetailModal({ studentId, canEdit, onClose, onApproved, setError }: {
+  studentId: string; canEdit: boolean; onClose: () => void; onApproved: () => void; setError: (s: string) => void;
+}) {
+  const [student, setStudent] = useState<ApprovalStudentDetail | null>(null);
+  const [items, setItems] = useState<ApprovalItem[]>([]);
+  const [allSigned, setAllSigned] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [approving, setApproving] = useState(false);
+  const [showFeeForm, setShowFeeForm] = useState(false);
+
+  const load = useCallback(() => {
+    setLoading(true);
+    api.get(`/api/student-onboarding/approvals/${studentId}`)
+      .then((res) => {
+        setStudent(res.data.data.student);
+        setItems(res.data.data.items);
+        setAllSigned(res.data.data.allSigned);
+      })
+      .catch((err) => setError(errMsg(err, 'Failed to load student')))
+      .finally(() => setLoading(false));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [studentId]);
+
+  useEffect(() => { load(); }, [load]);
+
+  const approve = async () => {
+    setApproving(true);
+    try {
+      await api.post(`/api/student-onboarding/approvals/${studentId}/approve`);
+      onApproved();
+    } catch (err) { setError(errMsg(err, 'Failed to approve')); } finally { setApproving(false); }
+  };
+
+  return (
+    <Modal title={student ? `${student.firstName} ${student.lastName}` : 'Student'} onClose={onClose} wide>
+      {loading ? (
+        <div className="flex justify-center py-12"><Loader2 className="w-6 h-6 animate-spin text-blue-600" /></div>
+      ) : !student ? null : (
+        <div className="space-y-4 text-left">
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 text-xs">
+            <Field label="Student ID" value={student.studentCode} />
+            <Field label="Track" value={student.track} />
+            <Field label="Phone" value={student.phone} />
+            <Field label="Email" value={student.email} />
+            <Field label="City" value={student.city} />
+            <Field label="Address" value={student.address} />
+            <Field label="Father" value={student.fatherName ? `${student.fatherName} (${student.fatherPhone || '—'})` : null} />
+            <Field label="Mother" value={student.motherName ? `${student.motherName} (${student.motherPhone || '—'})` : null} />
+          </div>
+
+          <div>
+            <p className="text-xs font-medium text-muted-foreground mb-1.5">Documents</p>
+            <div className="space-y-1">
+              {items.map((it) => (
+                <div key={it.id} className="flex items-center justify-between text-xs border rounded-lg px-2.5 py-1.5 bg-white">
+                  <span className="flex items-center gap-1.5">
+                    {it.signed ? <CheckCircle2 className="w-3.5 h-3.5 text-green-600" /> : <XCircle className="w-3.5 h-3.5 text-muted-foreground" />}
+                    {it.title}
+                  </span>
+                  <span className="text-muted-foreground">{it.signed ? formatDateTime(it.signedAt) : 'Pending'}</span>
+                </div>
+              ))}
+              {items.length === 0 && <p className="text-xs text-muted-foreground">No documents required.</p>}
+            </div>
+          </div>
+
+          {canEdit && (
+            <button onClick={() => setShowFeeForm(true)} className="text-xs font-medium text-blue-600 hover:underline flex items-center gap-1">
+              <Receipt className="w-3.5 h-3.5" /> Add fee declaration form
+            </button>
+          )}
+
+          <div className="flex justify-end gap-2 pt-3 border-t">
+            <button onClick={onClose} className="px-4 py-2 text-sm rounded-lg border">Close</button>
+            {canEdit && (
+              <button
+                onClick={approve}
+                disabled={!allSigned || approving}
+                className="px-4 py-2 text-sm rounded-lg bg-green-600 text-white disabled:opacity-50"
+              >
+                {approving ? 'Approving...' : allSigned ? 'Approve & Unlock Dashboard' : 'Waiting on signatures'}
+              </button>
+            )}
+          </div>
+        </div>
+      )}
+
+      {showFeeForm && (
+        <FeeDeclarationFormModal
+          studentId={studentId}
+          onClose={() => setShowFeeForm(false)}
+          setError={setError}
+          onSaved={() => { setShowFeeForm(false); load(); }}
+        />
+      )}
+    </Modal>
+  );
+}
+
+interface FeeRow { date: string; totalFee: string; feesPaid: string; amountDue: string; }
+const EMPTY_FEE_ROW: FeeRow = { date: '', totalFee: '', feesPaid: '', amountDue: '' };
+
+function FeeDeclarationFormModal({ studentId, onClose, setError, onSaved }: {
+  studentId: string; onClose: () => void; setError: (s: string) => void; onSaved: () => void;
+}) {
+  const [guardianName, setGuardianName] = useState('');
+  const [courseName, setCourseName] = useState('');
+  const [dueDate, setDueDate] = useState('');
+  const [rows, setRows] = useState<FeeRow[]>([EMPTY_FEE_ROW]);
+  const [saving, setSaving] = useState(false);
+
+  const updateRow = (i: number, field: keyof FeeRow, value: string) => {
+    setRows((rs) => rs.map((r, idx) => (idx === i ? { ...r, [field]: value } : r)));
+  };
+
+  const submit = async () => {
+    const validRows = rows.filter((r) => r.date || r.totalFee || r.feesPaid || r.amountDue);
+    if (validRows.length === 0) { setError('Add at least one fee row'); return; }
+    setSaving(true);
+    setError('');
+    try {
+      await api.post(`/api/student-onboarding/students/${studentId}/fee-declarations`, {
+        guardianName: guardianName || undefined,
+        courseName: courseName || undefined,
+        dueDate: dueDate || undefined,
+        rows: validRows,
+      });
+      onSaved();
+    } catch (err) { setError(errMsg(err, 'Failed to create fee declaration')); } finally { setSaving(false); }
+  };
+
+  return (
+    <Modal title="Student Declaration Form for Pending Fee Payment" onClose={onClose}>
+      <div className="space-y-3 text-left">
+        <p className="text-xs text-muted-foreground">
+          This is sent to the student to read and sign. Once signed, it counts toward their onboarding approval —
+          creating this re-locks the student's dashboard until they sign it and you approve again.
+        </p>
+        <input className="w-full px-3 py-2 border rounded-lg text-sm" placeholder="Guardian name (S/o or D/o)" value={guardianName} onChange={(e) => setGuardianName(e.target.value)} />
+        <input className="w-full px-3 py-2 border rounded-lg text-sm" placeholder="Course enrolled" value={courseName} onChange={(e) => setCourseName(e.target.value)} />
+        <div>
+          <label className="text-xs text-muted-foreground">Clear dues on or before</label>
+          <input type="date" className="w-full px-3 py-2 border rounded-lg text-sm" value={dueDate} onChange={(e) => setDueDate(e.target.value)} />
+        </div>
+        <div>
+          <div className="flex items-center justify-between mb-1.5">
+            <label className="text-xs font-medium">Fee schedule</label>
+            <button type="button" onClick={() => setRows((rs) => [...rs, EMPTY_FEE_ROW])} className="text-xs text-blue-600 font-medium hover:underline">+ Add row</button>
+          </div>
+          <div className="space-y-2">
+            {rows.map((r, i) => (
+              <div key={i} className="grid grid-cols-4 gap-1.5">
+                <input placeholder="Date" value={r.date} onChange={(e) => updateRow(i, 'date', e.target.value)} className="px-2 py-1.5 border rounded-md text-xs" />
+                <input placeholder="Total fee" value={r.totalFee} onChange={(e) => updateRow(i, 'totalFee', e.target.value)} className="px-2 py-1.5 border rounded-md text-xs" />
+                <input placeholder="Fees paid" value={r.feesPaid} onChange={(e) => updateRow(i, 'feesPaid', e.target.value)} className="px-2 py-1.5 border rounded-md text-xs" />
+                <input placeholder="Amount due" value={r.amountDue} onChange={(e) => updateRow(i, 'amountDue', e.target.value)} className="px-2 py-1.5 border rounded-md text-xs" />
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+      <ModalFooter onClose={onClose} onSubmit={submit} saving={saving} label="Send to Student" />
     </Modal>
   );
 }
