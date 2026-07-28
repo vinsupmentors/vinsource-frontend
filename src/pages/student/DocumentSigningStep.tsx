@@ -1,16 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { Document, Page, pdfjs } from 'react-pdf';
 import SignatureCanvas from 'react-signature-canvas';
-import 'react-pdf/dist/Page/AnnotationLayer.css';
-import 'react-pdf/dist/Page/TextLayer.css';
-// Vite-bundled worker — avoids depending on a CDN and keeping its version in
-// lockstep with whatever pdfjs-dist react-pdf itself pulls in.
-// eslint-disable-next-line import/no-unresolved
-import workerSrc from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
-import api from '@/lib/api';
-import { Loader2, FileText, CheckCircle2, Camera, RotateCcw, PenLine, AlertTriangle } from 'lucide-react';
-
-pdfjs.GlobalWorkerOptions.workerSrc = workerSrc;
+import api, { BASE_URL } from '@/lib/api';
+import { Loader2, FileText, CheckCircle2, Camera, RotateCcw, PenLine, AlertTriangle, ExternalLink } from 'lucide-react';
 
 interface FeeDeclarationRow {
   date?: string;
@@ -152,63 +143,36 @@ function FeeDeclarationContent({ fd }: { fd: NonNullable<OnboardingItem['feeDecl
   );
 }
 
+const REQUIRED_VIEW_SECONDS = 15;
+
 function SingleDocumentSigner({ doc, onSigned }: { doc: OnboardingItem; onSigned: () => void }) {
-  const [numPages, setNumPages] = useState(0);
-  const [pdfError, setPdfError] = useState('');
-  const [hasReadToEnd, setHasReadToEnd] = useState(false);
-  const scrollRef = useRef<HTMLDivElement>(null);
+  // Full public URL to the document — served as a plain static file with no
+  // auth required, so the browser's own native PDF viewer can just load it
+  // directly inside an <iframe>, exactly like tapping a PDF link. Previously
+  // this fetched raw bytes via axios and rendered pages ourselves with
+  // react-pdf/pdfjs (a web-worker, manual canvas rendering, byte-array
+  // parsing) — every one of those steps was a possible point of failure and
+  // produced the same generic "could not load" error no matter the real
+  // cause. Letting the browser handle a plain URL removes that entire class
+  // of bug: there's no custom fetch, no worker, nothing to parse ourselves.
+  const fileUrl = doc.kind === 'template' && doc.fileUrl ? `${BASE_URL}${doc.fileUrl}` : null;
 
-  // Fetch the PDF bytes ourselves through the authenticated axios client
-  // instead of letting react-pdf/pdfjs fetch the URL directly. pdfjs does
-  // byte-range requests by default, which cross-origin requires the server
-  // to expose Content-Range/Accept-Ranges via CORS — easy to get wrong and
-  // hard to debug ("Could not load this document" with no further detail).
-  // A single plain GET through `api` sidesteps that entirely and reuses the
-  // exact request path already proven to work for every other call here.
-  const [pdfData, setPdfData] = useState<Uint8Array | null>(null);
-  // Bumping this re-runs the fetch below — lets the student retry in place
-  // after a transient network blip instead of reloading the whole page.
-  const [retryTick, setRetryTick] = useState(0);
+  // We can no longer detect "scrolled to the end" inside a native PDF viewer
+  // (it's a separate sandboxed viewer, not something our JS can inspect).
+  // Instead, require the document to stay open for a minimum time and an
+  // explicit confirmation checkbox before signing unlocks — the same pattern
+  // most e-signature products use.
+  const [secondsLeft, setSecondsLeft] = useState(REQUIRED_VIEW_SECONDS);
+  const [confirmedRead, setConfirmedRead] = useState(false);
   useEffect(() => {
-    if (doc.kind !== 'template' || !doc.fileUrl) return;
-    let cancelled = false;
-    setPdfData(null);
-    setPdfError('');
-    api.get(doc.fileUrl, { responseType: 'arraybuffer' })
-      .then((res) => { if (!cancelled) setPdfData(new Uint8Array(res.data)); })
-      .catch((err: unknown) => {
-        if (cancelled) return;
-        // Surface the actual cause instead of one generic message — a 429
-        // (shared mobile-carrier IP hitting the rate limit) needs a very
-        // different response from the student than a real network drop.
-        const e = err as { response?: { status?: number }; request?: unknown };
-        if (e.response?.status === 429) {
-          setPdfError('Too many requests from your network right now. Please wait a couple of minutes, then retry.');
-        } else if (e.response?.status) {
-          setPdfError(`Could not load this document (error ${e.response.status}). Please retry, or contact support if this continues.`);
-        } else if (e.request) {
-          setPdfError('Could not reach the server — check your internet connection and retry.');
-        } else {
-          setPdfError('Could not load this document. Please retry.');
-        }
-      });
-    return () => { cancelled = true; };
-  }, [doc.kind, doc.fileUrl, retryTick]);
-
-  const checkScrolledToEnd = useCallback(() => {
-    const el = scrollRef.current;
-    if (!el) return;
-    if (el.scrollTop + el.clientHeight >= el.scrollHeight - 24) setHasReadToEnd(true);
-  }, []);
-
-  // Documents shorter than the viewport need no scrolling at all — check once
-  // rendering settles instead of leaving the Sign button permanently locked.
-  useEffect(() => {
-    const t = setTimeout(checkScrolledToEnd, 400);
+    if (secondsLeft <= 0) return;
+    const t = setTimeout(() => setSecondsLeft((s) => s - 1), 1000);
     return () => clearTimeout(t);
-  }, [numPages, checkScrolledToEnd]);
+  }, [secondsLeft]);
 
-  // Camera + signature only become relevant once reading is done.
+  const canSign = secondsLeft <= 0 && confirmedRead;
+
+  // Camera + signature only become relevant once reading is confirmed.
   const [signatureEmpty, setSignatureEmpty] = useState(true);
   const [photoDataUrl, setPhotoDataUrl] = useState('');
   const [cameraError, setCameraError] = useState('');
@@ -231,10 +195,10 @@ function SingleDocumentSigner({ doc, onSigned }: { doc: OnboardingItem; onSigned
   }, []);
 
   useEffect(() => {
-    if (!hasReadToEnd || photoDataUrl) return;
+    if (!canSign || photoDataUrl) return;
     startCamera();
     return () => { streamRef.current?.getTracks().forEach((t) => t.stop()); };
-  }, [hasReadToEnd, photoDataUrl, startCamera]);
+  }, [canSign, photoDataUrl, startCamera]);
 
   const capturePhoto = () => {
     const video = videoRef.current;
@@ -282,49 +246,56 @@ function SingleDocumentSigner({ doc, onSigned }: { doc: OnboardingItem; onSigned
 
   return (
     <div className="border rounded-xl overflow-hidden">
-      <div className="px-4 py-3 border-b bg-muted/30 flex items-center gap-2">
-        <FileText className="w-4 h-4 text-blue-600" />
-        <h3 className="font-semibold text-sm">{doc.title}</h3>
-      </div>
-
-      <div
-        ref={scrollRef}
-        onScroll={checkScrolledToEnd}
-        className="max-h-[50vh] overflow-y-auto bg-muted/20 p-2"
-      >
-        {pdfError ? (
-          <div className="p-4 space-y-2">
-            <p className="text-sm text-red-600">{pdfError}</p>
-            <button
-              type="button"
-              onClick={() => setRetryTick((n) => n + 1)}
-              className="text-xs px-3 py-1.5 border rounded-lg font-medium hover:bg-muted inline-flex items-center gap-1.5"
-            >
-              <RotateCcw className="w-3 h-3" /> Retry
-            </button>
-          </div>
-        ) : doc.kind === 'fee_declaration' && doc.feeDeclaration ? (
-          <FeeDeclarationContent fd={doc.feeDeclaration} />
-        ) : !pdfData ? (
-          <div className="flex justify-center py-8"><Loader2 className="w-5 h-5 animate-spin text-blue-600" /></div>
-        ) : (
-          <Document
-            file={{ data: pdfData }}
-            onLoadSuccess={({ numPages: n }) => setNumPages(n)}
-            onLoadError={() => setPdfError('Could not load this document. Please refresh the page.')}
-            loading={<div className="flex justify-center py-8"><Loader2 className="w-5 h-5 animate-spin text-blue-600" /></div>}
+      <div className="px-4 py-3 border-b bg-muted/30 flex items-center justify-between gap-2">
+        <div className="flex items-center gap-2">
+          <FileText className="w-4 h-4 text-blue-600" />
+          <h3 className="font-semibold text-sm">{doc.title}</h3>
+        </div>
+        {fileUrl && (
+          <a
+            href={fileUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-xs text-blue-600 hover:underline flex items-center gap-1 shrink-0"
           >
-            {Array.from({ length: numPages }, (_, i) => (
-              <Page key={i} pageNumber={i + 1} width={640} className="mb-2 mx-auto shadow-sm" />
-            ))}
-          </Document>
+            Open in new tab <ExternalLink className="w-3 h-3" />
+          </a>
         )}
       </div>
 
-      {!hasReadToEnd ? (
-        <div className="px-4 py-3 border-t bg-amber-50 flex items-center gap-2 text-xs text-amber-700">
-          <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
-          Scroll through the entire document to unlock signing.
+      <div className="bg-muted/20 p-2">
+        {doc.kind === 'fee_declaration' && doc.feeDeclaration ? (
+          <FeeDeclarationContent fd={doc.feeDeclaration} />
+        ) : fileUrl ? (
+          <iframe
+            src={fileUrl}
+            title={doc.title}
+            className="w-full rounded-lg border bg-white"
+            style={{ height: '60vh' }}
+          />
+        ) : (
+          <p className="text-sm text-red-600 p-4">This document is not available. Please contact support.</p>
+        )}
+      </div>
+
+      {!canSign ? (
+        <div className="px-4 py-3 border-t bg-amber-50 space-y-2">
+          <div className="flex items-center gap-2 text-xs text-amber-700">
+            <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
+            {secondsLeft > 0
+              ? `Please review the document. You can confirm in ${secondsLeft}s.`
+              : 'Please confirm you have read the document below to unlock signing.'}
+          </div>
+          <label className={`flex items-start gap-2 text-sm ${secondsLeft > 0 ? 'opacity-50' : ''}`}>
+            <input
+              type="checkbox"
+              className="mt-0.5"
+              checked={confirmedRead}
+              disabled={secondsLeft > 0}
+              onChange={(e) => setConfirmedRead(e.target.checked)}
+            />
+            <span>I have read and understood this document.</span>
+          </label>
         </div>
       ) : (
         <div className="p-4 border-t space-y-4">
