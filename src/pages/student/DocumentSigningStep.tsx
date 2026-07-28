@@ -7,7 +7,7 @@ import 'react-pdf/dist/Page/TextLayer.css';
 // lockstep with whatever pdfjs-dist react-pdf itself pulls in.
 // eslint-disable-next-line import/no-unresolved
 import workerSrc from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
-import api, { BASE_URL } from '@/lib/api';
+import api from '@/lib/api';
 import { Loader2, FileText, CheckCircle2, Camera, RotateCcw, PenLine, AlertTriangle } from 'lucide-react';
 
 pdfjs.GlobalWorkerOptions.workerSrc = workerSrc;
@@ -158,6 +158,25 @@ function SingleDocumentSigner({ doc, onSigned }: { doc: OnboardingItem; onSigned
   const [hasReadToEnd, setHasReadToEnd] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
 
+  // Fetch the PDF bytes ourselves through the authenticated axios client
+  // instead of letting react-pdf/pdfjs fetch the URL directly. pdfjs does
+  // byte-range requests by default, which cross-origin requires the server
+  // to expose Content-Range/Accept-Ranges via CORS — easy to get wrong and
+  // hard to debug ("Could not load this document" with no further detail).
+  // A single plain GET through `api` sidesteps that entirely and reuses the
+  // exact request path already proven to work for every other call here.
+  const [pdfData, setPdfData] = useState<Uint8Array | null>(null);
+  useEffect(() => {
+    if (doc.kind !== 'template' || !doc.fileUrl) return;
+    let cancelled = false;
+    setPdfData(null);
+    setPdfError('');
+    api.get(doc.fileUrl, { responseType: 'arraybuffer' })
+      .then((res) => { if (!cancelled) setPdfData(new Uint8Array(res.data)); })
+      .catch(() => { if (!cancelled) setPdfError('Could not load this document. Please refresh the page.'); });
+    return () => { cancelled = true; };
+  }, [doc.kind, doc.fileUrl]);
+
   const checkScrolledToEnd = useCallback(() => {
     const el = scrollRef.current;
     if (!el) return;
@@ -259,9 +278,11 @@ function SingleDocumentSigner({ doc, onSigned }: { doc: OnboardingItem; onSigned
           <p className="text-sm text-red-600 p-4">{pdfError}</p>
         ) : doc.kind === 'fee_declaration' && doc.feeDeclaration ? (
           <FeeDeclarationContent fd={doc.feeDeclaration} />
+        ) : !pdfData ? (
+          <div className="flex justify-center py-8"><Loader2 className="w-5 h-5 animate-spin text-blue-600" /></div>
         ) : (
           <Document
-            file={`${BASE_URL}${doc.fileUrl}`}
+            file={{ data: pdfData }}
             onLoadSuccess={({ numPages: n }) => setNumPages(n)}
             onLoadError={() => setPdfError('Could not load this document. Please refresh the page.')}
             loading={<div className="flex justify-center py-8"><Loader2 className="w-5 h-5 animate-spin text-blue-600" /></div>}
