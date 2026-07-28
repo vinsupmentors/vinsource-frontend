@@ -441,6 +441,9 @@ interface ApprovalItem {
   title: string;
   signed: boolean;
   signedAt: string | null;
+  signatureUrl?: string | null;
+  photoUrl?: string | null;
+  location?: string | null;
 }
 
 interface ApprovalStudentDetail {
@@ -451,9 +454,12 @@ interface ApprovalStudentDetail {
   email?: string | null;
   phone: string;
   track: string;
+  photo?: string | null;
   city?: string | null;
   state?: string | null;
   address?: string | null;
+  aadharNumber?: string | null;
+  aadharPhoto?: string | null;
   fatherName?: string | null;
   fatherPhone?: string | null;
   motherName?: string | null;
@@ -572,27 +578,65 @@ function ApprovalDetailModal({ studentId, canEdit, onClose, onApproved, setError
         <div className="flex justify-center py-12"><Loader2 className="w-6 h-6 animate-spin text-blue-600" /></div>
       ) : !student ? null : (
         <div className="space-y-4 text-left">
-          <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 text-xs">
-            <Field label="Student ID" value={student.studentCode} />
-            <Field label="Track" value={student.track} />
-            <Field label="Phone" value={student.phone} />
-            <Field label="Email" value={student.email} />
-            <Field label="City" value={student.city} />
-            <Field label="Address" value={student.address} />
-            <Field label="Father" value={student.fatherName ? `${student.fatherName} (${student.fatherPhone || '—'})` : null} />
-            <Field label="Mother" value={student.motherName ? `${student.motherName} (${student.motherPhone || '—'})` : null} />
+          <div className="flex items-start gap-4">
+            {student.photo ? (
+              <img src={`${BASE_URL}${student.photo}`} alt="Profile" className="w-16 h-16 rounded-xl object-cover border shrink-0" />
+            ) : (
+              <div className="w-16 h-16 rounded-xl bg-muted flex items-center justify-center border shrink-0"><GraduationCap className="w-6 h-6 text-muted-foreground" /></div>
+            )}
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 text-xs flex-1">
+              <Field label="Student ID" value={student.studentCode} />
+              <Field label="Track" value={student.track} />
+              <Field label="Phone" value={student.phone} />
+              <Field label="Email" value={student.email} />
+              <Field label="City" value={student.city} />
+              <Field label="Address" value={student.address} />
+              <Field label="Father" value={student.fatherName ? `${student.fatherName} (${student.fatherPhone || '—'})` : null} />
+              <Field label="Mother" value={student.motherName ? `${student.motherName} (${student.motherPhone || '—'})` : null} />
+              <Field label="Aadhar number" value={student.aadharNumber} />
+            </div>
           </div>
+
+          {student.aadharPhoto && (
+            <div>
+              <p className="text-xs font-medium text-muted-foreground mb-1.5">Aadhar card</p>
+              <a href={`${BASE_URL}${student.aadharPhoto}`} target="_blank" rel="noreferrer">
+                <img src={`${BASE_URL}${student.aadharPhoto}`} alt="Aadhar card" className="h-28 rounded-lg border object-cover hover:opacity-90 transition" />
+              </a>
+            </div>
+          )}
 
           <div>
             <p className="text-xs font-medium text-muted-foreground mb-1.5">Documents</p>
-            <div className="space-y-1">
+            <div className="space-y-2">
               {items.map((it) => (
-                <div key={it.id} className="flex items-center justify-between text-xs border rounded-lg px-2.5 py-1.5 bg-white">
-                  <span className="flex items-center gap-1.5">
-                    {it.signed ? <CheckCircle2 className="w-3.5 h-3.5 text-green-600" /> : <XCircle className="w-3.5 h-3.5 text-muted-foreground" />}
-                    {it.title}
-                  </span>
-                  <span className="text-muted-foreground">{it.signed ? formatDateTime(it.signedAt) : 'Pending'}</span>
+                <div key={it.id} className="border rounded-lg px-2.5 py-2 bg-white space-y-2">
+                  <div className="flex items-center justify-between text-xs">
+                    <span className="flex items-center gap-1.5">
+                      {it.signed ? <CheckCircle2 className="w-3.5 h-3.5 text-green-600" /> : <XCircle className="w-3.5 h-3.5 text-muted-foreground" />}
+                      {it.title}
+                    </span>
+                    <span className="text-muted-foreground flex items-center gap-1.5">
+                      {it.signed && it.location && <span className="flex items-center gap-1"><MapPin className="w-3 h-3" /> {it.location}</span>}
+                      {it.signed ? formatDateTime(it.signedAt) : 'Pending'}
+                    </span>
+                  </div>
+                  {it.signed && (it.signatureUrl || it.photoUrl) && (
+                    <div className="flex items-center gap-3 pl-5">
+                      {it.signatureUrl && (
+                        <a href={`${BASE_URL}${it.signatureUrl}`} target="_blank" rel="noreferrer" className="text-center">
+                          <img src={`${BASE_URL}${it.signatureUrl}`} alt="Signature" className="h-14 w-24 object-contain border rounded-md bg-white hover:opacity-90 transition" />
+                          <p className="text-[10px] text-muted-foreground mt-0.5">Signature</p>
+                        </a>
+                      )}
+                      {it.photoUrl && (
+                        <a href={`${BASE_URL}${it.photoUrl}`} target="_blank" rel="noreferrer" className="text-center">
+                          <img src={`${BASE_URL}${it.photoUrl}`} alt="Selfie taken while signing" className="h-14 w-14 object-cover border rounded-md hover:opacity-90 transition" />
+                          <p className="text-[10px] text-muted-foreground mt-0.5">Photo</p>
+                        </a>
+                      )}
+                    </div>
+                  )}
                 </div>
               ))}
               {items.length === 0 && <p className="text-xs text-muted-foreground">No documents required.</p>}
