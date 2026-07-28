@@ -58,6 +58,13 @@ interface Lead {
   notes?: string | null;
   lastContactAt?: string | null;
   nextFollowUpAt?: string | null;
+  // Student intake — captured during Log a Call, carried forward onto any
+  // demo booked later for this lead.
+  city?: string | null;
+  educationQualification?: string | null;
+  collegeName?: string | null;
+  passedOutYear?: number | null;
+  currentStatus?: string | null;
   createdAt: string;
   assignedTo?: EmployeeLite | null;
   campaign?: { id: string; name: string } | null;
@@ -940,19 +947,19 @@ function LeadDetailModal({ lead, employees, canEdit, onClose, onChanged, setGlob
   const [callFollowUp, setCallFollowUp] = useState('');
   const [callStatus, setCallStatus] = useState<LeadStatus | ''>('');
   const [callLostReason, setCallLostReason] = useState<LeadLostReason | ''>('');
+  // Student intake — collected during the call itself, pre-filled with
+  // whatever's already on file for this lead so a BDA only has to fill in
+  // what's missing/changed rather than retype everything each call.
+  const [callCity, setCallCity] = useState(lead.city || '');
+  const [callEducation, setCallEducation] = useState(lead.educationQualification || '');
+  const [callCollege, setCallCollege] = useState(lead.collegeName || '');
+  const [callPassedOutYear, setCallPassedOutYear] = useState(lead.passedOutYear ? String(lead.passedOutYear) : '');
+  const [callCurrentStatus, setCallCurrentStatus] = useState(lead.currentStatus || '');
   const [savingCall, setSavingCall] = useState(false);
 
   const [showScheduleForm, setShowScheduleForm] = useState(false);
   const [demoScheduledAt, setDemoScheduledAt] = useState('');
   const [demoMode, setDemoMode] = useState<DemoMode>('ONLINE');
-  // Student intake, captured once at booking time.
-  const [demoCity, setDemoCity] = useState('');
-  const [demoEducation, setDemoEducation] = useState('');
-  const [demoCollege, setDemoCollege] = useState('');
-  const [demoPassedOutYear, setDemoPassedOutYear] = useState('');
-  const [demoCurrentStatus, setDemoCurrentStatus] = useState('');
-  const [demoCourseEnquired, setDemoCourseEnquired] = useState(lead.courseInterest || '');
-  const [demoBookingComments, setDemoBookingComments] = useState('');
   const [savingDemo, setSavingDemo] = useState(false);
 
   const [actingDemo, setActingDemo] = useState<{ id: string; type: 'complete' | 'reschedule' | 'noshow' | 'cancel' } | null>(null);
@@ -1000,6 +1007,11 @@ function LeadDetailModal({ lead, employees, canEdit, onClose, onChanged, setGlob
         nextFollowUpAt: callFollowUp ? new Date(callFollowUp).toISOString() : undefined,
         status: callStatus || undefined,
         lostReason: callStatus === 'LOST' ? callLostReason : undefined,
+        city: callCity.trim(),
+        educationQualification: callEducation.trim(),
+        collegeName: callCollege.trim(),
+        passedOutYear: callPassedOutYear.trim(),
+        currentStatus: callCurrentStatus.trim(),
       });
       setCallNotes(''); setCallFollowUp(''); setCallStatus(''); setCallLostReason('');
       await load();
@@ -1034,17 +1046,8 @@ function LeadDetailModal({ lead, employees, canEdit, onClose, onChanged, setGlob
         leadId: lead.id,
         scheduledAt: new Date(demoScheduledAt).toISOString(),
         mode: demoMode,
-        city: demoCity || undefined,
-        educationQualification: demoEducation || undefined,
-        collegeName: demoCollege || undefined,
-        passedOutYear: demoPassedOutYear || undefined,
-        currentStatus: demoCurrentStatus || undefined,
-        courseEnquired: demoCourseEnquired || undefined,
-        bookingComments: demoBookingComments || undefined,
       });
       setDemoScheduledAt(''); setDemoMode('ONLINE');
-      setDemoCity(''); setDemoEducation(''); setDemoCollege(''); setDemoPassedOutYear('');
-      setDemoCurrentStatus(''); setDemoCourseEnquired(lead.courseInterest || ''); setDemoBookingComments('');
       setShowScheduleForm(false);
       await load();
       onChanged();
@@ -1179,6 +1182,16 @@ function LeadDetailModal({ lead, employees, canEdit, onClose, onChanged, setGlob
                 </select>
               )}
             </div>
+
+            <p className="text-xs font-medium text-muted-foreground pt-1">Student details</p>
+            <div className="grid grid-cols-2 gap-2">
+              <input className="px-2 py-1.5 border rounded-lg text-xs" placeholder="City" value={callCity} onChange={(e) => setCallCity(e.target.value)} />
+              <input className="px-2 py-1.5 border rounded-lg text-xs" placeholder="Education qualification" value={callEducation} onChange={(e) => setCallEducation(e.target.value)} />
+              <input className="px-2 py-1.5 border rounded-lg text-xs" placeholder="College name" value={callCollege} onChange={(e) => setCallCollege(e.target.value)} />
+              <input type="number" className="px-2 py-1.5 border rounded-lg text-xs" placeholder="Passed out year" value={callPassedOutYear} onChange={(e) => setCallPassedOutYear(e.target.value)} />
+              <input className="px-2 py-1.5 border rounded-lg text-xs" placeholder="Current status (e.g. Working, Job Seeking)" value={callCurrentStatus} onChange={(e) => setCallCurrentStatus(e.target.value)} />
+            </div>
+
             <div className="flex justify-end">
               <button onClick={submitCall} disabled={savingCall} className="px-4 py-2 text-sm rounded-lg bg-blue-600 text-white disabled:opacity-50">
                 {savingCall ? 'Saving...' : 'Log Call'}
@@ -1229,22 +1242,7 @@ function LeadDetailModal({ lead, employees, canEdit, onClose, onChanged, setGlob
                 </select>
               </div>
 
-              <p className="text-xs font-medium text-muted-foreground pt-1">Student details</p>
-              <div className="grid grid-cols-2 gap-2">
-                <input className="px-2 py-1.5 border rounded-lg text-xs" placeholder="City" value={demoCity} onChange={(e) => setDemoCity(e.target.value)} />
-                <input className="px-2 py-1.5 border rounded-lg text-xs" placeholder="Education qualification" value={demoEducation} onChange={(e) => setDemoEducation(e.target.value)} />
-                <input className="px-2 py-1.5 border rounded-lg text-xs" placeholder="College name" value={demoCollege} onChange={(e) => setDemoCollege(e.target.value)} />
-                <input type="number" className="px-2 py-1.5 border rounded-lg text-xs" placeholder="Passed out year" value={demoPassedOutYear} onChange={(e) => setDemoPassedOutYear(e.target.value)} />
-                <input className="px-2 py-1.5 border rounded-lg text-xs" placeholder="Current status (e.g. Working, Job Seeking)" value={demoCurrentStatus} onChange={(e) => setDemoCurrentStatus(e.target.value)} />
-                <input className="px-2 py-1.5 border rounded-lg text-xs" placeholder="Course enquired" value={demoCourseEnquired} onChange={(e) => setDemoCourseEnquired(e.target.value)} />
-              </div>
-              <textarea
-                className="w-full px-2 py-1.5 border rounded-lg text-xs"
-                placeholder="Comments (optional)"
-                rows={2}
-                value={demoBookingComments}
-                onChange={(e) => setDemoBookingComments(e.target.value)}
-              />
+              <p className="text-xs text-muted-foreground italic">Student details are captured in Log a Call above and carry over automatically.</p>
 
               <div className="flex gap-2">
                 <button onClick={submitScheduleDemo} disabled={savingDemo} className="px-3 py-1.5 text-xs rounded-lg bg-blue-600 text-white disabled:opacity-50">
