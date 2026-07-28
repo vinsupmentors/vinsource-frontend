@@ -166,6 +166,9 @@ function SingleDocumentSigner({ doc, onSigned }: { doc: OnboardingItem; onSigned
   // A single plain GET through `api` sidesteps that entirely and reuses the
   // exact request path already proven to work for every other call here.
   const [pdfData, setPdfData] = useState<Uint8Array | null>(null);
+  // Bumping this re-runs the fetch below — lets the student retry in place
+  // after a transient network blip instead of reloading the whole page.
+  const [retryTick, setRetryTick] = useState(0);
   useEffect(() => {
     if (doc.kind !== 'template' || !doc.fileUrl) return;
     let cancelled = false;
@@ -173,9 +176,9 @@ function SingleDocumentSigner({ doc, onSigned }: { doc: OnboardingItem; onSigned
     setPdfError('');
     api.get(doc.fileUrl, { responseType: 'arraybuffer' })
       .then((res) => { if (!cancelled) setPdfData(new Uint8Array(res.data)); })
-      .catch(() => { if (!cancelled) setPdfError('Could not load this document. Please refresh the page.'); });
+      .catch(() => { if (!cancelled) setPdfError('Could not load this document. Please check your connection and retry.'); });
     return () => { cancelled = true; };
-  }, [doc.kind, doc.fileUrl]);
+  }, [doc.kind, doc.fileUrl, retryTick]);
 
   const checkScrolledToEnd = useCallback(() => {
     const el = scrollRef.current;
@@ -275,7 +278,16 @@ function SingleDocumentSigner({ doc, onSigned }: { doc: OnboardingItem; onSigned
         className="max-h-[50vh] overflow-y-auto bg-muted/20 p-2"
       >
         {pdfError ? (
-          <p className="text-sm text-red-600 p-4">{pdfError}</p>
+          <div className="p-4 space-y-2">
+            <p className="text-sm text-red-600">{pdfError}</p>
+            <button
+              type="button"
+              onClick={() => setRetryTick((n) => n + 1)}
+              className="text-xs px-3 py-1.5 border rounded-lg font-medium hover:bg-muted inline-flex items-center gap-1.5"
+            >
+              <RotateCcw className="w-3 h-3" /> Retry
+            </button>
+          </div>
         ) : doc.kind === 'fee_declaration' && doc.feeDeclaration ? (
           <FeeDeclarationContent fd={doc.feeDeclaration} />
         ) : !pdfData ? (
