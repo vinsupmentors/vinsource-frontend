@@ -176,7 +176,22 @@ function SingleDocumentSigner({ doc, onSigned }: { doc: OnboardingItem; onSigned
     setPdfError('');
     api.get(doc.fileUrl, { responseType: 'arraybuffer' })
       .then((res) => { if (!cancelled) setPdfData(new Uint8Array(res.data)); })
-      .catch(() => { if (!cancelled) setPdfError('Could not load this document. Please check your connection and retry.'); });
+      .catch((err: unknown) => {
+        if (cancelled) return;
+        // Surface the actual cause instead of one generic message — a 429
+        // (shared mobile-carrier IP hitting the rate limit) needs a very
+        // different response from the student than a real network drop.
+        const e = err as { response?: { status?: number }; request?: unknown };
+        if (e.response?.status === 429) {
+          setPdfError('Too many requests from your network right now. Please wait a couple of minutes, then retry.');
+        } else if (e.response?.status) {
+          setPdfError(`Could not load this document (error ${e.response.status}). Please retry, or contact support if this continues.`);
+        } else if (e.request) {
+          setPdfError('Could not reach the server — check your internet connection and retry.');
+        } else {
+          setPdfError('Could not load this document. Please retry.');
+        }
+      });
     return () => { cancelled = true; };
   }, [doc.kind, doc.fileUrl, retryTick]);
 
