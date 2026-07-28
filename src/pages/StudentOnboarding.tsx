@@ -444,6 +444,7 @@ interface ApprovalItem {
   signatureUrl?: string | null;
   photoUrl?: string | null;
   location?: string | null;
+  signedPdfUrl?: string | null;
 }
 
 interface ApprovalStudentDetail {
@@ -633,7 +634,19 @@ function ApprovalDetailModal({ studentId, canEdit, onClose, onApproved, setError
                       {it.signed ? formatDateTime(it.signedAt) : 'Pending'}
                     </span>
                   </div>
-                  {it.signed && (it.signatureUrl || it.photoUrl) && (
+                  {it.signed && it.signedPdfUrl ? (
+                    <div className="pl-5 space-y-1">
+                      <iframe
+                        src={`${BASE_URL}${it.signedPdfUrl}`}
+                        title={`${it.title} — signed copy`}
+                        className="w-full h-80 rounded-lg border bg-white"
+                      />
+                      <a href={`${BASE_URL}${it.signedPdfUrl}`} target="_blank" rel="noreferrer" className="text-[11px] text-blue-600 hover:underline">
+                        Open full document in a new tab
+                      </a>
+                    </div>
+                  ) : it.signed && (it.signatureUrl || it.photoUrl) ? (
+                    // Signed before the signed-PDF stamp existed — fall back to the raw images.
                     <div className="flex items-center gap-3 pl-5">
                       {it.signatureUrl && (
                         <a href={`${BASE_URL}${it.signatureUrl}`} target="_blank" rel="noreferrer" className="text-center">
@@ -648,7 +661,7 @@ function ApprovalDetailModal({ studentId, canEdit, onClose, onApproved, setError
                         </a>
                       )}
                     </div>
-                  )}
+                  ) : null}
                 </div>
               ))}
               {items.length === 0 && <p className="text-xs text-muted-foreground">No documents required.</p>}
