@@ -548,6 +548,9 @@ function ApprovalDetailModal({ studentId, canEdit, onClose, onApproved, setError
   const [loading, setLoading] = useState(true);
   const [approving, setApproving] = useState(false);
   const [showFeeForm, setShowFeeForm] = useState(false);
+  const [showRejectForm, setShowRejectForm] = useState(false);
+  const [rejectReason, setRejectReason] = useState('');
+  const [rejecting, setRejecting] = useState(false);
 
   const load = useCallback(() => {
     setLoading(true);
@@ -570,6 +573,15 @@ function ApprovalDetailModal({ studentId, canEdit, onClose, onApproved, setError
       await api.post(`/api/student-onboarding/approvals/${studentId}/approve`);
       onApproved();
     } catch (err) { setError(errMsg(err, 'Failed to approve')); } finally { setApproving(false); }
+  };
+
+  const reject = async () => {
+    setRejecting(true);
+    setError('');
+    try {
+      await api.post(`/api/student-onboarding/approvals/${studentId}/reject`, { reason: rejectReason.trim() || undefined });
+      onApproved(); // same effect as approving: leave this modal, refresh the list
+    } catch (err) { setError(errMsg(err, 'Failed to reject')); } finally { setRejecting(false); }
   };
 
   return (
@@ -649,17 +661,47 @@ function ApprovalDetailModal({ studentId, canEdit, onClose, onApproved, setError
             </button>
           )}
 
-          <div className="flex justify-end gap-2 pt-3 border-t">
-            <button onClick={onClose} className="px-4 py-2 text-sm rounded-lg border">Close</button>
-            {canEdit && (
-              <button
-                onClick={approve}
-                disabled={!allSigned || approving}
-                className="px-4 py-2 text-sm rounded-lg bg-green-600 text-white disabled:opacity-50"
-              >
-                {approving ? 'Approving...' : allSigned ? 'Approve & Unlock Dashboard' : 'Waiting on signatures'}
+          {showRejectForm && (
+            <div className="border border-red-200 bg-red-50 rounded-lg p-3 space-y-2">
+              <label className="text-xs font-medium text-red-800">Reason for sending this back (shown to the student)</label>
+              <textarea
+                className="w-full px-2.5 py-2 border rounded-lg text-xs bg-white"
+                rows={2}
+                placeholder="e.g. Address looks incomplete, please re-enter your Aadhar number clearly"
+                value={rejectReason}
+                onChange={(e) => setRejectReason(e.target.value)}
+              />
+              <div className="flex justify-end gap-2">
+                <button onClick={() => setShowRejectForm(false)} className="px-3 py-1.5 text-xs rounded-lg border bg-white">Cancel</button>
+                <button
+                  onClick={reject}
+                  disabled={rejecting}
+                  className="px-3 py-1.5 text-xs rounded-lg bg-red-600 text-white disabled:opacity-50"
+                >
+                  {rejecting ? 'Sending back...' : 'Confirm rejection'}
+                </button>
+              </div>
+            </div>
+          )}
+
+          <div className="flex justify-between items-center gap-2 pt-3 border-t">
+            {canEdit ? (
+              <button onClick={() => setShowRejectForm((v) => !v)} className="px-3 py-2 text-sm rounded-lg border border-red-200 text-red-600 hover:bg-red-50">
+                Reject &amp; send back
               </button>
-            )}
+            ) : <span />}
+            <div className="flex items-center gap-2">
+              <button onClick={onClose} className="px-4 py-2 text-sm rounded-lg border">Close</button>
+              {canEdit && (
+                <button
+                  onClick={approve}
+                  disabled={!allSigned || approving}
+                  className="px-4 py-2 text-sm rounded-lg bg-green-600 text-white disabled:opacity-50"
+                >
+                  {approving ? 'Approving...' : allSigned ? 'Approve & Unlock Dashboard' : 'Waiting on signatures'}
+                </button>
+              )}
+            </div>
           </div>
         </div>
       )}

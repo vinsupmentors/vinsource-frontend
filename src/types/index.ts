@@ -35,6 +35,7 @@ export interface StudentProfile {
   profileCompletedAt?: string | null;
   documentsCompletedAt?: string | null;
   onboardingApprovedAt?: string | null;
+  rejectionReason?: string | null;
 }
 
 export interface User {

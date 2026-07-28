@@ -4,7 +4,7 @@ import { useDispatch, useSelector } from 'react-redux';
 import { AppDispatch, RootState } from '@/store';
 import { fetchMe } from '@/store/slices/authSlice';
 import api, { BASE_URL } from '@/lib/api';
-import { GraduationCap, Loader2, ShieldCheck, UserCircle, Plus, Trash2, CheckCircle2, Camera, Info, FileSignature, Clock, RefreshCw } from 'lucide-react';
+import { GraduationCap, Loader2, ShieldCheck, UserCircle, Plus, Trash2, CheckCircle2, Camera, Info, FileSignature, Clock, RefreshCw, AlertTriangle } from 'lucide-react';
 import DocumentSigningStep from './DocumentSigningStep';
 
 const inputCls = 'w-full px-3 py-2.5 rounded-lg border bg-background text-sm focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary transition';
@@ -301,6 +301,15 @@ export default function CompleteProfile() {
           {step === 2 && (
             <form onSubmit={handleMisSubmit} className="space-y-5">
               <p className="text-sm text-muted-foreground">Please complete your student record (MIS) — this is shared with the training and placement team.</p>
+              {s?.rejectionReason && (
+                <div className="bg-amber-50 border border-amber-200 rounded-lg px-4 py-3 text-sm text-amber-800 flex items-start gap-2">
+                  <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0" />
+                  <div>
+                    <p className="font-medium">Your submission was sent back for correction</p>
+                    <p className="mt-0.5">{s.rejectionReason}</p>
+                  </div>
+                </div>
+              )}
               {misError && <div className="bg-red-50 border border-red-200 rounded-lg px-4 py-2.5 text-sm text-red-600">{misError}</div>}
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
