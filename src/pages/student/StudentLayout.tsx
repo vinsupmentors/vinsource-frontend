@@ -55,8 +55,8 @@ export function StudentLayout() {
   // Non-students should never see this shell.
   if (user.role !== 'STUDENT') return <Navigate to="/dashboard" replace />;
 
-  // Force first-login password change + MIS completion before anything else.
-  const mustOnboard = user.mustChangePassword || !user.student?.profileCompletedAt;
+  // Force first-login password change + MIS completion + document signing before anything else.
+  const mustOnboard = user.mustChangePassword || !user.student?.profileCompletedAt || !user.student?.documentsCompletedAt;
   if (mustOnboard) return <Navigate to="/student/complete-profile" replace />;
 
   const initials = `${user.student?.firstName?.[0] || ''}${user.student?.lastName?.[0] || ''}`.toUpperCase() || 'S';

@@ -33,6 +33,7 @@ export interface StudentProfile {
   motherName?: string;
   motherPhone?: string;
   profileCompletedAt?: string | null;
+  documentsCompletedAt?: string | null;
 }
 
 export interface User {
@@ -57,7 +58,8 @@ export type ModuleName =
   | 'PRODUCTION_TRAINING'
   | 'PLACEMENTS'
   | 'DIGITAL_MARKETING'
-  | 'CERTIFICATES';
+  | 'CERTIFICATES'
+  | 'STUDENT_ONBOARDING';
 
 export type AccessLevel = 'NONE' | 'VIEW' | 'EDIT' | 'ADMIN';
 

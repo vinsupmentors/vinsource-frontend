@@ -32,6 +32,7 @@ import AdminOpsPage from './pages/AdminOps';
 import PlacementsPage from './pages/Placements';
 import ProductionPage from './pages/Production';
 import SalesPage from './pages/Sales';
+import StudentOnboardingPage from './pages/StudentOnboarding';
 import { ModulePlaceholder } from './components/ModulePlaceholder';
 import DigitalMarketingPage from './pages/DigitalMarketing';
 import CampaignDetailPage from './pages/CampaignDetail';
@@ -192,6 +193,7 @@ export default function App() {
             <Route path="permissions" element={<PermissionsPage />} />
             <Route path="master-control" element={<MasterControlPage />} />
             <Route path="sales" element={<SalesPage />} />
+            <Route path="student-onboarding" element={<StudentOnboardingPage />} />
             <Route path="finance/sales" element={<ModulePlaceholder title="Finance (Sales)" module="FINANCE_SALES" description="Student fee collections and sales-side revenue" />} />
             <Route path="finance/admin" element={<FinanceAdminPage />} />
             <Route path="admin-ops" element={<AdminOpsPage />} />

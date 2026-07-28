@@ -13,6 +13,7 @@ import {
   Wallet, GraduationCap, Target, Megaphone, KeyRound,
   BookOpen, PiggyBank, Store, Repeat, PieChart, X, Receipt, CheckCircle2,
   Presentation, CalendarClock, Handshake, ListChecks, Mic2, Network, FileBadge, Percent, Activity, RefreshCw,
+  FileSignature,
 } from 'lucide-react';
 
 const LEVEL_RANK: Record<AccessLevel, number> = { NONE: 0, VIEW: 1, EDIT: 2, ADMIN: 3 };
@@ -93,6 +94,7 @@ const MODULE_DEFAULT_TABS: Record<string, string> = {
   '/production': 'courses',
   '/placements': 'drives',
   '/sales': 'leads',
+  '/student-onboarding': 'add',
 };
 
 // Business modules — visibility driven entirely by effective module access
@@ -173,12 +175,23 @@ const moduleNavItems: ModuleNavItem[] = [
       { label: 'Reports',             to: '/production?tab=reports',  icon: BarChart2,     module: 'PRODUCTION_TRAINING' },
     ],
   },
+  {
+    label: 'Student Onboarding',
+    to: '/student-onboarding',
+    icon: FileSignature,
+    module: 'STUDENT_ONBOARDING',
+    children: [
+      { label: 'Add Student',    to: '/student-onboarding?tab=add',       icon: UserPlus,      module: 'STUDENT_ONBOARDING' },
+      { label: 'Documents',      to: '/student-onboarding?tab=documents', icon: FileText,      module: 'STUDENT_ONBOARDING' },
+      { label: 'Reports',        to: '/student-onboarding?tab=reports',   icon: BarChart2,     module: 'STUDENT_ONBOARDING' },
+    ],
+  },
 ];
 
 // Explicit top-of-sidebar ordering requested by the user.
 // Anything not listed here falls through to the "More" section, and
 // Resignation is pinned to sit right above Master Control / Sign out.
-const PINNED_TOP = ['Dashboard', 'Attendance', 'Finance (Admin)', 'Digital Marketing', 'Production', 'Placements'];
+const PINNED_TOP = ['Dashboard', 'Attendance', 'Finance (Admin)', 'Digital Marketing', 'Production', 'Placements', 'Student Onboarding'];
 const PINNED_SECOND = ['Employees', 'Onboarding', 'Assets', 'Documents'];
 const PINNED_LAST = ['Resignation'];
 

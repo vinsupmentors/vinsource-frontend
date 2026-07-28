@@ -4,7 +4,8 @@ import { useDispatch, useSelector } from 'react-redux';
 import { AppDispatch, RootState } from '@/store';
 import { fetchMe } from '@/store/slices/authSlice';
 import api, { BASE_URL } from '@/lib/api';
-import { GraduationCap, Loader2, ShieldCheck, UserCircle, Plus, Trash2, CheckCircle2, Camera, Info } from 'lucide-react';
+import { GraduationCap, Loader2, ShieldCheck, UserCircle, Plus, Trash2, CheckCircle2, Camera, Info, FileSignature } from 'lucide-react';
+import DocumentSigningStep from './DocumentSigningStep';
 
 const inputCls = 'w-full px-3 py-2.5 rounded-lg border bg-background text-sm focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary transition';
 const inputClsSm = 'w-full px-2 py-1.5 rounded-md border bg-background text-xs focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary transition';
@@ -35,11 +36,14 @@ export default function CompleteProfile() {
     if (token && !user) dispatch(fetchMe());
   }, [token, user, dispatch]);
 
-  // Step — initialised from mustChangePassword once user loads
-  const [step, setStep] = useState<1 | 2>(1);
+  // Step — initialised from mustChangePassword / profileCompletedAt once user loads
+  const [step, setStep] = useState<1 | 2 | 3>(1);
   useEffect(() => {
-    if (user) setStep(user.mustChangePassword ? 1 : 2);
-  }, [user?.mustChangePassword]);  // eslint-disable-line react-hooks/exhaustive-deps
+    if (!user) return;
+    if (user.mustChangePassword) setStep(1);
+    else if (!user.student?.profileCompletedAt) setStep(2);
+    else setStep(3);
+  }, [user?.mustChangePassword, user?.student?.profileCompletedAt]);  // eslint-disable-line react-hooks/exhaustive-deps
 
   // ---- Step 1 — password change ----
   const [currentPassword, setCurrentPassword] = useState('');
@@ -114,7 +118,7 @@ export default function CompleteProfile() {
   // directly (URL bar / bookmark) or where StudentLayout redirected
   // them before fetchMe finished.
   // ------------------------------------------------------------------
-  if (user && !user.mustChangePassword && user.student?.profileCompletedAt) {
+  if (user && !user.mustChangePassword && user.student?.profileCompletedAt && user.student?.documentsCompletedAt) {
     return <Navigate to="/student/dashboard" replace />;
   }
 
@@ -182,11 +186,14 @@ export default function CompleteProfile() {
       const refreshed = await dispatch(fetchMe()).unwrap();
       // This student already completed their profile before — a password
       // reset (forced or self-service) shouldn't make them redo the whole
-      // MIS/KYC form. Send them straight to the dashboard instead.
-      if (refreshed?.student?.profileCompletedAt) {
-        navigate('/student/dashboard');
-      } else {
+      // MIS/KYC form. Send them straight to the dashboard (or the document
+      // signing step, if that's still outstanding) instead.
+      if (!refreshed?.student?.profileCompletedAt) {
         setStep(2);
+      } else if (!refreshed?.student?.documentsCompletedAt) {
+        setStep(3);
+      } else {
+        navigate('/student/dashboard');
       }
     } catch (err: unknown) {
       const e2 = err as { response?: { data?: { message?: string } } };
@@ -232,7 +239,7 @@ export default function CompleteProfile() {
         aadharNumber, fatherName, fatherPhone, motherName, motherPhone,
       });
       await dispatch(fetchMe());
-      navigate('/student/dashboard');
+      setStep(3);
     } catch (err: unknown) {
       const e2 = err as { response?: { data?: { message?: string } } };
       setMisError(e2.response?.data?.message || 'Failed to save profile');
@@ -258,7 +265,9 @@ export default function CompleteProfile() {
         <div className="flex items-center justify-center gap-3 mb-6">
           <StepPill active={step === 1} done={passwordDone} icon={ShieldCheck} label="Change password" />
           <div className="w-10 h-px bg-border" />
-          <StepPill active={step === 2} done={false} icon={UserCircle} label="Your details" />
+          <StepPill active={step === 2} done={step > 2} icon={UserCircle} label="Your details" />
+          <div className="w-10 h-px bg-border" />
+          <StepPill active={step === 3} done={false} icon={FileSignature} label="Sign documents" />
         </div>
 
         <div className="bg-card rounded-2xl shadow-xl border p-6 sm:p-8">
@@ -450,9 +459,13 @@ export default function CompleteProfile() {
 
               <button type="submit" disabled={misLoading} className={btnCls}>
                 {misLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <CheckCircle2 className="w-4 h-4" />}
-                Finish setup
+                Continue to document signing
               </button>
             </form>
+          )}
+
+          {step === 3 && (
+            <DocumentSigningStep onAllSigned={async () => { await dispatch(fetchMe()); navigate('/student/dashboard'); }} />
           )}
         </div>
       </div>
