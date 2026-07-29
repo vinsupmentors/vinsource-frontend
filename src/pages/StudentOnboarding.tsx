@@ -159,25 +159,80 @@ export default function StudentOnboardingPage() {
 }
 
 // ── Add Student tab ──────────────────────────────────────────────────────────
+interface RecentStudent {
+  id: string;
+  studentCode: string;
+  firstName: string;
+  lastName: string;
+  email: string | null;
+  phone: string;
+  track: string;
+  createdAt: string;
+  enrollments?: { schedule: { course: { name: string }; batch: { code: string } } }[];
+}
+
 function AddStudentTab({ canEdit, setError }: { canEdit: boolean; setError: (s: string) => void }) {
   const [showAdd, setShowAdd] = useState(false);
+  const [recent, setRecent] = useState<RecentStudent[] | null>(null);
+
+  const loadRecent = useCallback(() => {
+    api.get('/api/production/students', { params: { pageSize: 10, page: 1 } })
+      .then((res) => setRecent(res.data.data))
+      .catch(() => setRecent([]));
+  }, []);
+
+  useEffect(() => { loadRecent(); }, [loadRecent]);
+
   return (
-    <div className="border rounded-xl p-8 text-center space-y-3">
-      <UserPlus className="w-10 h-10 text-blue-600 mx-auto" />
-      <h3 className="font-semibold">Create a new student</h3>
-      <p className="text-sm text-muted-foreground max-w-md mx-auto">
-        This uses the exact same student intake as Production — the student is emailed a temporary
-        password, resets it, fills in their profile, and then reads &amp; signs any onboarding
-        documents you've set up under the Documents tab before they can enter the classroom.
-      </p>
-      {canEdit && (
-        <button onClick={() => setShowAdd(true)} className="px-4 py-2 text-sm rounded-lg bg-blue-600 text-white inline-flex items-center gap-1.5">
-          <UserPlus className="w-4 h-4" /> New Student
-        </button>
-      )}
-      {showAdd && (
-        <AddStudentModal onClose={() => setShowAdd(false)} setError={setError} onSaved={() => setShowAdd(false)} />
-      )}
+    <div className="space-y-6">
+      <div className="border rounded-xl p-8 text-center space-y-3">
+        <UserPlus className="w-10 h-10 text-blue-600 mx-auto" />
+        <h3 className="font-semibold">Create a new student</h3>
+        <p className="text-sm text-muted-foreground max-w-md mx-auto">
+          This uses the exact same student intake as Production — the student is emailed a temporary
+          password, resets it, fills in their profile, and then reads &amp; signs any onboarding
+          documents you've set up under the Documents tab before they can enter the classroom.
+        </p>
+        {canEdit && (
+          <button onClick={() => setShowAdd(true)} className="px-4 py-2 text-sm rounded-lg bg-blue-600 text-white inline-flex items-center gap-1.5">
+            <UserPlus className="w-4 h-4" /> New Student
+          </button>
+        )}
+        {showAdd && (
+          <AddStudentModal onClose={() => setShowAdd(false)} setError={setError} onSaved={() => { setShowAdd(false); loadRecent(); }} />
+        )}
+      </div>
+
+      <div>
+        <h3 className="font-semibold text-sm mb-3">Recently added students</h3>
+        {recent === null ? (
+          <div className="flex justify-center py-8"><Loader2 className="w-5 h-5 animate-spin text-blue-600" /></div>
+        ) : recent.length === 0 ? (
+          <p className="text-sm text-muted-foreground text-center py-6">No students added yet.</p>
+        ) : (
+          <div className="border rounded-xl divide-y">
+            {recent.map((s) => {
+              const enr = s.enrollments?.[0];
+              return (
+                <div key={s.id} className="flex items-center justify-between px-4 py-3">
+                  <div>
+                    <p className="font-medium text-sm">{s.firstName} {s.lastName}</p>
+                    <p className="text-xs text-muted-foreground">
+                      {s.studentCode} · {s.phone}{s.email ? ` · ${s.email}` : ''}
+                    </p>
+                  </div>
+                  <div className="text-right">
+                    <p className="text-xs font-medium">
+                      {enr ? `${enr.schedule.batch.code} — ${enr.schedule.course.name}` : <span className="text-muted-foreground">No batch</span>}
+                    </p>
+                    <p className="text-[11px] text-muted-foreground">{s.track} · added {formatDate(s.createdAt)}</p>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
     </div>
   );
 }
