@@ -182,6 +182,8 @@ function AddStudentTab({ canEdit, setError }: { canEdit: boolean; setError: (s: 
   );
 }
 
+const PAYMENT_MODES = ['Cash', 'UPI', 'Bank Transfer', 'Cheque', 'Card'];
+
 function AddStudentModal({ onClose, setError, onSaved }: { onClose: () => void; setError: (s: string) => void; onSaved: () => void }) {
   const [studentCode, setStudentCode] = useState('');
   const [email, setEmail] = useState('');
@@ -191,6 +193,19 @@ function AddStudentModal({ onClose, setError, onSaved }: { onClose: () => void; 
   const [scheduleId, setScheduleId] = useState('');
   const [subBatchCode, setSubBatchCode] = useState('');
   const [saving, setSaving] = useState(false);
+
+  // Fee/enrollment intake — filled onto the onboarding agreement PDF at
+  // signing time alongside the student's name/ID/contact details.
+  const [trainingMode, setTrainingMode] = useState<'Offline' | 'Online'>('Offline');
+  const [totalProgramFee, setTotalProgramFee] = useState('');
+  const [amountPaid, setAmountPaid] = useState('');
+  const [paymentMode, setPaymentMode] = useState('');
+  const balanceAmount = (() => {
+    const total = parseFloat(totalProgramFee);
+    const paid = parseFloat(amountPaid);
+    if (Number.isNaN(total) || Number.isNaN(paid)) return null;
+    return total - paid;
+  })();
 
   useEffect(() => { api.get('/api/production/batches').then((res) => setBatches(res.data.data)).catch(() => setBatches([])); }, []);
 
@@ -213,7 +228,13 @@ function AddStudentModal({ onClose, setError, onSaved }: { onClose: () => void; 
     setSaving(true);
     setError('');
     try {
-      await api.post('/api/production/students', { studentCode, email, track, scheduleId });
+      await api.post('/api/production/students', {
+        studentCode, email, track, scheduleId,
+        trainingMode,
+        totalProgramFee: totalProgramFee || undefined,
+        amountPaid: amountPaid || undefined,
+        paymentMode: paymentMode || undefined,
+      });
       onSaved();
     } catch (err) { setError(errMsg(err, 'Failed to add student')); } finally { setSaving(false); }
   };
@@ -254,6 +275,58 @@ function AddStudentModal({ onClose, setError, onSaved }: { onClose: () => void; 
           <option value="">Select Course</option>
           {selectedBatch?.schedules.map((s) => <option key={s.id} value={s.id}>{s.code ? `${s.code} — ` : ''}{s.course.name} ({s.timing})</option>)}
         </select>
+
+        <div className="border-t pt-3 space-y-2">
+          <p className="text-xs font-medium text-muted-foreground">Training &amp; Fee Details</p>
+          <p className="text-xs text-muted-foreground">
+            Filled onto the onboarding agreement automatically — course name and batch number come from the sub-batch above.
+          </p>
+
+          <div className="flex items-center gap-4 text-sm">
+            <span className="text-muted-foreground">Training Mode:</span>
+            {(['Offline', 'Online'] as const).map((m) => (
+              <label key={m} className="flex items-center gap-1.5 cursor-pointer">
+                <input type="radio" name="trainingMode" checked={trainingMode === m} onChange={() => setTrainingMode(m)} />
+                {m}
+              </label>
+            ))}
+          </div>
+
+          <div className="grid grid-cols-2 gap-2">
+            <div>
+              <label className="text-xs text-muted-foreground">Total Program Fee (₹)</label>
+              <input
+                type="number"
+                className="w-full px-3 py-2 border rounded-lg text-sm"
+                placeholder="0"
+                value={totalProgramFee}
+                onChange={(e) => setTotalProgramFee(e.target.value)}
+              />
+            </div>
+            <div>
+              <label className="text-xs text-muted-foreground">Amount Paid (₹)</label>
+              <input
+                type="number"
+                className="w-full px-3 py-2 border rounded-lg text-sm"
+                placeholder="0"
+                value={amountPaid}
+                onChange={(e) => setAmountPaid(e.target.value)}
+              />
+            </div>
+          </div>
+
+          {balanceAmount !== null && (
+            <p className="text-xs text-muted-foreground">
+              Balance Amount: <span className={`font-medium ${balanceAmount > 0 ? 'text-amber-600' : 'text-green-600'}`}>₹{balanceAmount.toLocaleString('en-IN')}</span>
+            </p>
+          )}
+
+          <select className="w-full px-3 py-2 border rounded-lg text-sm" value={paymentMode} onChange={(e) => setPaymentMode(e.target.value)}>
+            <option value="">Payment Mode (optional)</option>
+            {PAYMENT_MODES.map((m) => <option key={m} value={m}>{m}</option>)}
+          </select>
+        </div>
+
         <p className="text-xs text-muted-foreground">
           The student will fill in their own name, phone, photo, and other details, then read and sign onboarding documents, before they can access the portal.
         </p>
