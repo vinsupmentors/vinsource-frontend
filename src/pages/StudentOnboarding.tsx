@@ -102,7 +102,7 @@ interface BatchStudent {
   motherPhone: string | null;
   emergencyContactName: string | null;
   emergencyContactPhone: string | null;
-  documents: { templateId: string; title: string; signed: boolean; signedAt: string | null; location: string | null }[];
+  documents: { templateId: string; title: string; signed: boolean; signedAt: string | null; location: string | null; signedPdfUrl: string | null }[];
 }
 
 type Tab = 'add' | 'documents' | 'approval' | 'reports';
@@ -1073,6 +1073,9 @@ function BatchDrillDownModal({ batchId, onClose, setError }: { batchId: string; 
                             <span className="text-muted-foreground flex items-center gap-2">
                               {d.signed && d.signedAt && <span>{formatDateTime(d.signedAt)}</span>}
                               {d.signed && d.location && <span className="flex items-center gap-1"><MapPin className="w-3 h-3" /> {d.location}</span>}
+                              {d.signed && d.signedPdfUrl && (
+                                <a href={`${BASE_URL}${d.signedPdfUrl}`} target="_blank" rel="noreferrer" className="text-blue-600 hover:underline font-medium">View</a>
+                              )}
                               {!d.signed && <span>Pending</span>}
                             </span>
                           </div>
