@@ -2545,7 +2545,7 @@ function AddProjectModal({ modules, onClose, setError, onSaved }: {
   const [saving, setSaving] = useState(false);
 
   const submit = async () => {
-    if (!moduleId || !title.trim() || !file) { setError('Module, title, and PDF resource are required'); return; }
+    if (!moduleId || !title.trim() || !file) { setError('Module, title, and a PDF or ZIP resource are required'); return; }
     setSaving(true);
     setError('');
     try {
@@ -2577,8 +2577,9 @@ function AddProjectModal({ modules, onClose, setError, onSaved }: {
           <textarea value={description} onChange={(e) => setDescription(e.target.value)} rows={3} className="w-full mt-1 border rounded-lg px-3 py-2 text-sm" />
         </div>
         <div>
-          <label className="text-xs font-medium text-muted-foreground">Resource PDF</label>
-          <input type="file" accept=".pdf" onChange={(e) => setFile(e.target.files?.[0] || null)} className="w-full mt-1 text-sm border rounded-lg px-3 py-2" />
+          <label className="text-xs font-medium text-muted-foreground">Resource (PDF or ZIP)</label>
+          <input type="file" accept=".pdf,.zip" onChange={(e) => setFile(e.target.files?.[0] || null)} className="w-full mt-1 text-sm border rounded-lg px-3 py-2" />
+          <p className="text-[11px] text-muted-foreground mt-1">Up to 50 MB. Use a ZIP to bundle starter files or multiple assets.</p>
         </div>
       </div>
       <ModalFooter onClose={onClose} onSubmit={submit} saving={saving} label="Create" />
