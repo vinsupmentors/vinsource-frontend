@@ -1767,8 +1767,19 @@ function EditStudentModal({ student, onClose, setError, onSaved }: {
 }
 
 // ── DELETION REQUESTS TAB (Admin / Super Admin only) ────────────────────────
+type DeletionLogEntry = {
+  id: string; studentId: string; studentCode: string; firstName: string; lastName: string;
+  email?: string | null; phone: string; track: string; status: string;
+  courseName?: string | null; batchCode?: string | null;
+  deletionReason?: string | null;
+  requestedAt: string; requestedBy?: { id: string; firstName: string; lastName: string; employeeCode?: string } | null;
+  approvedAt: string; approvedBy?: { id: string; firstName: string; lastName: string; employeeCode?: string } | null;
+  forced: boolean; attendanceCount: number; testAttemptCount: number; placementResultCount: number;
+};
+
 function DeletionRequestsTab({ setError }: { setError: (s: string) => void }) {
   const [students, setStudents] = useState<Student[]>([]);
+  const [log, setLog] = useState<DeletionLogEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const [busyId, setBusyId] = useState<string | null>(null);
 
@@ -1776,8 +1787,12 @@ function DeletionRequestsTab({ setError }: { setError: (s: string) => void }) {
     setLoading(true);
     setError('');
     try {
-      const res = await api.get('/api/production/students/deletion-requests');
-      setStudents(res.data.data);
+      const [reqRes, logRes] = await Promise.all([
+        api.get('/api/production/students/deletion-requests'),
+        api.get('/api/production/students/deletion-log'),
+      ]);
+      setStudents(reqRes.data.data);
+      setLog(logRes.data.data);
     } catch (err) {
       setError(errMsg(err, 'Failed to load deletion requests'));
     } finally {
@@ -1823,54 +1838,99 @@ function DeletionRequestsTab({ setError }: { setError: (s: string) => void }) {
   };
 
   if (loading) return <div className="text-center text-muted-foreground py-8">Loading...</div>;
-  if (students.length === 0) {
-    return (
-      <div className="text-center text-muted-foreground py-8">
-        No pending deletion requests.
-      </div>
-    );
-  }
 
   return (
-    <div className="space-y-3">
-      <p className="text-xs text-muted-foreground">
-        Deleting a student is a two-step process — anyone can request it, but only an Admin, Super Admin, or Manager can approve the
-        permanent delete here. Approving re-checks attendance/test/placement records at approval time before removing anything.
-        If the student has any of those, you'll be asked to confirm a Force Delete, which permanently erases that history too.
-      </p>
-      {students.map((s) => (
-        <div key={s.id} className="bg-card border rounded-xl p-4 space-y-2">
-          <div className="flex items-center justify-between flex-wrap gap-2">
-            <div>
-              <p className="font-medium">{s.firstName} {s.lastName} <span className="text-xs text-muted-foreground">({s.studentCode})</span></p>
-              <p className="text-xs text-muted-foreground">{s.phone}{s.email ? ` · ${s.email}` : ''}</p>
+    <div className="space-y-6">
+      <div className="space-y-3">
+        <p className="text-xs text-muted-foreground">
+          Deleting a student is a two-step process — anyone can request it, but only an Admin, Super Admin, or Manager can approve the
+          permanent delete here. Approving re-checks attendance/test/placement records at approval time before removing anything.
+          If the student has any of those, you'll be asked to confirm a Force Delete, which permanently erases that history too.
+        </p>
+        {students.length === 0 ? (
+          <div className="text-center text-muted-foreground py-6 text-sm">No pending deletion requests.</div>
+        ) : (
+          students.map((s) => (
+            <div key={s.id} className="bg-card border rounded-xl p-4 space-y-2">
+              <div className="flex items-center justify-between flex-wrap gap-2">
+                <div>
+                  <p className="font-medium">{s.firstName} {s.lastName} <span className="text-xs text-muted-foreground">({s.studentCode})</span></p>
+                  <p className="text-xs text-muted-foreground">{s.phone}{s.email ? ` · ${s.email}` : ''}</p>
+                </div>
+                <span className="text-xs px-2 py-1 rounded-full bg-amber-100 text-amber-700">Pending approval</span>
+              </div>
+              <div className="text-xs text-muted-foreground space-y-0.5">
+                <p>Requested {s.deletionRequestedAt ? formatDateTime(s.deletionRequestedAt) : '—'}
+                  {s.deletionRequestedBy ? ` by ${s.deletionRequestedBy.firstName} ${s.deletionRequestedBy.lastName}` : ''}
+                </p>
+                {s.deletionReason && <p>Reason: <span className="text-foreground">{s.deletionReason}</span></p>}
+              </div>
+              <div className="flex items-center gap-2 pt-1">
+                <button
+                  onClick={() => approve(s)}
+                  disabled={busyId === s.id}
+                  className="text-xs px-3 py-1.5 bg-red-600 text-white rounded-lg hover:bg-red-700 disabled:opacity-50 flex items-center gap-1"
+                >
+                  <Trash2 className="w-3 h-3" /> Approve &amp; Delete
+                </button>
+                <button
+                  onClick={() => reject(s)}
+                  disabled={busyId === s.id}
+                  className="text-xs px-3 py-1.5 border rounded-lg hover:bg-muted/50 disabled:opacity-50 flex items-center gap-1"
+                >
+                  <XCircle className="w-3 h-3" /> Reject
+                </button>
+              </div>
             </div>
-            <span className="text-xs px-2 py-1 rounded-full bg-amber-100 text-amber-700">Pending approval</span>
-          </div>
-          <div className="text-xs text-muted-foreground space-y-0.5">
-            <p>Requested {s.deletionRequestedAt ? formatDateTime(s.deletionRequestedAt) : '—'}
-              {s.deletionRequestedBy ? ` by ${s.deletionRequestedBy.firstName} ${s.deletionRequestedBy.lastName}` : ''}
-            </p>
-            {s.deletionReason && <p>Reason: <span className="text-foreground">{s.deletionReason}</span></p>}
-          </div>
-          <div className="flex items-center gap-2 pt-1">
-            <button
-              onClick={() => approve(s)}
-              disabled={busyId === s.id}
-              className="text-xs px-3 py-1.5 bg-red-600 text-white rounded-lg hover:bg-red-700 disabled:opacity-50 flex items-center gap-1"
-            >
-              <Trash2 className="w-3 h-3" /> Approve &amp; Delete
-            </button>
-            <button
-              onClick={() => reject(s)}
-              disabled={busyId === s.id}
-              className="text-xs px-3 py-1.5 border rounded-lg hover:bg-muted/50 disabled:opacity-50 flex items-center gap-1"
-            >
-              <XCircle className="w-3 h-3" /> Reject
-            </button>
-          </div>
+          ))
+        )}
+      </div>
+
+      <div className="space-y-3">
+        <div>
+          <h3 className="text-sm font-semibold">Deleted Students Log</h3>
+          <p className="text-xs text-muted-foreground">
+            Permanent record of every student that's been deleted — the student record itself is gone, but who requested it, why,
+            and who approved it is kept here for audit purposes.
+          </p>
         </div>
-      ))}
+        {log.length === 0 ? (
+          <div className="text-center text-muted-foreground py-6 text-sm">No students have been deleted yet.</div>
+        ) : (
+          <div className="border rounded-lg divide-y">
+            {log.map((l) => (
+              <div key={l.id} className="px-4 py-3 space-y-1">
+                <div className="flex items-center justify-between flex-wrap gap-2">
+                  <div>
+                    <p className="font-medium text-sm">{l.firstName} {l.lastName} <span className="text-xs text-muted-foreground">({l.studentCode})</span></p>
+                    <p className="text-xs text-muted-foreground">
+                      {l.phone}{l.email ? ` · ${l.email}` : ''} · {l.track}
+                      {l.courseName ? ` · ${l.courseName}` : ''}{l.batchCode ? ` · ${l.batchCode}` : ''}
+                    </p>
+                  </div>
+                  {l.forced && (
+                    <span className="text-xs px-2 py-1 rounded-full bg-red-100 text-red-700" title="Approved despite existing attendance/test/placement records">
+                      Force deleted
+                    </span>
+                  )}
+                </div>
+                <div className="text-xs text-muted-foreground space-y-0.5">
+                  <p>
+                    Requested {formatDateTime(l.requestedAt)}{l.requestedBy ? ` by ${l.requestedBy.firstName} ${l.requestedBy.lastName}` : ''}
+                    {' · '}Deleted {formatDateTime(l.approvedAt)}{l.approvedBy ? ` by ${l.approvedBy.firstName} ${l.approvedBy.lastName}` : ''}
+                  </p>
+                  {l.deletionReason && <p>Reason: <span className="text-foreground">{l.deletionReason}</span></p>}
+                  {(l.attendanceCount + l.testAttemptCount + l.placementResultCount) > 0 && (
+                    <p>
+                      Records erased: {l.attendanceCount} attendance, {l.testAttemptCount} test attempt{l.testAttemptCount === 1 ? '' : 's'}, {l.placementResultCount} placement result{l.placementResultCount === 1 ? '' : 's'}
+                    </p>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
     </div>
   );
 }
