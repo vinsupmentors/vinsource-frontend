@@ -1,5 +1,7 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import { useSearchParams } from 'react-router-dom';
+import { useSelector } from 'react-redux';
+import { RootState } from '@/store';
 import api, { BASE_URL } from '@/lib/api';
 import { formatDateTime } from '@/lib/utils';
 import { useModuleAccess } from '@/hooks/useModuleAccess';
@@ -8,7 +10,7 @@ import {
   Lock, Plus, X, Users, BookOpen, CalendarRange, ChevronDown, ChevronRight,
   GraduationCap, PlayCircle, CalendarClock, Search, Upload, Pencil, ChevronLeft, Download, Trash2, UserPlus,
   FileText, ClipboardList, ListChecks, Star, Type as TypeIcon, CheckSquare, BarChart3, Mail, NotebookPen,
-  BadgeCheck, CheckCircle2, XCircle, QrCode, ExternalLink, Loader2,
+  BadgeCheck, CheckCircle2, XCircle, QrCode, ExternalLink, Loader2, ShieldAlert,
 } from 'lucide-react';
 
 // Files uploaded by the backend (project submissions, student photos/aadhar) come back as
@@ -77,6 +79,9 @@ type Student = {
   enrollments: StudentBatchEnrollment[];
   trainerFeedbacks?: TrainerFeedback[];
   moduleFeedbacks?: ModuleFeedbackLite[];
+  deletionRequestedAt?: string | null;
+  deletionReason?: string | null;
+  deletionRequestedBy?: { id: string; firstName: string; lastName: string; employeeCode?: string } | null;
 };
 
 type Stats = { ongoingBatches: number; upcomingBatches: number; totalStudents: number; activeStudents: number };
@@ -149,8 +154,8 @@ function errMsg(err: unknown, fallback: string) {
   return e.response?.data?.message || fallback;
 }
 
-type Tab = 'courses' | 'batches' | 'students' | 'content' | 'portfolios' | 'reports';
-const VALID_TABS: Tab[] = ['courses', 'batches', 'students', 'content', 'portfolios', 'reports'];
+type Tab = 'courses' | 'batches' | 'students' | 'content' | 'portfolios' | 'reports' | 'deletion-requests';
+const VALID_TABS: Tab[] = ['courses', 'batches', 'students', 'content', 'portfolios', 'reports', 'deletion-requests'];
 const TABS: { id: Tab; label: string; icon: React.ComponentType<{ className?: string }> }[] = [
   { id: 'courses', label: 'Courses', icon: BookOpen },
   { id: 'batches', label: 'Batches & Schedules', icon: CalendarRange },
@@ -159,11 +164,18 @@ const TABS: { id: Tab; label: string; icon: React.ComponentType<{ className?: st
   { id: 'portfolios', label: 'Portfolio Approvals', icon: BadgeCheck },
   { id: 'reports', label: 'Reports', icon: BarChart3 },
 ];
+// Admin/Super Admin only — appended conditionally at render time, not part
+// of the base TABS array so non-admins never even see the tab exists.
+const DELETION_REQUESTS_TAB: { id: Tab; label: string; icon: React.ComponentType<{ className?: string }> } =
+  { id: 'deletion-requests', label: 'Deletion Requests', icon: ShieldAlert };
 
 export default function ProductionPage() {
   const { modules, loaded, hasModule } = useModuleAccess();
   const level = modules.PRODUCTION_TRAINING;
   const canEdit = hasModule('PRODUCTION_TRAINING', 'EDIT');
+  const role = useSelector((s: RootState) => s.auth.user?.role);
+  const isAdmin = role === 'ADMIN' || role === 'SUPER_ADMIN';
+  const visibleTabs = isAdmin ? [...TABS, DELETION_REQUESTS_TAB] : TABS;
 
   const [searchParams, setSearchParams] = useSearchParams();
   const tabFromUrl = searchParams.get('tab') as Tab | null;
@@ -254,7 +266,7 @@ export default function ProductionPage() {
           <h1 className="text-2xl font-bold">Production (Training)</h1>
           <p className="text-muted-foreground text-sm">Courses, batches, trainers, and student tracks (JRP / IOP / PAP)</p>
         </div>
-        {canEdit && tab !== 'content' && tab !== 'reports' && tab !== 'portfolios' && (
+        {canEdit && tab !== 'content' && tab !== 'reports' && tab !== 'portfolios' && tab !== 'deletion-requests' && (
           <button
             onClick={() => (tab === 'courses' ? setShowAddCourse(true) : tab === 'batches' ? setShowAddBatch(true) : setShowAddStudent(true))}
             className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700"
@@ -274,7 +286,7 @@ export default function ProductionPage() {
       </div>
 
       <div className="flex items-center gap-1 border-b">
-        {TABS.map((t) => {
+        {visibleTabs.map((t) => {
           const Icon = t.icon;
           return (
             <button
@@ -302,6 +314,8 @@ export default function ProductionPage() {
         <PortfoliosTab canEdit={canEdit} setError={setError} />
       ) : tab === 'reports' ? (
         <ReportsTab canEdit={canEdit} setError={setError} />
+      ) : tab === 'deletion-requests' ? (
+        <DeletionRequestsTab setError={setError} />
       ) : (
         <StudentsTab
           canEdit={canEdit}
@@ -1244,11 +1258,14 @@ function StudentsTab({ canEdit, setError, refresh, refreshKey, batches, onEnroll
   };
 
   const deleteStudent = async (id: string, name: string) => {
-    if (!window.confirm(`Delete ${name}? This cannot be undone.\n\nIf they have attendance or test records the server will block it — set their status to DROPPED instead.`)) return;
+    const reason = window.prompt(
+      `Request deletion of ${name}?\n\nThis does not delete them right away — it sends a request to the Deletion Requests tab, which an Admin must approve before anything is removed.\n\nOptional reason for the request:`
+    );
+    if (reason === null) return; // cancelled
     try {
-      await api.delete(`/api/production/students/${id}`);
+      await api.delete(`/api/production/students/${id}`, { data: { reason } });
       fetchStudents();
-    } catch (err) { setError(errMsg(err, 'Could not delete student')); }
+    } catch (err) { setError(errMsg(err, 'Could not submit deletion request')); }
   };
 
   const totalPages = Math.max(Math.ceil(total / PAGE_SIZE), 1);
@@ -1405,13 +1422,22 @@ function StudentsTab({ canEdit, setError, refresh, refreshKey, batches, onEnroll
                     >
                       <Pencil className="w-3.5 h-3.5" />
                     </button>
-                    <button
-                      onClick={(e) => { e.stopPropagation(); deleteStudent(s.id, `${s.firstName} ${s.lastName}`); }}
-                      className="p-1.5 rounded-lg hover:bg-red-50 text-red-500"
-                      title="Delete student"
-                    >
-                      <Trash2 className="w-3.5 h-3.5" />
-                    </button>
+                    {s.deletionRequestedAt ? (
+                      <span
+                        className="text-xs px-2 py-1 rounded-full bg-amber-100 text-amber-700 whitespace-nowrap"
+                        title="Awaiting admin approval in the Deletion Requests tab"
+                      >
+                        Deletion pending
+                      </span>
+                    ) : (
+                      <button
+                        onClick={(e) => { e.stopPropagation(); deleteStudent(s.id, `${s.firstName} ${s.lastName}`); }}
+                        className="p-1.5 rounded-lg hover:bg-red-50 text-red-500"
+                        title="Request deletion (requires admin approval)"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    )}
                   </>
                 )}
               </div>
@@ -1735,6 +1761,99 @@ function EditStudentModal({ student, onClose, setError, onSaved }: {
       </div>
       <ModalFooter onClose={onClose} onSubmit={submit} saving={saving} label="Save" />
     </Modal>
+  );
+}
+
+// ── DELETION REQUESTS TAB (Admin / Super Admin only) ────────────────────────
+function DeletionRequestsTab({ setError }: { setError: (s: string) => void }) {
+  const [students, setStudents] = useState<Student[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [busyId, setBusyId] = useState<string | null>(null);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    setError('');
+    try {
+      const res = await api.get('/api/production/students/deletion-requests');
+      setStudents(res.data.data);
+    } catch (err) {
+      setError(errMsg(err, 'Failed to load deletion requests'));
+    } finally {
+      setLoading(false);
+    }
+  }, [setError]);
+
+  useEffect(() => { load(); }, [load]);
+
+  const approve = async (s: Student) => {
+    if (!window.confirm(`Permanently delete ${s.firstName} ${s.lastName} (${s.studentCode})? This cannot be undone.`)) return;
+    setBusyId(s.id);
+    try {
+      await api.post(`/api/production/students/${s.id}/approve-delete`);
+      load();
+    } catch (err) { setError(errMsg(err, 'Could not delete student')); }
+    finally { setBusyId(null); }
+  };
+
+  const reject = async (s: Student) => {
+    if (!window.confirm(`Reject the deletion request for ${s.firstName} ${s.lastName}? The student record will be kept.`)) return;
+    setBusyId(s.id);
+    try {
+      await api.post(`/api/production/students/${s.id}/cancel-delete-request`);
+      load();
+    } catch (err) { setError(errMsg(err, 'Could not reject deletion request')); }
+    finally { setBusyId(null); }
+  };
+
+  if (loading) return <div className="text-center text-muted-foreground py-8">Loading...</div>;
+  if (students.length === 0) {
+    return (
+      <div className="text-center text-muted-foreground py-8">
+        No pending deletion requests.
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-3">
+      <p className="text-xs text-muted-foreground">
+        Deleting a student is a two-step process — anyone can request it, but only an Admin or Super Admin can approve the
+        permanent delete here. Approving re-checks attendance/test/placement records at approval time before removing anything.
+      </p>
+      {students.map((s) => (
+        <div key={s.id} className="bg-card border rounded-xl p-4 space-y-2">
+          <div className="flex items-center justify-between flex-wrap gap-2">
+            <div>
+              <p className="font-medium">{s.firstName} {s.lastName} <span className="text-xs text-muted-foreground">({s.studentCode})</span></p>
+              <p className="text-xs text-muted-foreground">{s.phone}{s.email ? ` · ${s.email}` : ''}</p>
+            </div>
+            <span className="text-xs px-2 py-1 rounded-full bg-amber-100 text-amber-700">Pending approval</span>
+          </div>
+          <div className="text-xs text-muted-foreground space-y-0.5">
+            <p>Requested {s.deletionRequestedAt ? formatDateTime(s.deletionRequestedAt) : '—'}
+              {s.deletionRequestedBy ? ` by ${s.deletionRequestedBy.firstName} ${s.deletionRequestedBy.lastName}` : ''}
+            </p>
+            {s.deletionReason && <p>Reason: <span className="text-foreground">{s.deletionReason}</span></p>}
+          </div>
+          <div className="flex items-center gap-2 pt-1">
+            <button
+              onClick={() => approve(s)}
+              disabled={busyId === s.id}
+              className="text-xs px-3 py-1.5 bg-red-600 text-white rounded-lg hover:bg-red-700 disabled:opacity-50 flex items-center gap-1"
+            >
+              <Trash2 className="w-3 h-3" /> Approve &amp; Delete
+            </button>
+            <button
+              onClick={() => reject(s)}
+              disabled={busyId === s.id}
+              className="text-xs px-3 py-1.5 border rounded-lg hover:bg-muted/50 disabled:opacity-50 flex items-center gap-1"
+            >
+              <XCircle className="w-3 h-3" /> Reject
+            </button>
+          </div>
+        </div>
+      ))}
+    </div>
   );
 }
 
