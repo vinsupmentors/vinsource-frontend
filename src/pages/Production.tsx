@@ -164,8 +164,8 @@ const TABS: { id: Tab; label: string; icon: React.ComponentType<{ className?: st
   { id: 'portfolios', label: 'Portfolio Approvals', icon: BadgeCheck },
   { id: 'reports', label: 'Reports', icon: BarChart3 },
 ];
-// Admin/Super Admin only — appended conditionally at render time, not part
-// of the base TABS array so non-admins never even see the tab exists.
+// Admin/Super Admin/Manager only — appended conditionally at render time,
+// not part of the base TABS array so other roles never even see it exists.
 const DELETION_REQUESTS_TAB: { id: Tab; label: string; icon: React.ComponentType<{ className?: string }> } =
   { id: 'deletion-requests', label: 'Deletion Requests', icon: ShieldAlert };
 
@@ -174,8 +174,10 @@ export default function ProductionPage() {
   const level = modules.PRODUCTION_TRAINING;
   const canEdit = hasModule('PRODUCTION_TRAINING', 'EDIT');
   const role = useSelector((s: RootState) => s.auth.user?.role);
-  const isAdmin = role === 'ADMIN' || role === 'SUPER_ADMIN';
-  const visibleTabs = isAdmin ? [...TABS, DELETION_REQUESTS_TAB] : TABS;
+  // Who can approve/reject student deletion requests — kept in sync with the
+  // requireRole(...) list on the approve-delete/cancel-delete-request routes.
+  const canApproveDeletions = role === 'ADMIN' || role === 'SUPER_ADMIN' || role === 'MANAGER';
+  const visibleTabs = canApproveDeletions ? [...TABS, DELETION_REQUESTS_TAB] : TABS;
 
   const [searchParams, setSearchParams] = useSearchParams();
   const tabFromUrl = searchParams.get('tab') as Tab | null;
@@ -1832,7 +1834,7 @@ function DeletionRequestsTab({ setError }: { setError: (s: string) => void }) {
   return (
     <div className="space-y-3">
       <p className="text-xs text-muted-foreground">
-        Deleting a student is a two-step process — anyone can request it, but only an Admin or Super Admin can approve the
+        Deleting a student is a two-step process — anyone can request it, but only an Admin, Super Admin, or Manager can approve the
         permanent delete here. Approving re-checks attendance/test/placement records at approval time before removing anything.
         If the student has any of those, you'll be asked to confirm a Force Delete, which permanently erases that history too.
       </p>
