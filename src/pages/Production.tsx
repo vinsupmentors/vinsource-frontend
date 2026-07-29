@@ -1785,13 +1785,28 @@ function DeletionRequestsTab({ setError }: { setError: (s: string) => void }) {
 
   useEffect(() => { load(); }, [load]);
 
-  const approve = async (s: Student) => {
-    if (!window.confirm(`Permanently delete ${s.firstName} ${s.lastName} (${s.studentCode})? This cannot be undone.`)) return;
+  const approve = async (s: Student, force = false) => {
+    const confirmMsg = force
+      ? `FORCE DELETE ${s.firstName} ${s.lastName} (${s.studentCode})?\n\nThis permanently erases the student AND all of their attendance, test, and placement records. There is no way to recover this data afterward.`
+      : `Permanently delete ${s.firstName} ${s.lastName} (${s.studentCode})? This cannot be undone.`;
+    if (!window.confirm(confirmMsg)) return;
     setBusyId(s.id);
     try {
-      await api.post(`/api/production/students/${s.id}/approve-delete`);
+      await api.post(`/api/production/students/${s.id}/approve-delete`, { force });
       load();
-    } catch (err) { setError(errMsg(err, 'Could not delete student')); }
+    } catch (err) {
+      const status = (err as { response?: { status?: number } }).response?.status;
+      const message = errMsg(err, 'Could not delete student');
+      // This specific 409 means the student has attendance/test/placement
+      // records — offer the Admin an explicit, separately-confirmed
+      // force-delete instead of just failing silently.
+      if (!force && status === 409 && /attendance, test, or placement/i.test(message)) {
+        setError('');
+        await approve(s, true);
+        return;
+      }
+      setError(message);
+    }
     finally { setBusyId(null); }
   };
 
@@ -1819,6 +1834,7 @@ function DeletionRequestsTab({ setError }: { setError: (s: string) => void }) {
       <p className="text-xs text-muted-foreground">
         Deleting a student is a two-step process — anyone can request it, but only an Admin or Super Admin can approve the
         permanent delete here. Approving re-checks attendance/test/placement records at approval time before removing anything.
+        If the student has any of those, you'll be asked to confirm a Force Delete, which permanently erases that history too.
       </p>
       {students.map((s) => (
         <div key={s.id} className="bg-card border rounded-xl p-4 space-y-2">
