@@ -1566,6 +1566,7 @@ function StudentsTab({ canEdit, setError, refresh, refreshKey, batches, onEnroll
       {editStudent && (
         <EditStudentModal
           student={editStudent}
+          batches={batchOptions}
           onClose={() => setEditStudent(null)}
           setError={setError}
           onSaved={() => { setEditStudent(null); fetchStudents(); refresh(); }}
@@ -1723,8 +1724,8 @@ function PushToPlacementsModal({ scheduleId, batchCode, courseName, track, estim
   );
 }
 
-function EditStudentModal({ student, onClose, setError, onSaved }: {
-  student: Student; onClose: () => void; setError: (s: string) => void; onSaved: () => void;
+function EditStudentModal({ student, batches, onClose, setError, onSaved }: {
+  student: Student; batches: Batch[]; onClose: () => void; setError: (s: string) => void; onSaved: () => void;
 }) {
   const [form, setForm] = useState({
     firstName: student.firstName, lastName: student.lastName, phone: student.phone,
@@ -1732,12 +1733,23 @@ function EditStudentModal({ student, onClose, setError, onSaved }: {
   });
   const [saving, setSaving] = useState(false);
 
+  // Current batch is whichever enrollment was created most recently — the
+  // list isn't ordered by the API, so fall back to the last array entry.
+  const currentEnrollment = student.enrollments[student.enrollments.length - 1];
+  const [newScheduleId, setNewScheduleId] = useState('');
+  const schedules = batches.flatMap((b) => b.schedules.map((s) => ({ ...s, batchCode: b.code })));
+
   const submit = async () => {
     if (!form.firstName.trim() || !form.phone.trim()) { setError('First name and phone are required'); return; }
     setSaving(true);
     setError('');
     try {
       await api.put(`/api/production/students/${student.id}`, { ...form, email: form.email || undefined });
+      // Moving to a different batch/schedule is optional — only fires if the
+      // admin actually picked something (and it's not just the current one).
+      if (newScheduleId && newScheduleId !== currentEnrollment?.scheduleId) {
+        await api.post('/api/production/enrollments', { studentId: student.id, scheduleId: newScheduleId });
+      }
       onSaved();
     } catch (err) { setError(errMsg(err, 'Failed to update student')); } finally { setSaving(false); }
   };
@@ -1758,6 +1770,17 @@ function EditStudentModal({ student, onClose, setError, onSaved }: {
           </select>
           <select className="w-full px-3 py-2 border rounded-lg text-sm" value={form.status} onChange={(e) => setForm({ ...form, status: e.target.value as StudentStatus })}>
             {STUDENT_STATUSES.map((st) => <option key={st} value={st}>{STUDENT_STATUS_LABEL[st]}</option>)}
+          </select>
+        </div>
+        <div className="pt-1 border-t">
+          <p className="text-xs text-muted-foreground pt-2">
+            Current batch: <span className="font-medium text-foreground">
+              {currentEnrollment ? `${currentEnrollment.schedule.batch.code} — ${currentEnrollment.schedule.course.name}` : 'Not enrolled'}
+            </span>
+          </p>
+          <select className="w-full px-3 py-2 border rounded-lg text-sm mt-1.5" value={newScheduleId} onChange={(e) => setNewScheduleId(e.target.value)}>
+            <option value="">Move to a different batch/schedule (optional)</option>
+            {schedules.map((s) => <option key={s.id} value={s.id}>{s.batchCode} — {s.course.name} ({s.timing})</option>)}
           </select>
         </div>
       </div>
