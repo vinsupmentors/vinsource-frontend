@@ -2911,19 +2911,34 @@ function FeedbackFormBuilderModal({ modules, existing, onClose, setError, onSave
       try {
         const wb = XLSX.read(evt.target?.result, { type: 'binary' });
         const ws = wb.Sheets[wb.SheetNames[0]];
-        const rows = XLSX.utils.sheet_to_json<Record<string, string>>(ws, { defval: '' });
+        const rows = XLSX.utils.sheet_to_json<Record<string, unknown>>(ws, { defval: '' });
+        // Column lookup is case-insensitive/trimmed (a template with "Type"
+        // or "Prompt " instead of "type"/"prompt" used to silently fail the
+        // whole import), and every cell is read defensively — a single row
+        // with a blank or missing cell used to throw mid-parse and fail the
+        // entire file with "Could not read Excel file" instead of just
+        // skipping that row.
+        const getCell = (row: Record<string, unknown>, key: string): string => {
+          const foundKey = Object.keys(row).find((k) => k.trim().toLowerCase() === key);
+          const val = foundKey ? row[foundKey] : undefined;
+          return val === null || val === undefined ? '' : String(val).trim();
+        };
         const imported: FeedbackFormQuestion[] = rows
-          .filter((r) => r.prompt?.toString().trim())
-          .map((r, i) => {
-            const type = (['RATING', 'TEXT', 'MCQ'].includes(r.type?.toString().toUpperCase())
-              ? r.type.toString().toUpperCase()
-              : 'RATING') as FeedbackQuestionType;
-            const options = type === 'MCQ' && r.options
-              ? r.options.toString().split(',').map((o) => o.trim()).filter(Boolean)
+          .map((r): FeedbackFormQuestion | null => {
+            const prompt = getCell(r, 'prompt');
+            if (!prompt) return null;
+            const rawType = getCell(r, 'type').toUpperCase();
+            const type = (['RATING', 'TEXT', 'MCQ'].includes(rawType) ? rawType : 'RATING') as FeedbackQuestionType;
+            const optionsRaw = getCell(r, 'options');
+            const options = type === 'MCQ' && optionsRaw
+              ? optionsRaw.split(',').map((o) => o.trim()).filter(Boolean)
               : undefined;
-            const required = r.required?.toString().toLowerCase() !== 'no' && r.required?.toString().toLowerCase() !== 'false';
-            return { order: i + 1, type, prompt: r.prompt.toString().trim(), required, options };
-          });
+            const requiredRaw = getCell(r, 'required').toLowerCase();
+            const required = requiredRaw !== 'no' && requiredRaw !== 'false';
+            return { order: 0, type, prompt, required, options };
+          })
+          .filter((q): q is FeedbackFormQuestion => q !== null)
+          .map((q, i) => ({ ...q, order: i + 1 }));
         if (imported.length) setQuestions(imported);
         else setError('No valid rows found — check the type and prompt columns');
       } catch {
