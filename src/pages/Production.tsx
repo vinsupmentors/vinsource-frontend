@@ -2723,9 +2723,14 @@ function FeedbackFormsPanel({ modules, canEdit, setError }: {
                 </p>
               </div>
               {canEdit && (
-                <button onClick={() => { setEditing(f); setShowBuilder(true); }} className="text-xs text-blue-600 hover:underline flex items-center gap-1">
-                  <Pencil className="w-3 h-3" /> Edit
-                </button>
+                <div className="flex items-center gap-3">
+                  <button onClick={() => { setEditing(f); setShowBuilder(true); }} className="text-xs text-blue-600 hover:underline flex items-center gap-1">
+                    <Pencil className="w-3 h-3" /> Edit
+                  </button>
+                  <button onClick={() => deleteForm(f)} className="text-xs text-red-600 hover:underline flex items-center gap-1">
+                    <Trash2 className="w-3 h-3" /> Delete
+                  </button>
+                </div>
               )}
             </div>
           ))}
@@ -2742,6 +2747,21 @@ function FeedbackFormsPanel({ modules, canEdit, setError }: {
       )}
     </div>
   );
+
+  async function deleteForm(f: FeedbackForm, force = false) {
+    const releaseCount = f._count?.releases ?? 0;
+    if (!force && !window.confirm(`Delete feedback form "${f.title}"?${releaseCount ? ` It has been released ${releaseCount} time(s).` : ''}`)) return;
+    try {
+      await api.delete(`/api/production/feedback-forms/${f.id}`, force ? { data: { force: true } } : undefined);
+      refresh();
+    } catch (err: unknown) {
+      const message = (err as { response?: { data?: { message?: string } } })?.response?.data?.message;
+      if (message?.includes('Force delete') && window.confirm(`${message}\n\nForce delete anyway? This permanently removes all releases and student responses for this form.`)) {
+        return deleteForm(f, true);
+      }
+      setError(message || 'Failed to delete feedback form');
+    }
+  }
 }
 
 // ── FEEDBACK RESPONSES (Production-Manager-only read surface) ───────────────
