@@ -49,12 +49,73 @@ interface ActiveAttempt {
   violationCount: number;
 }
 
-const MAX_WARNINGS = 2; // 1st + 2nd tab-switch = warning, 3rd ends the test
+const MAX_WARNINGS = 2; // 1st + 2nd violation = warning, 3rd ends the test
+
+// ── Camera proctoring: face-api.js + its pretrained TinyFaceDetector weights
+// are loaded from a CDN at runtime rather than bundled, so there's no build
+// step or multi-MB binary model files to ship in this repo. This is a
+// face-presence/count/orientation check, not literal eyeball/gaze tracking —
+// a lightweight, honest approximation of "is someone here, is it one person,
+// are they facing the screen."
+const FACE_API_SCRIPT_URL = 'https://cdn.jsdelivr.net/npm/face-api.js@0.22.2/dist/face-api.min.js';
+const FACE_API_MODEL_URL = 'https://cdn.jsdelivr.net/gh/justadudewhohacks/face-api.js-models@master/tiny_face_detector';
+const FACE_CHECK_INTERVAL_MS = 5000;
+const NO_FACE_STREAK_THRESHOLD = 3; // ~15s of no detected face before it counts as a violation
+const LOOKING_AWAY_STREAK_THRESHOLD = 3; // ~15s of an off-center face before it counts
+const LOOKING_AWAY_OFFSET_RATIO = 0.3; // face center offset from frame center, as a fraction of frame width
+
+type ViolationType = 'TAB_SWITCH' | 'NO_FACE' | 'MULTIPLE_FACES' | 'LOOKING_AWAY';
+type CameraStatus = 'idle' | 'loading' | 'active' | 'unavailable';
+
+interface FaceApiBox { x: number; y: number; width: number; height: number; }
+interface FaceApiDetection { box: FaceApiBox; }
+interface FaceApiGlobal {
+  nets: { tinyFaceDetector: { loadFromUri: (uri: string) => Promise<void> } };
+  TinyFaceDetectorOptions: new () => unknown;
+  detectAllFaces: (input: HTMLVideoElement, options: unknown) => Promise<FaceApiDetection[]>;
+}
+
+let faceApiLoadPromise: Promise<void> | null = null;
+function loadFaceApi(): Promise<void> {
+  const w = window as unknown as { faceapi?: FaceApiGlobal };
+  if (w.faceapi) return Promise.resolve();
+  if (faceApiLoadPromise) return faceApiLoadPromise;
+  faceApiLoadPromise = new Promise((resolve, reject) => {
+    const script = document.createElement('script');
+    script.src = FACE_API_SCRIPT_URL;
+    script.async = true;
+    script.onload = () => resolve();
+    script.onerror = () => reject(new Error('Failed to load face-api.js'));
+    document.head.appendChild(script);
+  });
+  return faceApiLoadPromise;
+}
+
+function captureSnapshot(video: HTMLVideoElement): Promise<Blob | null> {
+  return new Promise((resolve) => {
+    const canvas = document.createElement('canvas');
+    canvas.width = video.videoWidth || 320;
+    canvas.height = video.videoHeight || 240;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) { resolve(null); return; }
+    ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+    canvas.toBlob((blob) => resolve(blob), 'image/jpeg', 0.7);
+  });
+}
+
+function violationLabel(type: ViolationType) {
+  switch (type) {
+    case 'NO_FACE': return 'Face not visible to the camera';
+    case 'MULTIPLE_FACES': return 'More than one person in frame';
+    case 'LOOKING_AWAY': return 'Looking away from the screen';
+    default: return 'Tab switch / window change';
+  }
+}
 
 function statusLabel(status: string) {
   switch (status) {
     case 'SUBMITTED': return 'Submitted';
-    case 'AUTO_SUBMITTED_VIOLATION': return 'Auto-submitted (tab switch)';
+    case 'AUTO_SUBMITTED_VIOLATION': return 'Auto-submitted (policy violation)';
     case 'EXPIRED': return 'Time expired';
     default: return status;
   }
@@ -69,7 +130,13 @@ export default function StudentTest() {
   const [remainingMs, setRemainingMs] = useState(0);
   const [submitting, setSubmitting] = useState(false);
   const [reviewAttemptId, setReviewAttemptId] = useState<string | null>(null);
+  const [cameraStatus, setCameraStatus] = useState<CameraStatus>('idle');
   const submittedRef = useRef(false);
+  const videoRef = useRef<HTMLVideoElement | null>(null);
+  const streamRef = useRef<MediaStream | null>(null);
+  const faceCheckIntervalRef = useRef<number | null>(null);
+  const noFaceStreakRef = useRef(0);
+  const awayStreakRef = useRef(0);
   const { toast } = useToast();
 
   const load = () => {
@@ -146,14 +213,19 @@ export default function StudentTest() {
     }
   }, [active, load, toast]);
 
-  // Tab-switch / minimize policy: the server counts violations per attempt.
-  // The first two are just warnings (test keeps going); the third ends it.
-  // Server-counted rather than client-decided, so a student can't dodge the
-  // rule by editing anything running in the browser.
-  const onViolation = useCallback(async () => {
+  // Violation policy (tab-switch OR camera-based): the server counts
+  // violations of any type per attempt. The first two are just warnings
+  // (test keeps going); the third ends it. Server-counted rather than
+  // client-decided, so a student can't dodge the rule by editing anything
+  // running in the browser. Camera violations carry a snapshot image as
+  // evidence for later review by the Trainer/PM.
+  const recordViolation = useCallback(async (type: ViolationType, snapshotBlob?: Blob | null) => {
     if (!active || submittedRef.current) return;
     try {
-      const res = await api.post(`/api/student-portal/online-tests/attempts/${active.attemptId}/violation`, {});
+      const form = new FormData();
+      form.append('type', type);
+      if (snapshotBlob) form.append('snapshot', snapshotBlob, `${type.toLowerCase()}_${Date.now()}.jpg`);
+      const res = await api.post(`/api/student-portal/online-tests/attempts/${active.attemptId}/violation`, form);
       const { action, violationCount } = res.data.data as { action: 'warning' | 'ended' | 'none'; violationCount: number };
 
       if (action === 'warning') {
@@ -162,8 +234,8 @@ export default function StudentTest() {
         toast({
           title: isFinal ? 'Final warning' : `Warning ${violationCount} of ${MAX_WARNINGS}`,
           description: isFinal
-            ? 'This is your last warning — switching tabs again will end your test immediately.'
-            : "Don't switch tabs or minimize the window during a test. One more after this and your test will end.",
+            ? `${violationLabel(type)}. This is your last warning — one more violation will end your test immediately.`
+            : `${violationLabel(type)}. One more after this and your test will end.`,
           variant: 'error',
         });
         return;
@@ -174,12 +246,22 @@ export default function StudentTest() {
       setActive(null);
       load();
       if (action === 'ended') {
-        toast({ title: 'Test ended', description: `Your test was ended after ${MAX_WARNINGS + 1} tab-switch violations.`, variant: 'error' });
+        toast({ title: 'Test ended', description: `Your test was ended after ${MAX_WARNINGS + 1} policy violations.`, variant: 'error' });
       }
     } catch {
       // Transient failure recording the violation — don't punish the student for a network blip.
     }
   }, [active, load, toast]);
+
+  // Interval callbacks below are set up once per attempt (see the camera
+  // effect) and would otherwise close over a stale `recordViolation` from
+  // the render that started them — recordViolation itself is recreated
+  // every time `active` changes identity (e.g. on every answer pick). A ref
+  // keeps the interval always calling the latest version.
+  const recordViolationRef = useRef(recordViolation);
+  useEffect(() => { recordViolationRef.current = recordViolation; }, [recordViolation]);
+
+  const onTabViolation = useCallback(() => { recordViolation('TAB_SWITCH'); }, [recordViolation]);
 
   // Countdown timer.
   useEffect(() => {
@@ -194,18 +276,100 @@ export default function StudentTest() {
     return () => clearInterval(id);
   }, [active, finishAttempt]);
 
-  // Tab-switch / minimize detection — see onViolation for the warn/end policy.
+  // Tab-switch / minimize detection — see recordViolation for the warn/end policy.
   useEffect(() => {
     if (!active) return;
-    const onBlur = () => onViolation();
-    const onVisibility = () => { if (document.hidden) onViolation(); };
+    const onBlur = () => onTabViolation();
+    const onVisibility = () => { if (document.hidden) onTabViolation(); };
     window.addEventListener('blur', onBlur);
     document.addEventListener('visibilitychange', onVisibility);
     return () => {
       window.removeEventListener('blur', onBlur);
       document.removeEventListener('visibilitychange', onVisibility);
     };
-  }, [active, onViolation]);
+  }, [active, onTabViolation]);
+
+  // Camera proctoring: request the camera once per attempt, load face-api.js
+  // + the TinyFaceDetector weights from a CDN, then poll every few seconds
+  // for face presence/count/orientation. Fails open — if the camera or the
+  // model can't be loaded (permission denied, no camera, CDN blocked), the
+  // test still runs on tab-switch detection alone rather than blocking the
+  // student. Keyed on attemptId (not the whole `active` object, which gets a
+  // new identity on every answer pick) so this only runs once per attempt.
+  useEffect(() => {
+    if (!active) return;
+    let cancelled = false;
+    noFaceStreakRef.current = 0;
+    awayStreakRef.current = 0;
+
+    const setup = async () => {
+      try {
+        setCameraStatus('loading');
+        await loadFaceApi();
+        const faceapi = (window as unknown as { faceapi: FaceApiGlobal }).faceapi;
+        await faceapi.nets.tinyFaceDetector.loadFromUri(FACE_API_MODEL_URL);
+        const stream = await navigator.mediaDevices.getUserMedia({ video: { width: 320, height: 240 }, audio: false });
+        if (cancelled) { stream.getTracks().forEach((t) => t.stop()); return; }
+        streamRef.current = stream;
+        if (videoRef.current) {
+          videoRef.current.srcObject = stream;
+          await videoRef.current.play();
+        }
+        setCameraStatus('active');
+
+        faceCheckIntervalRef.current = window.setInterval(async () => {
+          const video = videoRef.current;
+          if (!video || submittedRef.current) return;
+          try {
+            const detections = await faceapi.detectAllFaces(video, new faceapi.TinyFaceDetectorOptions());
+            if (detections.length === 0) {
+              awayStreakRef.current = 0;
+              noFaceStreakRef.current += 1;
+              if (noFaceStreakRef.current >= NO_FACE_STREAK_THRESHOLD) {
+                noFaceStreakRef.current = 0;
+                const blob = await captureSnapshot(video);
+                recordViolationRef.current('NO_FACE', blob);
+              }
+            } else if (detections.length > 1) {
+              noFaceStreakRef.current = 0;
+              awayStreakRef.current = 0;
+              const blob = await captureSnapshot(video);
+              recordViolationRef.current('MULTIPLE_FACES', blob);
+            } else {
+              noFaceStreakRef.current = 0;
+              const box = detections[0].box;
+              const frameWidth = video.videoWidth || 320;
+              const offset = Math.abs((box.x + box.width / 2) - frameWidth / 2) / frameWidth;
+              if (offset > LOOKING_AWAY_OFFSET_RATIO) {
+                awayStreakRef.current += 1;
+                if (awayStreakRef.current >= LOOKING_AWAY_STREAK_THRESHOLD) {
+                  awayStreakRef.current = 0;
+                  const blob = await captureSnapshot(video);
+                  recordViolationRef.current('LOOKING_AWAY', blob);
+                }
+              } else {
+                awayStreakRef.current = 0;
+              }
+            }
+          } catch {
+            // Detection glitch on this tick — skip it, try again next interval.
+          }
+        }, FACE_CHECK_INTERVAL_MS);
+      } catch {
+        if (!cancelled) setCameraStatus('unavailable');
+      }
+    };
+
+    setup();
+
+    return () => {
+      cancelled = true;
+      if (faceCheckIntervalRef.current !== null) { window.clearInterval(faceCheckIntervalRef.current); faceCheckIntervalRef.current = null; }
+      if (streamRef.current) { streamRef.current.getTracks().forEach((t) => t.stop()); streamRef.current = null; }
+      setCameraStatus('idle');
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [active?.attemptId]);
 
   if (loading) return <div className="flex justify-center py-20"><Loader2 className="w-6 h-6 animate-spin text-primary" /></div>;
 
@@ -228,9 +392,20 @@ export default function StudentTest() {
 
         <div className="bg-amber-50 border border-amber-200 text-amber-800 text-xs rounded-lg px-3 py-2 flex items-center gap-2">
           <AlertTriangle className="w-4 h-4 shrink-0" />
-          Do not switch tabs or minimize this window. You'll get {MAX_WARNINGS} warnings — the next violation after that ends your test immediately.
+          Do not switch tabs or minimize this window, and stay alone and visible to the camera. You'll get {MAX_WARNINGS} warnings — the next violation after that ends your test immediately.
           {active.violationCount > 0 && (
             <span className="font-semibold shrink-0">({active.violationCount} / {MAX_WARNINGS} warnings used)</span>
+          )}
+        </div>
+
+        {/* Small always-visible camera preview — transparency that proctoring is active, not hidden surveillance. */}
+        <div className="fixed bottom-4 right-4 z-20 rounded-lg overflow-hidden border-2 border-white shadow-lg bg-black w-28 h-20 sm:w-36 sm:h-24">
+          <video ref={videoRef} muted playsInline className="w-full h-full object-cover" />
+          <div className={`absolute top-1 right-1 w-2 h-2 rounded-full ${cameraStatus === 'active' ? 'bg-green-400' : cameraStatus === 'loading' ? 'bg-amber-400 animate-pulse' : 'bg-red-400'}`} />
+          {cameraStatus === 'unavailable' && (
+            <div className="absolute inset-0 flex items-center justify-center bg-black/70 text-white text-[10px] text-center px-1">
+              Camera unavailable — tab monitoring only
+            </div>
           )}
         </div>
 

@@ -10,6 +10,18 @@ import { Loader2, Users, CalendarCheck, ClipboardList, MessageSquareText, Save, 
 // instead of the file. Absolute URLs (e.g. a pasted link submission) are left untouched.
 const fileUrl = (path: string) => (/^https?:\/\//i.test(path) ? path : `${BASE_URL}${path}`);
 
+// Proctoring violation types recorded during an online test attempt — see
+// OnlineTestViolationSnapshot on the backend. Face-presence/count/orientation
+// checks (not literal gaze tracking), plus the original tab-switch check.
+function violationTypeLabel(type: 'TAB_SWITCH' | 'NO_FACE' | 'MULTIPLE_FACES' | 'LOOKING_AWAY') {
+  switch (type) {
+    case 'NO_FACE': return 'Face not visible';
+    case 'MULTIPLE_FACES': return 'Multiple people';
+    case 'LOOKING_AWAY': return 'Looking away';
+    default: return 'Tab switch';
+  }
+}
+
 interface ScheduleAssignment {
   id: string;
   schedule: {
@@ -1263,6 +1275,7 @@ interface TestRosterRow {
     totalMarks: number | null;
     startedAt: string;
     submittedAt: string | null;
+    violationCount: number;
   } | null;
 }
 
@@ -1344,10 +1357,17 @@ function TestResultsModal({ schedule, releaseId, title, onClose }: { schedule: S
                       <td className="px-4 py-3">{studentLabel} <span className="text-xs text-muted-foreground">({row.student.studentCode})</span></td>
                       <td className="px-4 py-3">
                         {row.attempt ? (
-                          <span className={`flex items-center gap-1 text-xs font-medium ${row.attempt.status === 'IN_PROGRESS' ? 'text-amber-600' : 'text-green-700'}`}>
-                            {row.attempt.status === 'IN_PROGRESS' ? <Loader2 className="w-3.5 h-3.5" /> : <CheckCircle2 className="w-3.5 h-3.5" />}
-                            {row.attempt.status.replace('_', ' ')}
-                          </span>
+                          <div className="flex items-center gap-1.5 flex-wrap">
+                            <span className={`flex items-center gap-1 text-xs font-medium ${row.attempt.status === 'IN_PROGRESS' ? 'text-amber-600' : 'text-green-700'}`}>
+                              {row.attempt.status === 'IN_PROGRESS' ? <Loader2 className="w-3.5 h-3.5" /> : <CheckCircle2 className="w-3.5 h-3.5" />}
+                              {row.attempt.status.replace('_', ' ')}
+                            </span>
+                            {row.attempt.violationCount > 0 && (
+                              <span className="text-[10px] font-medium text-amber-700 bg-amber-50 border border-amber-200 rounded-full px-1.5 py-0.5">
+                                {row.attempt.violationCount} violation{row.attempt.violationCount === 1 ? '' : 's'}
+                              </span>
+                            )}
+                          </div>
                         ) : (
                           <span className="flex items-center gap-1 text-xs font-medium text-muted-foreground"><XCircle className="w-3.5 h-3.5" /> Not started</span>
                         )}
@@ -1414,9 +1434,10 @@ function StudentAnswerReviewModal({
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [data, setData] = useState<{
-    attempt: { score: number | null; totalMarks: number | null; startedAt: string; submittedAt: string | null };
+    attempt: { score: number | null; totalMarks: number | null; startedAt: string; submittedAt: string | null; violationCount: number };
     testTitle: string;
     questions: { id: string; order: number; prompt: string; options: string[]; marks: number; correctIndex: number; selectedIndex: number | null; isCorrect: boolean }[];
+    violations: { id: string; type: 'TAB_SWITCH' | 'NO_FACE' | 'MULTIPLE_FACES' | 'LOOKING_AWAY'; snapshotUrl: string | null; createdAt: string }[];
   } | null>(null);
 
   useEffect(() => {
@@ -1450,6 +1471,30 @@ function StudentAnswerReviewModal({
           <p className="text-sm text-red-600">{error}</p>
         ) : (
           <div className="space-y-4">
+            {data!.violations.length > 0 && (
+              <div className="rounded-xl border border-amber-200 bg-amber-50 p-4">
+                <p className="text-sm font-semibold text-amber-800 flex items-center gap-1.5">
+                  Proctoring: {data!.attempt.violationCount} violation{data!.attempt.violationCount === 1 ? '' : 's'} recorded
+                </p>
+                <div className="mt-3 flex flex-wrap gap-3">
+                  {data!.violations.map((v) => (
+                    <div key={v.id} className="w-32 rounded-lg border bg-white overflow-hidden">
+                      {v.snapshotUrl ? (
+                        <a href={fileUrl(v.snapshotUrl)} target="_blank" rel="noopener noreferrer">
+                          <img src={fileUrl(v.snapshotUrl)} alt={violationTypeLabel(v.type)} className="w-full h-24 object-cover" />
+                        </a>
+                      ) : (
+                        <div className="w-full h-24 flex items-center justify-center bg-muted text-muted-foreground text-[10px] text-center px-1">No snapshot</div>
+                      )}
+                      <div className="p-1.5">
+                        <p className="text-[10px] font-medium leading-tight">{violationTypeLabel(v.type)}</p>
+                        <p className="text-[10px] text-muted-foreground mt-0.5">{formatDateTime(v.createdAt)}</p>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
             {data!.questions.map((q, idx) => (
               <div key={q.id} className="rounded-xl border p-4">
                 <p className="text-sm font-medium">

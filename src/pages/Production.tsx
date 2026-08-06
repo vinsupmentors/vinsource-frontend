@@ -19,6 +19,16 @@ import {
 // Absolute URLs (e.g. a pasted link submission) are left untouched.
 const fileUrl = (path: string) => (/^https?:\/\//i.test(path) ? path : `${BASE_URL}${path}`);
 
+// Proctoring violation types recorded during an online test attempt — face
+// presence/count/orientation checks (not literal gaze tracking), plus the
+// original tab-switch check. See OnlineTestViolationSnapshot on the backend.
+const VIOLATION_TYPE_LABEL: Record<'TAB_SWITCH' | 'NO_FACE' | 'MULTIPLE_FACES' | 'LOOKING_AWAY', string> = {
+  TAB_SWITCH: 'Tab switch',
+  NO_FACE: 'Face not visible',
+  MULTIPLE_FACES: 'Multiple people',
+  LOOKING_AWAY: 'Looking away',
+};
+
 // ── Types (mirrors backend production.controller.ts) ───────────────────────
 type EmployeeLite = { id: string; firstName: string; lastName: string; employeeCode?: string; department?: { name: string } | null; status?: string };
 
@@ -4114,7 +4124,11 @@ interface StudentReportData {
     rank: number | null; totalStudents: number; marksObtained: number; marksMax: number;
     percentage: number; classAverage: number; attendancePct: number | null;
     attendanceLog: { date: string; status: string }[];
-    onlineTests: { id: string; testTitle: string; moduleTitle: string; status: string; score: number | null; totalMarks: number | null; submittedAt: string | null }[];
+    onlineTests: {
+      id: string; testTitle: string; moduleTitle: string; status: string; score: number | null; totalMarks: number | null; submittedAt: string | null;
+      violationCount: number;
+      violations: { id: string; type: 'TAB_SWITCH' | 'NO_FACE' | 'MULTIPLE_FACES' | 'LOOKING_AWAY'; snapshotUrl: string | null; createdAt: string }[];
+    }[];
     projects: { id: string; projectTitle: string; moduleTitle: string; status: string; submittedAt: string | null; graded: boolean; grade: number | null; maxGrade: number | null; reviewNote: string | null; fileUrl: string | null; linkUrl: string | null }[];
     moduleFeedback: { id: string; moduleTitle: string; rating: number | null; comments: string | null; trainerName: string | null; updatedAt: string }[];
   }[];
@@ -4138,6 +4152,7 @@ function StudentReportPanel({ setError }: { setError: (s: string) => void }) {
   const [loadingList, setLoadingList] = useState(true);
   const [loadingDetail, setLoadingDetail] = useState(false);
   const [expandedAttendance, setExpandedAttendance] = useState<string | null>(null);
+  const [expandedViolations, setExpandedViolations] = useState<string | null>(null);
   const [showFullProfile, setShowFullProfile] = useState(false);
 
   useEffect(() => {
@@ -4301,9 +4316,40 @@ function StudentReportPanel({ setError }: { setError: (s: string) => void }) {
                     ) : (
                       <div className="space-y-1">
                         {sc.onlineTests.map((t) => (
-                          <div key={t.id} className="text-xs flex items-center justify-between border rounded-lg px-2 py-1">
-                            <span>{t.testTitle} <span className="text-muted-foreground">({t.moduleTitle})</span></span>
-                            <span className="text-muted-foreground">{t.status}{t.score !== null ? ` · ${t.score}/${t.totalMarks}` : ''}</span>
+                          <div key={t.id} className="border rounded-lg px-2 py-1">
+                            <div className="text-xs flex items-center justify-between gap-2">
+                              <span>{t.testTitle} <span className="text-muted-foreground">({t.moduleTitle})</span></span>
+                              <div className="flex items-center gap-1.5 shrink-0">
+                                <span className="text-muted-foreground">{t.status}{t.score !== null ? ` · ${t.score}/${t.totalMarks}` : ''}</span>
+                                {t.violationCount > 0 && (
+                                  <button
+                                    onClick={() => setExpandedViolations(expandedViolations === t.id ? null : t.id)}
+                                    className="text-amber-700 bg-amber-50 border border-amber-200 rounded-full px-1.5 py-0.5 font-medium hover:bg-amber-100"
+                                  >
+                                    {t.violationCount} violation{t.violationCount === 1 ? '' : 's'}
+                                  </button>
+                                )}
+                              </div>
+                            </div>
+                            {expandedViolations === t.id && t.violations.length > 0 && (
+                              <div className="mt-2 flex flex-wrap gap-2">
+                                {t.violations.map((v) => (
+                                  <div key={v.id} className="w-28 rounded-lg border bg-white overflow-hidden">
+                                    {v.snapshotUrl ? (
+                                      <a href={fileUrl(v.snapshotUrl)} target="_blank" rel="noopener noreferrer">
+                                        <img src={fileUrl(v.snapshotUrl)} alt={v.type} className="w-full h-20 object-cover" />
+                                      </a>
+                                    ) : (
+                                      <div className="w-full h-20 flex items-center justify-center bg-muted text-muted-foreground text-[10px] text-center px-1">No snapshot</div>
+                                    )}
+                                    <div className="p-1">
+                                      <p className="text-[10px] font-medium leading-tight">{VIOLATION_TYPE_LABEL[v.type]}</p>
+                                      <p className="text-[10px] text-muted-foreground">{formatDateTime(v.createdAt)}</p>
+                                    </div>
+                                  </div>
+                                ))}
+                              </div>
+                            )}
                           </div>
                         ))}
                       </div>
