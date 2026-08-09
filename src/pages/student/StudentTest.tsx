@@ -51,6 +51,12 @@ interface ActiveAttempt {
 
 const MAX_WARNINGS = 2; // 1st + 2nd violation = warning, 3rd ends the test
 
+// Kill switch — camera proctoring turned off in the field on 2026-08-06:
+// students were getting blocked from writing their tests because of it. Flip
+// back to true once it's been retested properly. Tab-switch detection below
+// is unaffected and keeps working either way.
+const CAMERA_PROCTORING_ENABLED = false;
+
 // ── Camera proctoring: face-api.js + its pretrained TinyFaceDetector weights
 // are loaded from a CDN at runtime rather than bundled, so there's no build
 // step or multi-MB binary model files to ship in this repo. This is a
@@ -297,7 +303,7 @@ export default function StudentTest() {
   // student. Keyed on attemptId (not the whole `active` object, which gets a
   // new identity on every answer pick) so this only runs once per attempt.
   useEffect(() => {
-    if (!active) return;
+    if (!active || !CAMERA_PROCTORING_ENABLED) return;
     let cancelled = false;
     noFaceStreakRef.current = 0;
     awayStreakRef.current = 0;
@@ -392,22 +398,24 @@ export default function StudentTest() {
 
         <div className="bg-amber-50 border border-amber-200 text-amber-800 text-xs rounded-lg px-3 py-2 flex items-center gap-2">
           <AlertTriangle className="w-4 h-4 shrink-0" />
-          Do not switch tabs or minimize this window, and stay alone and visible to the camera. You'll get {MAX_WARNINGS} warnings — the next violation after that ends your test immediately.
+          Do not switch tabs or minimize this window. You'll get {MAX_WARNINGS} warnings — the next violation after that ends your test immediately.
           {active.violationCount > 0 && (
             <span className="font-semibold shrink-0">({active.violationCount} / {MAX_WARNINGS} warnings used)</span>
           )}
         </div>
 
-        {/* Small always-visible camera preview — transparency that proctoring is active, not hidden surveillance. */}
-        <div className="fixed bottom-4 right-4 z-20 rounded-lg overflow-hidden border-2 border-white shadow-lg bg-black w-28 h-20 sm:w-36 sm:h-24">
-          <video ref={videoRef} muted playsInline className="w-full h-full object-cover" />
-          <div className={`absolute top-1 right-1 w-2 h-2 rounded-full ${cameraStatus === 'active' ? 'bg-green-400' : cameraStatus === 'loading' ? 'bg-amber-400 animate-pulse' : 'bg-red-400'}`} />
-          {cameraStatus === 'unavailable' && (
-            <div className="absolute inset-0 flex items-center justify-center bg-black/70 text-white text-[10px] text-center px-1">
-              Camera unavailable — tab monitoring only
-            </div>
-          )}
-        </div>
+        {/* Small always-visible camera preview — transparency that proctoring is active, not hidden surveillance. Hidden while CAMERA_PROCTORING_ENABLED is off. */}
+        {CAMERA_PROCTORING_ENABLED && (
+          <div className="fixed bottom-4 right-4 z-20 rounded-lg overflow-hidden border-2 border-white shadow-lg bg-black w-28 h-20 sm:w-36 sm:h-24">
+            <video ref={videoRef} muted playsInline className="w-full h-full object-cover" />
+            <div className={`absolute top-1 right-1 w-2 h-2 rounded-full ${cameraStatus === 'active' ? 'bg-green-400' : cameraStatus === 'loading' ? 'bg-amber-400 animate-pulse' : 'bg-red-400'}`} />
+            {cameraStatus === 'unavailable' && (
+              <div className="absolute inset-0 flex items-center justify-center bg-black/70 text-white text-[10px] text-center px-1">
+                Camera unavailable — tab monitoring only
+              </div>
+            )}
+          </div>
+        )}
 
         <div className="space-y-4">
           {active.questions.map((q, idx) => (
