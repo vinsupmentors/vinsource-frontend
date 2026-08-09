@@ -11,6 +11,7 @@ import {
 
 interface Enrollment {
   id: string;
+  status: 'ACTIVE' | 'COMPLETED' | 'DROPPED';
   schedule: {
     code?: string | null;
     timing?: string;
@@ -57,7 +58,12 @@ export default function StudentDashboard() {
       api.get('/api/student-portal/gamification'),
     ])
       .then(([e, a, c, cc, pr, fb, rk, gm]) => {
-        if (e.status === 'fulfilled') setEnrollments(e.value.data.data || []);
+        // DROPPED enrollments are leftovers from a batch move (see Edit
+        // Student > "move to a different batch") — the old schedule/trainer
+        // is retired server-side but the row itself is kept for history, so
+        // it must be filtered out here or the student sees both the old and
+        // new batch/trainer side by side.
+        if (e.status === 'fulfilled') setEnrollments((e.value.data.data || []).filter((en: Enrollment) => en.status !== 'DROPPED'));
         if (a.status === 'fulfilled') setAttendancePct(a.value.data.meta?.percentage ?? null);
         if (c.status === 'fulfilled') setCertCount((c.value.data.data || []).length);
         if (cc.status === 'fulfilled') {

@@ -6,6 +6,7 @@ import { cn } from '@/lib/utils';
 
 interface Enrollment {
   scheduleId: string;
+  status: 'ACTIVE' | 'COMPLETED' | 'DROPPED';
   schedule: { course: { id: string; name: string } };
 }
 
@@ -43,7 +44,10 @@ export default function StudentFeedback() {
       api.get('/api/student-portal/enrollments'),
       api.get('/api/student-portal/feedback'),
     ]).then(([enrRes, fbRes]) => {
-      const enr = enrRes.data.data || [];
+      // DROPPED enrollments are leftovers from a batch move — the schedule/
+      // trainer they point to is no longer current, so don't offer feedback
+      // on them.
+      const enr = (enrRes.data.data || []).filter((e: Enrollment) => e.status !== 'DROPPED');
       const fb = fbRes.data.data || [];
       setEnrollments(enr);
       const map: Record<string, Feedback> = {};

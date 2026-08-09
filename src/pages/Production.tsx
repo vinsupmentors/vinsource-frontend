@@ -1758,7 +1758,15 @@ function EditStudentModal({ student, batches, onClose, setError, onSaved }: {
       // Moving to a different batch/schedule is optional — only fires if the
       // admin actually picked something (and it's not just the current one).
       if (newScheduleId && newScheduleId !== currentEnrollment?.scheduleId) {
-        await api.post('/api/production/enrollments', { studentId: student.id, scheduleId: newScheduleId });
+        // previousEnrollmentId tells the backend this is a *move*, not an
+        // additional concurrent enrollment — it retires the old enrollment
+        // (status -> DROPPED) in the same transaction, so the student portal
+        // only ever shows the new batch/trainer, not both.
+        await api.post('/api/production/enrollments', {
+          studentId: student.id,
+          scheduleId: newScheduleId,
+          previousEnrollmentId: currentEnrollment?.status === 'ACTIVE' ? currentEnrollment.id : undefined,
+        });
       }
       onSaved();
     } catch (err) { setError(errMsg(err, 'Failed to update student')); } finally { setSaving(false); }
@@ -1790,7 +1798,9 @@ function EditStudentModal({ student, batches, onClose, setError, onSaved }: {
           </p>
           <select className="w-full px-3 py-2 border rounded-lg text-sm mt-1.5" value={newScheduleId} onChange={(e) => setNewScheduleId(e.target.value)}>
             <option value="">Move to a different batch/schedule (optional)</option>
-            {schedules.map((s) => <option key={s.id} value={s.id}>{s.batchCode} — {s.course.name} ({s.timing})</option>)}
+            {[...schedules]
+              .sort((a, b) => (a.code || '').localeCompare(b.code || '') || a.batchCode.localeCompare(b.batchCode) || a.course.name.localeCompare(b.course.name))
+              .map((s) => <option key={s.id} value={s.id}>{s.code ? `${s.code} — ` : ''}{s.batchCode} — {s.course.name} ({s.timing})</option>)}
           </select>
         </div>
       </div>
