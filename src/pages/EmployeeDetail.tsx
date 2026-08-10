@@ -6,7 +6,7 @@ import { formatDate, formatTime, formatCurrency, getInitials } from '@/lib/utils
 import {
   ArrowLeft, Mail, Phone, Building2, Briefcase, Calendar, CreditCard,
   MapPin, User, Shield, Loader2, AlertCircle, FileText, DollarSign, Clock, Edit2, Check, X,
-  KeyRound, Eye, EyeOff, RefreshCw, Trash2, Hash,
+  KeyRound, Eye, EyeOff, RefreshCw, Trash2, Hash, Camera,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useRole } from '@/hooks/useAuth';
@@ -75,6 +75,11 @@ export default function EmployeeDetail() {
   const [editSaving, setEditSaving] = useState(false);
   const [editError, setEditError] = useState('');
 
+  // Profile photo upload (HR/SuperAdmin, on behalf of the employee — most
+  // employees never get around to uploading their own via My Profile)
+  const [photoUploading, setPhotoUploading] = useState(false);
+  const [photoError, setPhotoError] = useState('');
+
   // Attendance history for this employee
   const [attRecords, setAttRecords] = useState<AttRecord[]>([]);
   const [attLoading, setAttLoading] = useState(false);
@@ -103,6 +108,24 @@ export default function EmployeeDetail() {
       .catch(() => setAttRecords([]))
       .finally(() => setAttLoading(false));
   }, [tab, id, attMonth, attYear]);
+
+  const uploadPhoto = async (file: File) => {
+    if (!id) return;
+    setPhotoUploading(true);
+    setPhotoError('');
+    try {
+      const fd = new FormData();
+      fd.append('photo', file);
+      const res = await api.post<{ data: { profilePhoto: string } }>(`/api/employees/${id}/photo`, fd, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+      });
+      setEmp((prev) => (prev ? { ...prev, profilePhoto: res.data.data.profilePhoto } : prev));
+    } catch (e: any) {
+      setPhotoError(e.response?.data?.message ?? 'Failed to upload photo');
+    } finally {
+      setPhotoUploading(false);
+    }
+  };
 
   const generatePwd = () => {
     const chars = 'ABCDEFGHJKMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789';
@@ -233,8 +256,29 @@ export default function EmployeeDetail() {
         <div className="h-24 bg-gradient-to-r from-blue-600 to-indigo-600" />
         <div className="px-6 pb-6">
           <div className="flex items-end gap-4 -mt-10 mb-5">
-            <div className="w-20 h-20 bg-white dark:bg-gray-900 rounded-2xl border-4 border-card flex items-center justify-center text-2xl font-bold text-blue-600 flex-shrink-0">
-              {getInitials(fullName)}
+            <div className="relative w-20 h-20 flex-shrink-0 group">
+              <div className="w-20 h-20 bg-white dark:bg-gray-900 rounded-2xl border-4 border-card flex items-center justify-center text-2xl font-bold text-blue-600 overflow-hidden">
+                {emp.profilePhoto ? (
+                  <img src={emp.profilePhoto} alt={fullName} className="w-full h-full object-cover" />
+                ) : (
+                  getInitials(fullName)
+                )}
+              </div>
+              {isHR && (
+                <label
+                  title={emp.profilePhoto ? 'Change photo' : 'Upload photo'}
+                  className="absolute -bottom-1 -right-1 w-7 h-7 rounded-full bg-primary text-primary-foreground flex items-center justify-center cursor-pointer shadow-md hover:opacity-90"
+                >
+                  {photoUploading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Camera className="w-3.5 h-3.5" />}
+                  <input
+                    type="file"
+                    accept="image/jpeg,image/png,image/webp"
+                    className="hidden"
+                    disabled={photoUploading}
+                    onChange={(e) => { const f = e.target.files?.[0]; if (f) uploadPhoto(f); e.target.value = ''; }}
+                  />
+                </label>
+              )}
             </div>
             <div className="pb-1">
               <h1 className="text-xl font-bold">{fullName}</h1>
@@ -277,6 +321,10 @@ export default function EmployeeDetail() {
               </span>
             </div>
           </div>
+
+          {photoError && (
+            <p className="text-xs text-red-600 mb-3 flex items-center gap-1"><AlertCircle className="w-3.5 h-3.5" /> {photoError}</p>
+          )}
 
           <div className="flex flex-wrap gap-3 text-sm text-muted-foreground">
             <div className="flex items-center gap-1.5"><Mail className="w-3.5 h-3.5" />{emp.user?.email}</div>
