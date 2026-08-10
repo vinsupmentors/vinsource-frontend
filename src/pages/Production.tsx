@@ -1529,8 +1529,11 @@ function StudentsTab({ canEdit, setError, refresh, refreshKey, batches, onEnroll
                       <tr><th className="py-1 pr-2">Batch</th><th className="py-1 pr-2">Course</th><th className="py-1 pr-2">Status</th></tr>
                     </thead>
                     <tbody className="divide-y">
-                      {s.enrollments.map((en) => (
-                        <tr key={en.id}>
+                      {/* ACTIVE first, then history (COMPLETED/DROPPED) — and the
+                          non-active rows are visibly muted so a dropped row from a
+                          batch move doesn't read as "still enrolled here." */}
+                      {[...s.enrollments].sort((a, b) => (a.status === 'ACTIVE' ? -1 : 0) - (b.status === 'ACTIVE' ? -1 : 0)).map((en) => (
+                        <tr key={en.id} className={en.status !== 'ACTIVE' ? 'opacity-50' : ''}>
                           <td className="py-1.5 pr-2">{en.schedule.batch.code}</td>
                           <td className="py-1.5 pr-2">{en.schedule.course.name}</td>
                           <td className="py-1.5 pr-2">
@@ -1539,6 +1542,7 @@ function StudentsTab({ canEdit, setError, refresh, refreshKey, batches, onEnroll
                                 {ENROLLMENT_STATUSES.map((st) => <option key={st} value={st}>{st}</option>)}
                               </select>
                             ) : en.status}
+                            {en.status !== 'ACTIVE' && <span className="ml-1.5 text-[10px] text-muted-foreground">(history — not current)</span>}
                           </td>
                         </tr>
                       ))}
