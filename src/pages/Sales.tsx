@@ -8,6 +8,7 @@ import {
   Lock, Plus, X, Phone, Mail, Calendar, Users, TrendingUp, CheckCircle2,
   PhoneCall, Video, MapPin, RefreshCw, AlertTriangle, Settings, Trash2, Activity,
   ChevronLeft, ChevronRight, Upload, Download, Percent,
+  Smartphone, PhoneIncoming, Link2, UserPlus, Copy, Ban, Check,
 } from 'lucide-react';
 
 const PAGE_SIZE = 100;
@@ -120,6 +121,25 @@ interface Stats {
 
 interface ListMeta { total: number; page: number; limit: number; totalPages: number; }
 
+// SIM call-tracking — devices registry + the unmatched-call review queue.
+interface DeviceRow {
+  id: string;
+  label?: string | null;
+  isActive: boolean;
+  lastSeenAt?: string | null;
+  createdAt: string;
+  employee: EmployeeLite;
+}
+
+interface UnmatchedCall {
+  id: string;
+  rawPhoneNumber?: string | null;
+  direction?: 'INBOUND' | 'OUTBOUND' | 'MISSED' | null;
+  durationSeconds?: number | null;
+  calledAt: string;
+  calledBy?: EmployeeLite | null;
+}
+
 interface LeadQualityRow {
   campaignId: string;
   campaignName: string;
@@ -227,12 +247,16 @@ function pctLabel(pct: number | null): string {
 }
 
 // ── Main page ────────────────────────────────────────────────────────────
-type Tab = 'leads' | 'pulse' | 'leadQuality' | 'demoBooked' | 'demoRescheduled' | 'demoConducted';
-const VALID_TABS: Tab[] = ['leads', 'pulse', 'leadQuality', 'demoBooked', 'demoRescheduled', 'demoConducted'];
+type Tab = 'leads' | 'pulse' | 'leadQuality' | 'demoBooked' | 'demoRescheduled' | 'demoConducted' | 'devices' | 'unmatchedCalls';
+const VALID_TABS: Tab[] = ['leads', 'pulse', 'leadQuality', 'demoBooked', 'demoRescheduled', 'demoConducted', 'devices', 'unmatchedCalls'];
 // Sales Pulse / Lead Quality are aggregate, cross-rep views — admin only.
 // BDAs get Demo Booked/Rescheduled/Conducted instead, scoped to their own leads.
-const ADMIN_ONLY_TABS: Tab[] = ['pulse', 'leadQuality'];
+// Devices (issuing call-tracking tokens) is admin-only too. Unmatched Calls
+// is regular EDIT access, same level as logging a call manually — both admins
+// and BDAs can see and work it.
+const ADMIN_ONLY_TABS: Tab[] = ['pulse', 'leadQuality', 'devices'];
 const BDA_ONLY_TABS: Tab[] = ['demoBooked', 'demoRescheduled', 'demoConducted'];
+const EDIT_REQUIRED_TABS: Tab[] = ['unmatchedCalls'];
 
 export default function SalesPage() {
   const { modules, loaded, hasModule } = useModuleAccess();
@@ -254,7 +278,8 @@ export default function SalesPage() {
     if (!loaded) return;
     if (!isAdmin && ADMIN_ONLY_TABS.includes(tab)) setTab('leads');
     if (isAdmin && BDA_ONLY_TABS.includes(tab)) setTab('leads');
-  }, [loaded, isAdmin, tab]);
+    if (!canEdit && EDIT_REQUIRED_TABS.includes(tab)) setTab('leads');
+  }, [loaded, isAdmin, canEdit, tab]);
 
   const [leads, setLeads] = useState<Lead[]>([]);
   const [meta, setMeta] = useState<ListMeta | null>(null);
@@ -411,12 +436,15 @@ export default function SalesPage() {
               { id: 'leads' as Tab, label: 'Leads', icon: Users },
               { id: 'pulse' as Tab, label: 'Sales Pulse', icon: Activity },
               { id: 'leadQuality' as Tab, label: 'Lead Quality', icon: Percent },
+              { id: 'unmatchedCalls' as Tab, label: 'Unmatched Calls', icon: PhoneIncoming },
+              { id: 'devices' as Tab, label: 'Devices', icon: Smartphone },
             ]
           : [
               { id: 'leads' as Tab, label: 'Leads', icon: Users },
               { id: 'demoBooked' as Tab, label: 'Demo Booked', icon: Calendar },
               { id: 'demoRescheduled' as Tab, label: 'Demo Rescheduled', icon: RefreshCw },
               { id: 'demoConducted' as Tab, label: 'Demo Conducted', icon: CheckCircle2 },
+              ...(canEdit ? [{ id: 'unmatchedCalls' as Tab, label: 'Unmatched Calls', icon: PhoneIncoming }] : []),
             ]
         ).map((t) => {
           const Icon = t.icon;
@@ -602,6 +630,10 @@ export default function SalesPage() {
       {tab === 'demoRescheduled' && !isAdmin && <DemoListPanel status="RESCHEDULED" emptyLabel="No demos rescheduled" onOpenLead={openLeadDetail} />}
 
       {tab === 'demoConducted' && !isAdmin && <DemoListPanel status="COMPLETED" emptyLabel="No demos conducted yet" onOpenLead={openLeadDetail} />}
+
+      {tab === 'devices' && isAdmin && <DevicesPanel employees={employees} />}
+
+      {tab === 'unmatchedCalls' && canEdit && <UnmatchedCallsPanel setGlobalError={setError} />}
 
       {showAdd && (
         <AddLeadModal
@@ -1677,6 +1709,408 @@ function DemoListPanel({ status, emptyLabel, onOpenLead }: {
             ))}
           </tbody>
         </table>
+      </div>
+    </div>
+  );
+}
+
+// ── Devices tab: register/manage phones running the SIM call-tracker app ──
+function DevicesPanel({ employees }: { employees: EmployeeLite[] }) {
+  const [devices, setDevices] = useState<DeviceRow[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+  const [showAdd, setShowAdd] = useState(false);
+  const [newEmployeeId, setNewEmployeeId] = useState('');
+  const [newLabel, setNewLabel] = useState('');
+  const [saving, setSaving] = useState(false);
+  // Shown once, right after registration — the token itself is never
+  // returned by the list endpoint, so this is the only chance to copy it.
+  const [issuedToken, setIssuedToken] = useState<{ token: string; employee: string } | null>(null);
+  const [copied, setCopied] = useState(false);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    setError('');
+    try {
+      const res = await api.get('/api/sales/devices');
+      setDevices(res.data.data);
+    } catch (err: unknown) {
+      const e = err as { response?: { data?: { message?: string } } };
+      setError(e.response?.data?.message || 'Failed to load devices');
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => { load(); }, [load]);
+
+  const register = async () => {
+    if (!newEmployeeId) { setError('Pick which salesperson this phone belongs to'); return; }
+    setSaving(true);
+    setError('');
+    try {
+      const res = await api.post('/api/sales/devices', { employeeId: newEmployeeId, label: newLabel.trim() || undefined });
+      const emp = employees.find((e) => e.id === newEmployeeId);
+      setIssuedToken({ token: res.data.data.deviceToken, employee: emp ? `${emp.firstName} ${emp.lastName}` : 'this device' });
+      setShowAdd(false);
+      setNewEmployeeId(''); setNewLabel('');
+      load();
+    } catch (err: unknown) {
+      const e = err as { response?: { data?: { message?: string } } };
+      setError(e.response?.data?.message || 'Failed to register device');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const deactivate = async (id: string) => {
+    if (!confirm('Deactivate this device? The phone will stop being able to report calls until re-registered.')) return;
+    try {
+      await api.put(`/api/sales/devices/${id}/deactivate`);
+      load();
+    } catch (err: unknown) {
+      const e = err as { response?: { data?: { message?: string } } };
+      setError(e.response?.data?.message || 'Failed to deactivate device');
+    }
+  };
+
+  const copyToken = () => {
+    if (!issuedToken) return;
+    navigator.clipboard.writeText(issuedToken.token);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
+
+  return (
+    <div className="space-y-6">
+      {error && <div className="bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg px-4 py-3">{error}</div>}
+
+      <div className="flex items-center justify-between">
+        <p className="text-sm text-muted-foreground">
+          Phones running the Vin-Source Call Tracker app — each one auto-logs calls made on the business SIM.
+        </p>
+        <div className="flex items-center gap-2">
+          <button onClick={load} disabled={loading} className="flex items-center gap-2 px-3 py-2 border rounded-lg text-sm font-medium hover:bg-muted/50 disabled:opacity-50">
+            <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} /> Refresh
+          </button>
+          <button onClick={() => setShowAdd(true)} className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 transition-colors">
+            <Plus className="w-4 h-4" /> Register Device
+          </button>
+        </div>
+      </div>
+
+      {issuedToken && (
+        <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 space-y-2">
+          <p className="text-sm font-medium text-amber-900">
+            Device registered for {issuedToken.employee}. Copy this token now — it won't be shown again. Paste it into the call-tracker app's "Device token" field on that phone.
+          </p>
+          <div className="flex items-center gap-2">
+            <code className="flex-1 bg-white border rounded-lg px-3 py-2 text-xs font-mono break-all">{issuedToken.token}</code>
+            <button onClick={copyToken} className="flex items-center gap-1 px-3 py-2 border rounded-lg text-xs font-medium bg-white hover:bg-muted/50 flex-shrink-0">
+              {copied ? <Check className="w-3.5 h-3.5 text-green-600" /> : <Copy className="w-3.5 h-3.5" />} {copied ? 'Copied' : 'Copy'}
+            </button>
+          </div>
+          <button onClick={() => setIssuedToken(null)} className="text-xs text-amber-700 hover:underline">Done</button>
+        </div>
+      )}
+
+      {showAdd && (
+        <div className="border rounded-xl p-4 space-y-3 bg-muted/20">
+          <h3 className="font-semibold text-sm">Register a new device</h3>
+          <div className="flex flex-wrap gap-2">
+            <select className="px-3 py-2 border rounded-lg text-sm flex-1 min-w-[180px]" value={newEmployeeId} onChange={(e) => setNewEmployeeId(e.target.value)}>
+              <option value="">Belongs to...</option>
+              {employees.map((e) => <option key={e.id} value={e.id}>{e.firstName} {e.lastName}</option>)}
+            </select>
+            <input className="px-3 py-2 border rounded-lg text-sm flex-1 min-w-[140px]" placeholder="Label (e.g. Arun's phone)" value={newLabel} onChange={(e) => setNewLabel(e.target.value)} />
+          </div>
+          <div className="flex justify-end gap-2">
+            <button onClick={() => setShowAdd(false)} className="px-4 py-2 text-sm rounded-lg border">Cancel</button>
+            <button onClick={register} disabled={saving || !newEmployeeId} className="px-4 py-2 text-sm rounded-lg bg-blue-600 text-white disabled:opacity-50">
+              {saving ? 'Registering...' : 'Register & Get Token'}
+            </button>
+          </div>
+        </div>
+      )}
+
+      <div className="bg-card border rounded-xl overflow-x-auto">
+        <table className="w-full text-sm">
+          <thead className="bg-muted/50 text-left text-xs uppercase text-muted-foreground">
+            <tr>
+              <th className="px-3 py-3">Salesperson</th>
+              <th className="px-3 py-3">Label</th>
+              <th className="px-3 py-3">Status</th>
+              <th className="px-3 py-3">Last Seen</th>
+              <th className="px-3 py-3">Registered</th>
+              <th className="px-3 py-3"></th>
+            </tr>
+          </thead>
+          <tbody className="divide-y">
+            {loading ? (
+              <tr><td colSpan={6} className="px-4 py-8 text-center text-muted-foreground">Loading...</td></tr>
+            ) : devices.length === 0 ? (
+              <tr><td colSpan={6} className="px-4 py-8 text-center text-muted-foreground">No devices registered yet</td></tr>
+            ) : devices.map((d) => (
+              <tr key={d.id} className="hover:bg-muted/30">
+                <td className="px-3 py-3 font-medium whitespace-nowrap">{d.employee.firstName} {d.employee.lastName}</td>
+                <td className="px-3 py-3 text-muted-foreground whitespace-nowrap">{d.label || '—'}</td>
+                <td className="px-3 py-3">
+                  <span className={`text-xs font-medium rounded-full px-2 py-1 ${d.isActive ? 'bg-green-100 text-green-700' : 'bg-slate-100 text-slate-500'}`}>
+                    {d.isActive ? 'Active' : 'Deactivated'}
+                  </span>
+                </td>
+                <td className="px-3 py-3 text-xs text-muted-foreground whitespace-nowrap">{d.lastSeenAt ? formatDateTime(d.lastSeenAt) : 'Never'}</td>
+                <td className="px-3 py-3 text-xs text-muted-foreground whitespace-nowrap">{formatDate(d.createdAt)}</td>
+                <td className="px-3 py-3 text-right">
+                  {d.isActive && (
+                    <button onClick={() => deactivate(d.id)} className="text-xs font-medium text-red-600 hover:underline flex items-center gap-1 ml-auto">
+                      <Ban className="w-3 h-3" /> Deactivate
+                    </button>
+                  )}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+// ── Unmatched Calls tab: review queue for tracked calls that didn't match
+// any existing lead — link to an existing lead, or spin up a new one.
+function UnmatchedCallsPanel({ setGlobalError }: { setGlobalError: (s: string) => void }) {
+  const [calls, setCalls] = useState<UnmatchedCall[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+  const [linkingCall, setLinkingCall] = useState<UnmatchedCall | null>(null);
+  const [creatingCall, setCreatingCall] = useState<UnmatchedCall | null>(null);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    setError('');
+    try {
+      const res = await api.get('/api/sales/unmatched-calls');
+      setCalls(res.data.data);
+    } catch (err: unknown) {
+      const e = err as { response?: { data?: { message?: string } } };
+      setError(e.response?.data?.message || 'Failed to load unmatched calls');
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => { load(); }, [load]);
+
+  const directionLabel = (d?: UnmatchedCall['direction']) =>
+    d === 'INBOUND' ? 'Inbound' : d === 'OUTBOUND' ? 'Outbound' : d === 'MISSED' ? 'Missed' : '—';
+  const durationLabel = (s?: number | null) => {
+    if (s == null) return '—';
+    const m = Math.floor(s / 60), sec = s % 60;
+    return m > 0 ? `${m}m ${sec}s` : `${sec}s`;
+  };
+
+  return (
+    <div className="space-y-6">
+      {error && <div className="bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg px-4 py-3">{error}</div>}
+
+      <div className="flex items-center justify-between">
+        <p className="text-sm text-muted-foreground">
+          Calls auto-logged from a tracked phone that didn't match any existing lead — link them to a lead or create a new one.
+        </p>
+        <button onClick={load} disabled={loading} className="flex items-center gap-2 px-3 py-2 border rounded-lg text-sm font-medium hover:bg-muted/50 disabled:opacity-50">
+          <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} /> Refresh
+        </button>
+      </div>
+
+      <div className="bg-card border rounded-xl overflow-x-auto">
+        <table className="w-full text-sm">
+          <thead className="bg-muted/50 text-left text-xs uppercase text-muted-foreground">
+            <tr>
+              <th className="px-3 py-3">Phone</th>
+              <th className="px-3 py-3">Direction</th>
+              <th className="px-3 py-3">Duration</th>
+              <th className="px-3 py-3">Called By</th>
+              <th className="px-3 py-3">When</th>
+              <th className="px-3 py-3"></th>
+            </tr>
+          </thead>
+          <tbody className="divide-y">
+            {loading ? (
+              <tr><td colSpan={6} className="px-4 py-8 text-center text-muted-foreground">Loading...</td></tr>
+            ) : calls.length === 0 ? (
+              <tr><td colSpan={6} className="px-4 py-8 text-center text-muted-foreground">Nothing to review — every tracked call matched a lead</td></tr>
+            ) : calls.map((c) => (
+              <tr key={c.id} className="hover:bg-muted/30">
+                <td className="px-3 py-3 font-medium whitespace-nowrap">
+                  <div className="flex items-center gap-1"><Phone className="w-3 h-3 text-muted-foreground" /> {c.rawPhoneNumber || 'Unknown'}</div>
+                </td>
+                <td className="px-3 py-3 text-xs text-muted-foreground whitespace-nowrap">{directionLabel(c.direction)}</td>
+                <td className="px-3 py-3 text-xs text-muted-foreground whitespace-nowrap">{durationLabel(c.durationSeconds)}</td>
+                <td className="px-3 py-3 text-xs text-muted-foreground whitespace-nowrap">{c.calledBy ? `${c.calledBy.firstName} ${c.calledBy.lastName}` : '—'}</td>
+                <td className="px-3 py-3 text-xs text-muted-foreground whitespace-nowrap">{formatDateTime(c.calledAt)}</td>
+                <td className="px-3 py-3 whitespace-nowrap text-right">
+                  <div className="flex items-center justify-end gap-3">
+                    <button onClick={() => setLinkingCall(c)} className="text-xs font-medium text-blue-600 hover:underline flex items-center gap-1">
+                      <Link2 className="w-3 h-3" /> Link
+                    </button>
+                    <button onClick={() => setCreatingCall(c)} className="text-xs font-medium text-green-600 hover:underline flex items-center gap-1">
+                      <UserPlus className="w-3 h-3" /> New Lead
+                    </button>
+                  </div>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      {linkingCall && (
+        <LinkCallModal
+          call={linkingCall}
+          onClose={() => setLinkingCall(null)}
+          onLinked={() => { setLinkingCall(null); load(); }}
+          setError={setGlobalError}
+        />
+      )}
+
+      {creatingCall && (
+        <CreateLeadFromCallModal
+          call={creatingCall}
+          onClose={() => setCreatingCall(null)}
+          onCreated={() => { setCreatingCall(null); load(); }}
+          setError={setGlobalError}
+        />
+      )}
+    </div>
+  );
+}
+
+function LinkCallModal({ call, onClose, onLinked, setError }: {
+  call: UnmatchedCall; onClose: () => void; onLinked: () => void; setError: (s: string) => void;
+}) {
+  const [search, setSearch] = useState('');
+  const [results, setResults] = useState<{ id: string; name: string; phone: string }[]>([]);
+  const [searching, setSearching] = useState(false);
+  const [linking, setLinking] = useState(false);
+
+  // Debounced live search — same /api/sales/leads endpoint the Leads tab
+  // uses, just capped to a handful of results for a picker instead of a page.
+  useEffect(() => {
+    if (!search.trim()) { setResults([]); return; }
+    const t = setTimeout(async () => {
+      setSearching(true);
+      try {
+        const res = await api.get('/api/sales/leads', { params: { search: search.trim(), limit: '10' } });
+        setResults(res.data.data);
+      } catch {
+        setResults([]);
+      } finally {
+        setSearching(false);
+      }
+    }, 300);
+    return () => clearTimeout(t);
+  }, [search]);
+
+  const link = async (leadId: string) => {
+    setLinking(true);
+    setError('');
+    try {
+      await api.post(`/api/sales/unmatched-calls/${call.id}/link`, { leadId });
+      onLinked();
+    } catch (err: unknown) {
+      const e = err as { response?: { data?: { message?: string } } };
+      setError(e.response?.data?.message || 'Failed to link call');
+    } finally {
+      setLinking(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
+      <div className="bg-white rounded-xl w-full max-w-md p-6 space-y-4">
+        <div className="flex items-center justify-between">
+          <h2 className="font-semibold text-lg">Link call to a lead</h2>
+          <button onClick={onClose}><X className="w-4 h-4" /></button>
+        </div>
+        <p className="text-xs text-muted-foreground">
+          Call from {call.rawPhoneNumber || 'unknown number'} — search by name or phone to find the right lead.
+        </p>
+        <input
+          autoFocus
+          className="w-full px-3 py-2 border rounded-lg text-sm"
+          placeholder="Search leads..."
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+        />
+        <div className="max-h-56 overflow-y-auto divide-y border rounded-lg">
+          {searching ? (
+            <p className="text-sm text-muted-foreground px-3 py-3">Searching...</p>
+          ) : results.length === 0 ? (
+            <p className="text-sm text-muted-foreground px-3 py-3">{search.trim() ? 'No matching leads' : 'Start typing to search'}</p>
+          ) : results.map((l) => (
+            <button
+              key={l.id}
+              disabled={linking}
+              onClick={() => link(l.id)}
+              className="w-full text-left px-3 py-2 text-sm hover:bg-muted/50 disabled:opacity-50 flex items-center justify-between"
+            >
+              <span>{l.name}</span>
+              <span className="text-xs text-muted-foreground">{l.phone}</span>
+            </button>
+          ))}
+        </div>
+        <div className="flex justify-end">
+          <button onClick={onClose} className="px-4 py-2 text-sm rounded-lg border">Cancel</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function CreateLeadFromCallModal({ call, onClose, onCreated, setError }: {
+  call: UnmatchedCall; onClose: () => void; onCreated: () => void; setError: (s: string) => void;
+}) {
+  const [name, setName] = useState('');
+  const [saving, setSaving] = useState(false);
+
+  const submit = async () => {
+    setSaving(true);
+    setError('');
+    try {
+      await api.post(`/api/sales/unmatched-calls/${call.id}/create-lead`, { name: name.trim() || undefined });
+      onCreated();
+    } catch (err: unknown) {
+      const e = err as { response?: { data?: { message?: string } } };
+      setError(e.response?.data?.message || 'Failed to create lead');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
+      <div className="bg-white rounded-xl w-full max-w-sm p-6 space-y-4">
+        <div className="flex items-center justify-between">
+          <h2 className="font-semibold text-lg">New lead from this call</h2>
+          <button onClick={onClose}><X className="w-4 h-4" /></button>
+        </div>
+        <p className="text-xs text-muted-foreground">
+          Phone {call.rawPhoneNumber || 'unknown'} will be used as the lead's number, assigned to whoever's phone took the call.
+        </p>
+        <input
+          autoFocus
+          className="w-full px-3 py-2 border rounded-lg text-sm"
+          placeholder="Name (optional)"
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+        />
+        <div className="flex justify-end gap-2">
+          <button onClick={onClose} className="px-4 py-2 text-sm rounded-lg border">Cancel</button>
+          <button onClick={submit} disabled={saving} className="px-4 py-2 text-sm rounded-lg bg-blue-600 text-white disabled:opacity-50">
+            {saving ? 'Creating...' : 'Create Lead'}
+          </button>
+        </div>
       </div>
     </div>
   );
