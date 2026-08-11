@@ -8,7 +8,7 @@ import {
   Lock, Plus, X, Phone, Mail, Calendar, Users, TrendingUp, CheckCircle2,
   PhoneCall, Video, MapPin, RefreshCw, AlertTriangle, Settings, Trash2, Activity,
   ChevronLeft, ChevronRight, Upload, Download, Percent,
-  Smartphone, PhoneIncoming, Link2, UserPlus, Copy, Ban, Check,
+  Smartphone, PhoneIncoming, Link2, UserPlus, Copy, Ban, Check, History,
 } from 'lucide-react';
 
 const PAGE_SIZE = 100;
@@ -140,6 +140,19 @@ interface UnmatchedCall {
   calledBy?: EmployeeLite | null;
 }
 
+// Global call log — every call (manual or auto-tracked), across all leads.
+interface CallLogRow {
+  id: string;
+  rawPhoneNumber?: string | null;
+  direction?: 'INBOUND' | 'OUTBOUND' | 'MISSED' | null;
+  durationSeconds?: number | null;
+  source: 'MANUAL' | 'AUTO';
+  notes?: string | null;
+  calledAt: string;
+  calledBy?: EmployeeLite | null;
+  lead?: { id: string; name: string; phone: string } | null;
+}
+
 interface LeadQualityRow {
   campaignId: string;
   campaignName: string;
@@ -247,8 +260,8 @@ function pctLabel(pct: number | null): string {
 }
 
 // ── Main page ────────────────────────────────────────────────────────────
-type Tab = 'leads' | 'pulse' | 'leadQuality' | 'demoBooked' | 'demoRescheduled' | 'demoConducted' | 'devices' | 'unmatchedCalls';
-const VALID_TABS: Tab[] = ['leads', 'pulse', 'leadQuality', 'demoBooked', 'demoRescheduled', 'demoConducted', 'devices', 'unmatchedCalls'];
+type Tab = 'leads' | 'pulse' | 'leadQuality' | 'demoBooked' | 'demoRescheduled' | 'demoConducted' | 'devices' | 'unmatchedCalls' | 'callLog';
+const VALID_TABS: Tab[] = ['leads', 'pulse', 'leadQuality', 'demoBooked', 'demoRescheduled', 'demoConducted', 'devices', 'unmatchedCalls', 'callLog'];
 // Sales Pulse / Lead Quality are aggregate, cross-rep views — admin only.
 // BDAs get Demo Booked/Rescheduled/Conducted instead, scoped to their own leads.
 // Devices (issuing call-tracking tokens) is admin-only too. Unmatched Calls
@@ -434,6 +447,7 @@ export default function SalesPage() {
         {(isAdmin
           ? [
               { id: 'leads' as Tab, label: 'Leads', icon: Users },
+              { id: 'callLog' as Tab, label: 'Call Log', icon: History },
               { id: 'pulse' as Tab, label: 'Sales Pulse', icon: Activity },
               { id: 'leadQuality' as Tab, label: 'Lead Quality', icon: Percent },
               { id: 'unmatchedCalls' as Tab, label: 'Unmatched Calls', icon: PhoneIncoming },
@@ -441,6 +455,7 @@ export default function SalesPage() {
             ]
           : [
               { id: 'leads' as Tab, label: 'Leads', icon: Users },
+              { id: 'callLog' as Tab, label: 'Call Log', icon: History },
               { id: 'demoBooked' as Tab, label: 'Demo Booked', icon: Calendar },
               { id: 'demoRescheduled' as Tab, label: 'Demo Rescheduled', icon: RefreshCw },
               { id: 'demoConducted' as Tab, label: 'Demo Conducted', icon: CheckCircle2 },
@@ -630,6 +645,8 @@ export default function SalesPage() {
       {tab === 'demoRescheduled' && !isAdmin && <DemoListPanel status="RESCHEDULED" emptyLabel="No demos rescheduled" onOpenLead={openLeadDetail} />}
 
       {tab === 'demoConducted' && !isAdmin && <DemoListPanel status="COMPLETED" emptyLabel="No demos conducted yet" onOpenLead={openLeadDetail} />}
+
+      {tab === 'callLog' && <CallLogPanel onOpenLead={openLeadDetail} />}
 
       {tab === 'devices' && isAdmin && <DevicesPanel employees={employees} />}
 
@@ -2064,6 +2081,168 @@ function LinkCallModal({ call, onClose, onLinked, setError }: {
           <button onClick={onClose} className="px-4 py-2 text-sm rounded-lg border">Cancel</button>
         </div>
       </div>
+    </div>
+  );
+}
+
+// ── Call Log tab: every call across all leads, browsable by day or by
+// number — like a phone's own call log. Non-admins only ever see their own
+// calls (server-scoped), same as the rest of this page.
+function CallLogPanel({ onOpenLead }: { onOpenLead: (id: string) => void }) {
+  const todayISO = () => new Date().toISOString().slice(0, 10);
+  const [date, setDate] = useState(todayISO());
+  const [phoneSearch, setPhoneSearch] = useState('');
+  const [appliedPhone, setAppliedPhone] = useState('');
+  const [logs, setLogs] = useState<CallLogRow[]>([]);
+  const [meta, setMeta] = useState<ListMeta | null>(null);
+  const [page, setPage] = useState(1);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+
+  // Debounced — typing a number shouldn't fire a request per keystroke, and
+  // once applied it takes over from the date filter entirely (full history
+  // for that number, not just one day).
+  useEffect(() => {
+    const t = setTimeout(() => { setAppliedPhone(phoneSearch.trim()); setPage(1); }, 400);
+    return () => clearTimeout(t);
+  }, [phoneSearch]);
+
+  useEffect(() => { setPage(1); }, [date]);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    setError('');
+    try {
+      const params: Record<string, string> = { page: String(page), limit: '50' };
+      if (appliedPhone) params.phone = appliedPhone;
+      else params.date = date;
+      const res = await api.get('/api/sales/call-log', { params });
+      setLogs(res.data.data);
+      setMeta(res.data.meta);
+    } catch (err: unknown) {
+      const e = err as { response?: { data?: { message?: string } } };
+      setError(e.response?.data?.message || 'Failed to load call log');
+    } finally {
+      setLoading(false);
+    }
+  }, [page, date, appliedPhone]);
+
+  useEffect(() => { load(); }, [load]);
+
+  const directionLabel = (d?: CallLogRow['direction']) =>
+    d === 'INBOUND' ? 'Inbound' : d === 'OUTBOUND' ? 'Outbound' : d === 'MISSED' ? 'Missed' : '—';
+  const durationLabel = (s?: number | null) => {
+    if (s == null) return '—';
+    const m = Math.floor(s / 60), sec = s % 60;
+    return m > 0 ? `${m}m ${sec}s` : `${sec}s`;
+  };
+
+  return (
+    <div className="space-y-6">
+      {error && <div className="bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg px-4 py-3">{error}</div>}
+
+      <div className="flex flex-wrap items-center gap-3">
+        <label className="text-xs text-muted-foreground flex items-center gap-2">
+          Date:
+          <input
+            type="date"
+            className="px-2 py-1.5 border rounded-lg text-sm"
+            value={date}
+            disabled={!!appliedPhone}
+            onChange={(e) => setDate(e.target.value)}
+          />
+        </label>
+        <input
+          className="px-3 py-2 border rounded-lg text-sm w-64"
+          placeholder="Search a phone number for its full history..."
+          value={phoneSearch}
+          onChange={(e) => setPhoneSearch(e.target.value)}
+        />
+        {appliedPhone && (
+          <button onClick={() => setPhoneSearch('')} className="text-xs text-blue-600 hover:underline">
+            Clear — back to daily log
+          </button>
+        )}
+        <button onClick={load} disabled={loading} className="flex items-center gap-2 px-3 py-2 border rounded-lg text-sm font-medium hover:bg-muted/50 disabled:opacity-50 ml-auto">
+          <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} /> Refresh
+        </button>
+      </div>
+
+      <p className="text-xs text-muted-foreground">
+        {appliedPhone ? `Full call history for ${appliedPhone}` : `Calls on ${formatDate(date)}`} — {meta?.total ?? 0} call{meta?.total === 1 ? '' : 's'}
+      </p>
+
+      <div className="bg-card border rounded-xl overflow-x-auto">
+        <table className="w-full text-sm">
+          <thead className="bg-muted/50 text-left text-xs uppercase text-muted-foreground">
+            <tr>
+              <th className="px-3 py-3">Time</th>
+              <th className="px-3 py-3">Phone</th>
+              <th className="px-3 py-3">Direction</th>
+              <th className="px-3 py-3">Duration</th>
+              <th className="px-3 py-3">Lead</th>
+              <th className="px-3 py-3">Called By</th>
+              <th className="px-3 py-3">Notes</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y">
+            {loading ? (
+              <tr><td colSpan={7} className="px-4 py-8 text-center text-muted-foreground">Loading...</td></tr>
+            ) : logs.length === 0 ? (
+              <tr><td colSpan={7} className="px-4 py-8 text-center text-muted-foreground">No calls found</td></tr>
+            ) : logs.map((c) => {
+              const number = c.rawPhoneNumber || c.lead?.phone;
+              return (
+                <tr key={c.id} className="hover:bg-muted/30">
+                  <td className="px-3 py-3 text-xs text-muted-foreground whitespace-nowrap">{formatDateTime(c.calledAt)}</td>
+                  <td className="px-3 py-3 whitespace-nowrap">
+                    {number ? (
+                      <button
+                        onClick={() => setPhoneSearch(number)}
+                        title="View full history for this number"
+                        className="flex items-center gap-1 text-blue-600 hover:underline text-xs"
+                      >
+                        <Phone className="w-3 h-3" /> {number}
+                      </button>
+                    ) : '—'}
+                  </td>
+                  <td className="px-3 py-3 text-xs text-muted-foreground whitespace-nowrap">
+                    {c.source === 'AUTO' ? directionLabel(c.direction) : 'Manual'}
+                  </td>
+                  <td className="px-3 py-3 text-xs text-muted-foreground whitespace-nowrap">
+                    {c.source === 'AUTO' ? durationLabel(c.durationSeconds) : '—'}
+                  </td>
+                  <td className="px-3 py-3 whitespace-nowrap">
+                    {c.lead ? (
+                      <button onClick={() => onOpenLead(c.lead!.id)} className="text-blue-600 hover:underline text-xs">{c.lead.name}</button>
+                    ) : <span className="text-xs text-muted-foreground">Unmatched</span>}
+                  </td>
+                  <td className="px-3 py-3 text-xs text-muted-foreground whitespace-nowrap">
+                    {c.calledBy ? `${c.calledBy.firstName} ${c.calledBy.lastName}` : '—'}
+                  </td>
+                  <td className="px-3 py-3 text-xs text-muted-foreground max-w-[240px] truncate" title={c.notes || ''}>
+                    {c.notes || '—'}
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+
+      {!loading && meta && meta.total > 0 && (
+        <div className="flex items-center justify-between pt-1 text-sm text-muted-foreground">
+          <span>{meta.total} call{meta.total === 1 ? '' : 's'} · page {meta.page} of {meta.totalPages}</span>
+          <div className="flex items-center gap-2">
+            <button disabled={page <= 1} onClick={() => setPage((p) => Math.max(p - 1, 1))} className="flex items-center gap-1 px-2 py-1.5 border rounded-lg disabled:opacity-40 hover:bg-muted/50">
+              <ChevronLeft className="w-3.5 h-3.5" /> Prev
+            </button>
+            <button disabled={page >= meta.totalPages} onClick={() => setPage((p) => Math.min(p + 1, meta.totalPages))} className="flex items-center gap-1 px-2 py-1.5 border rounded-lg disabled:opacity-40 hover:bg-muted/50">
+              Next <ChevronRight className="w-3.5 h-3.5" />
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
