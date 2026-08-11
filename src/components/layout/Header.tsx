@@ -17,6 +17,9 @@ export function Header() {
   const { unreadCount, items } = useSelector((s: RootState) => s.notifications);
   const { toggle: toggleSidebar } = useSidebarContext();
 
+  // Initial value just mirrors whatever the inline script in index.html already
+  // applied to <html> before this component mounted (it reads the same
+  // localStorage key), so there's no mismatch/flash between the two.
   const [dark, setDark] = useState(() => document.documentElement.classList.contains('dark'));
   const [showNotif, setShowNotif] = useState(false);
   const [showUser, setShowUser] = useState(false);
@@ -52,6 +55,9 @@ export function Header() {
 
   useEffect(() => {
     document.documentElement.classList.toggle('dark', dark);
+    // Persist so the choice survives a refresh/new tab — previously this was
+    // never saved anywhere, so every reload lost it and fell back to light.
+    localStorage.setItem('theme', dark ? 'dark' : 'light');
   }, [dark]);
 
   // Close dropdowns on outside click

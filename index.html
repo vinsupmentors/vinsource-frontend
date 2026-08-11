@@ -6,6 +6,16 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Vin-Source Portal</title>
     <meta name="description" content="Vinsup Skill Academy — HR & Operations Portal" />
+    <script>
+      // Applies the saved dark-mode preference before React even mounts, so
+      // the page never flashes light-then-dark on refresh. Header.tsx owns
+      // the toggle itself and keeps this same localStorage key in sync.
+      (function () {
+        var saved = localStorage.getItem('theme');
+        var wantsDark = saved ? saved === 'dark' : window.matchMedia('(prefers-color-scheme: dark)').matches;
+        if (wantsDark) document.documentElement.classList.add('dark');
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>
