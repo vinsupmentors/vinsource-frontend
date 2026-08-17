@@ -4145,6 +4145,12 @@ interface StudentReportData {
     }[];
     projects: { id: string; projectTitle: string; moduleTitle: string; status: string; submittedAt: string | null; graded: boolean; grade: number | null; maxGrade: number | null; reviewNote: string | null; fileUrl: string | null; linkUrl: string | null }[];
     moduleFeedback: { id: string; moduleTitle: string; rating: number | null; comments: string | null; trainerName: string | null; updatedAt: string }[];
+    // Trainer's holistic per-course assessment (certificate eligibility, placement
+    // readiness, JRP->IOP recommendation) — distinct from per-module moduleFeedback above.
+    trainerFeedback: {
+      id: string; performanceRating: number | null; placementReadinessNote: string | null;
+      jrpToIopRecommended: boolean | null; certificateEligible: boolean; trainerName: string | null; updatedAt: string;
+    } | null;
   }[];
   placement: {
     movedToPlacementAt: string | null;
@@ -4393,8 +4399,35 @@ function StudentReportPanel({ setError }: { setError: (s: string) => void }) {
                       </div>
                     )}
                   </div>
+                  {sc.trainerFeedback && (
+                    <div>
+                      <p className="text-xs font-medium text-muted-foreground mb-1">Trainer Assessment &amp; Eligibility</p>
+                      <div className="text-xs border rounded-lg px-2 py-1.5 bg-white">
+                        <div className="flex items-center justify-between gap-2 flex-wrap">
+                          <span className="text-muted-foreground">{sc.trainerFeedback.trainerName || 'Trainer'}</span>
+                          <div className="flex items-center gap-1.5 flex-wrap">
+                            {sc.trainerFeedback.performanceRating != null && (
+                              <span className="px-2 py-0.5 rounded-full bg-slate-100 text-slate-700">Rating: {sc.trainerFeedback.performanceRating}/5</span>
+                            )}
+                            {sc.trainerFeedback.jrpToIopRecommended != null && (
+                              <span className="px-2 py-0.5 rounded-full bg-blue-50 text-blue-700">
+                                JRP→IOP: {sc.trainerFeedback.jrpToIopRecommended ? 'Recommended' : 'Not recommended'}
+                              </span>
+                            )}
+                            <span className={`px-2 py-0.5 rounded-full flex items-center gap-1 ${sc.trainerFeedback.certificateEligible ? 'bg-green-50 text-green-700' : 'bg-red-50 text-red-700'}`}>
+                              {sc.trainerFeedback.certificateEligible ? <CheckCircle2 className="w-3 h-3" /> : <XCircle className="w-3 h-3" />}
+                              {sc.trainerFeedback.certificateEligible ? 'Certificate eligible' : 'Not certificate eligible'}
+                            </span>
+                          </div>
+                        </div>
+                        {sc.trainerFeedback.placementReadinessNote && (
+                          <p className="text-muted-foreground mt-1">{sc.trainerFeedback.placementReadinessNote}</p>
+                        )}
+                      </div>
+                    </div>
+                  )}
                   <div>
-                    <p className="text-xs font-medium text-muted-foreground mb-1">Trainer feedback</p>
+                    <p className="text-xs font-medium text-muted-foreground mb-1">Module Feedback</p>
                     {sc.moduleFeedback.length === 0 ? (
                       <p className="text-xs text-muted-foreground">No feedback given yet.</p>
                     ) : (
