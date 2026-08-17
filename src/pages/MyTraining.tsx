@@ -434,7 +434,8 @@ function MarksTab({ schedule }: { schedule: ScheduleAssignment['schedule'] }) {
   );
 }
 
-interface FeedbackStudent { id: string; studentCode: string; firstName: string; lastName: string; }
+type FeedbackStudentStatus = 'ENROLLED' | 'ONBOARDED' | 'ACTIVE' | 'INACTIVE' | 'COMPLETED' | 'IN_PLACEMENT' | 'PLACED' | 'BATCH_TRANSFER';
+interface FeedbackStudent { id: string; studentCode: string; firstName: string; lastName: string; status?: FeedbackStudentStatus; }
 
 type FeedbackSubTab = 'internal' | 'module';
 
@@ -582,11 +583,18 @@ function ModuleFeedbackPanel({ schedule }: { schedule: ScheduleAssignment['sched
   );
 }
 
+const STUDENT_STATUS_LABEL: Record<FeedbackStudentStatus, string> = {
+  ENROLLED: 'Enrolled', ONBOARDED: 'Onboarded', ACTIVE: 'Active', INACTIVE: 'Inactive',
+  COMPLETED: 'Completed', IN_PLACEMENT: 'In Placement Pool', PLACED: 'Placed', BATCH_TRANSFER: 'Batch Transfer',
+};
+
 function InternalFeedbackPanel({ schedule }: { schedule: ScheduleAssignment['schedule'] }) {
   const [students, setStudents] = useState<FeedbackStudent[]>([]);
   const [feedbackMap, setFeedbackMap] = useState<Record<string, { performanceRating?: number; placementReadinessNote?: string; jrpToIopRecommended?: boolean; certificateEligible?: boolean }>>({});
   const [loading, setLoading] = useState(true);
   const [savingId, setSavingId] = useState<string | null>(null);
+  const [pushingId, setPushingId] = useState<string | null>(null);
+  const { toast } = useToast();
 
   useEffect(() => {
     setLoading(true);
@@ -613,8 +621,27 @@ function InternalFeedbackPanel({ schedule }: { schedule: ScheduleAssignment['sch
     try {
       const fb = feedbackMap[studentId] || {};
       await api.post('/api/trainer-portal/feedback', { studentId, courseId: schedule.course.id, ...fb });
+      toast({ title: 'Feedback saved', variant: 'success' });
+    } catch (e: unknown) {
+      const err = e as { response?: { data?: { message?: string } } };
+      toast({ title: 'Could not save feedback', description: err.response?.data?.message || 'Please try again.', variant: 'error' });
     } finally {
       setSavingId(null);
+    }
+  };
+
+  const pushToPlacement = async (studentId: string) => {
+    if (!window.confirm('Transfer this student to the Placement Pool? This starts their placement SLA clock.')) return;
+    setPushingId(studentId);
+    try {
+      const res = await api.post(`/api/trainer-portal/students/${studentId}/push-to-placement`, { courseId: schedule.course.id });
+      setStudents((rows) => rows.map((r) => (r.id === studentId ? { ...r, status: res.data.data.status } : r)));
+      toast({ title: 'Moved to Placement Pool', description: 'This will now show in Production and in the Placements menu.', variant: 'success' });
+    } catch (e: unknown) {
+      const err = e as { response?: { data?: { message?: string } } };
+      toast({ title: 'Could not transfer to Placement Pool', description: err.response?.data?.message || 'Please try again.', variant: 'error' });
+    } finally {
+      setPushingId(null);
     }
   };
 
@@ -627,9 +654,18 @@ function InternalFeedbackPanel({ schedule }: { schedule: ScheduleAssignment['sch
       </p>
       {students.map((s) => {
         const fb = feedbackMap[s.id] || {};
+        const alreadyInPool = s.status === 'IN_PLACEMENT' || s.status === 'PLACED';
+        const locked = s.status === 'PLACED' || s.status === 'BATCH_TRANSFER';
         return (
           <div key={s.id} className="bg-card rounded-xl border p-4 space-y-3">
-            <p className="text-sm font-semibold">{s.firstName} {s.lastName} <span className="text-xs text-muted-foreground font-normal">({s.studentCode})</span></p>
+            <div className="flex items-center justify-between flex-wrap gap-2">
+              <p className="text-sm font-semibold">{s.firstName} {s.lastName} <span className="text-xs text-muted-foreground font-normal">({s.studentCode})</span></p>
+              {s.status && (
+                <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${alreadyInPool ? 'bg-indigo-100 text-indigo-700' : 'bg-muted text-muted-foreground'}`}>
+                  {STUDENT_STATUS_LABEL[s.status]}
+                </span>
+              )}
+            </div>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div>
                 <label className="block text-xs font-medium mb-1 text-muted-foreground">Performance rating (1–5)</label>
@@ -644,9 +680,24 @@ function InternalFeedbackPanel({ schedule }: { schedule: ScheduleAssignment['sch
               <label className="block text-xs font-medium mb-1 text-muted-foreground">Placement-readiness note</label>
               <textarea rows={2} value={fb.placementReadinessNote ?? ''} onChange={(e) => update(s.id, 'placementReadinessNote', e.target.value)} className="w-full px-3 py-2 rounded-lg border bg-background text-sm" />
             </div>
-            <button onClick={() => save(s.id)} disabled={savingId === s.id} className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-blue-600 text-white text-xs font-medium hover:bg-blue-700 disabled:opacity-60">
-              {savingId === s.id ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Save className="w-3.5 h-3.5" />} Save feedback
-            </button>
+            <div className="flex items-center gap-2 flex-wrap">
+              <button onClick={() => save(s.id)} disabled={savingId === s.id} className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-blue-600 text-white text-xs font-medium hover:bg-blue-700 disabled:opacity-60">
+                {savingId === s.id ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Save className="w-3.5 h-3.5" />} Save feedback
+              </button>
+              {!alreadyInPool && !locked && (
+                <button
+                  onClick={() => pushToPlacement(s.id)}
+                  disabled={pushingId === s.id || !fb.certificateEligible}
+                  title={fb.certificateEligible ? 'Send this student to the Placement Pool' : 'Save feedback with "Certificate eligible" checked first'}
+                  className="flex items-center gap-2 px-3 py-1.5 rounded-lg border border-indigo-200 bg-indigo-50 text-indigo-700 text-xs font-medium hover:bg-indigo-100 disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  {pushingId === s.id ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Rocket className="w-3.5 h-3.5" />} Transfer to Placement Pool
+                </button>
+              )}
+              {alreadyInPool && (
+                <span className="text-xs text-muted-foreground flex items-center gap-1"><CheckCircle2 className="w-3.5 h-3.5 text-indigo-600" /> Already in Placement Pool</span>
+              )}
+            </div>
           </div>
         );
       })}
