@@ -298,53 +298,91 @@ export default function BatchCertificatesPage() {
     } finally { setGenerating(false); }
   };
 
-  // ── PDF download: render each cert off-screen full-size, capture, save ──
+  // ── PDF export: render each cert off-screen full-size, capture, hand back
+  // a Blob. Single downloads save that Blob directly; "Download All" instead
+  // collects every Blob into one ZIP so the user gets one file, not N popups.
   const captureRef = useRef<HTMLDivElement>(null);
   const [captureRow, setCaptureRow] = useState<CertRow | null>(null);
-  const resolveCaptureRef = useRef<(() => void) | null>(null);
+  const resolveCaptureRef = useRef<((blob: Blob | null) => void) | null>(null);
+
+  const certFileName = (row: CertRow) => {
+    const safeName = row.studentName.replace(/[^a-z0-9]+/gi, '_');
+    const safeCert = row.certNo.replace(/[^a-z0-9]+/gi, '_');
+    return `${safeName}_${safeCert}.pdf`;
+  };
 
   useEffect(() => {
     if (!captureRow) return;
     const t = setTimeout(async () => {
+      let blob: Blob | null = null;
       try {
         const node = captureRef.current;
         if (node) {
           const canvas = await html2canvas(node, { scale: 2, useCORS: true, backgroundColor: '#ffffff' });
           const pdf = new jsPDF({ orientation: 'portrait', unit: 'px', format: [794, 1123] });
           pdf.addImage(canvas.toDataURL('image/jpeg', 0.95), 'JPEG', 0, 0, 794, 1123);
-          const safeName = captureRow.studentName.replace(/[^a-z0-9]+/gi, '_');
-          const safeCert = captureRow.certNo.replace(/[^a-z0-9]+/gi, '_');
-          pdf.save(`${safeName}_${safeCert}.pdf`);
+          blob = pdf.output('blob');
         }
       } catch (e) {
         console.error('Certificate PDF export failed', e);
       } finally {
         setCaptureRow(null);
-        resolveCaptureRef.current?.();
+        resolveCaptureRef.current?.(blob);
         resolveCaptureRef.current = null;
       }
     }, 300); // let the photo <img> finish loading before capture
     return () => clearTimeout(t);
   }, [captureRow]);
 
-  const downloadOne = (row: CertRow) => new Promise<void>((resolve) => {
+  // Renders one certificate and resolves with its PDF as a Blob (null on failure).
+  const renderPdfBlob = (row: CertRow) => new Promise<Blob | null>((resolve) => {
     resolveCaptureRef.current = resolve;
     setCaptureRow(row);
   });
 
+  const saveBlob = (blob: Blob, filename: string) => {
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  };
+
   const [bulkDownloading, setBulkDownloading] = useState(false);
   const [bulkProgress, setBulkProgress] = useState(0);
 
+  // Single-card "PDF" button — one file, straight to the browser's downloads.
+  const downloadOne = async (row: CertRow) => {
+    const blob = await renderPdfBlob(row);
+    if (blob) saveBlob(blob, certFileName(row));
+  };
+
+  // "Download All" — one ZIP containing every student's individual PDF.
   const downloadAll = async () => {
     if (!certs.length) return;
     setBulkDownloading(true);
     setBulkProgress(0);
-    for (let i = 0; i < certs.length; i++) {
-      await downloadOne(certs[i]);
-      setBulkProgress(i + 1);
-      await new Promise((r) => setTimeout(r, 350)); // avoid the browser's multi-download popup blocker
+    try {
+      const { default: JSZip } = await import('jszip');
+      const zip = new JSZip();
+      for (let i = 0; i < certs.length; i++) {
+        const row = certs[i];
+        const blob = await renderPdfBlob(row);
+        if (blob) zip.file(certFileName(row), blob);
+        setBulkProgress(i + 1);
+      }
+      const zipBlob = await zip.generateAsync({ type: 'blob' });
+      const batchCode = batches.find((b) => b.id === batchId)?.code || 'Batch';
+      saveBlob(zipBlob, `${batchCode}_Certificates.zip`.replace(/\s+/g, '_'));
+    } catch (e) {
+      console.error('Bulk certificate ZIP export failed', e);
+      setError('Failed to build the ZIP file. Please try again.');
+    } finally {
+      setBulkDownloading(false);
     }
-    setBulkDownloading(false);
   };
 
   if (loaded && !canView) {
