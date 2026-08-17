@@ -79,6 +79,12 @@ export function PhotoCropper({ src, onApply, onCancel }: { src: string; onApply:
     canvas.width = OUT; canvas.height = OUT;
     const ctx = canvas.getContext('2d')!;
     const img = new Image();
+    // Needed when `src` is an already-uploaded server URL (e.g. re-cropping an
+    // existing certificate photo) rather than a local blob/data URL — without
+    // this the canvas gets "tainted" by the cross-origin pixel data and
+    // toDataURL() throws. No effect on local data: URLs, which is the only
+    // source type the single-certificate generator ever passes in.
+    img.crossOrigin = 'anonymous';
     img.onload = () => {
       const ratio = OUT / SIZE;
       ctx.fillStyle = '#fff';
@@ -93,6 +99,13 @@ export function PhotoCropper({ src, onApply, onCancel }: { src: string; onApply:
       ctx.drawImage(img, -natural.w / 2, -natural.h / 2);
       ctx.restore();
       onApply(canvas.toDataURL('image/jpeg', 0.92));
+    };
+    img.onerror = () => {
+      // Backend sends CORS headers globally so this shouldn't happen in
+      // practice — but rather than hang forever on a failed cross-origin
+      // load, surface it so the user isn't left staring at a stuck dialog.
+      console.error('Could not load image for cropping (CORS?)', src);
+      alert('Could not load this photo for editing. Please try again.');
     };
     img.src = src;
   };

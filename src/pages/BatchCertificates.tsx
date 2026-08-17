@@ -5,7 +5,7 @@ import html2canvas from 'html2canvas';
 import jsPDF from 'jspdf';
 import {
   Award, Loader2, RefreshCw, Download, Pencil, Trash2, X, Check,
-  ImagePlus, Sparkles, ChevronDown, AlertTriangle,
+  ImagePlus, Sparkles, ChevronDown, AlertTriangle, Move,
 } from 'lucide-react';
 import { PhotoCropper, CourseCompletionTemplate } from './CertificateGenerator';
 
@@ -187,12 +187,24 @@ function EditorModal({
 
             <div>
               <label className="text-xs text-muted-foreground mb-1 block">Photo</label>
-              <label className={`flex items-center justify-center gap-2 px-3 py-2 border rounded-lg text-xs cursor-pointer hover:bg-accent ${!canEdit ? 'opacity-60 pointer-events-none' : ''}`}>
-                {uploadingPhoto ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <ImagePlus className="w-3.5 h-3.5" />}
-                Replace photo &amp; reposition
-                <input type="file" accept="image/*" className="hidden" onChange={pickPhoto} disabled={!canEdit} />
-              </label>
-              <p className="text-[10px] text-muted-foreground mt-1">Only this student's certificate is affected — their profile photo is untouched.</p>
+              <div className="flex gap-2">
+                {photoUrl && (
+                  <button
+                    type="button"
+                    onClick={() => setCropSrc(photoUrl)}
+                    disabled={!canEdit || uploadingPhoto}
+                    className="flex-1 flex items-center justify-center gap-1.5 px-3 py-2 border rounded-lg text-xs hover:bg-accent disabled:opacity-60"
+                  >
+                    <Move className="w-3.5 h-3.5" /> Reposition / zoom
+                  </button>
+                )}
+                <label className={`flex-1 flex items-center justify-center gap-1.5 px-3 py-2 border rounded-lg text-xs cursor-pointer hover:bg-accent ${!canEdit ? 'opacity-60 pointer-events-none' : ''}`}>
+                  {uploadingPhoto ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <ImagePlus className="w-3.5 h-3.5" />}
+                  Replace photo
+                  <input type="file" accept="image/*" className="hidden" onChange={pickPhoto} disabled={!canEdit} />
+                </label>
+              </div>
+              <p className="text-[10px] text-muted-foreground mt-1">"Reposition / zoom" re-crops the existing photo. Only this student's certificate is affected — their profile photo is untouched.</p>
             </div>
 
             {error && <p className="text-xs text-red-600">{error}</p>}
