@@ -159,6 +159,20 @@ function flattenModules(courses: AcademyCourse[]): (ModuleLite & { courseName: s
   return courses.flatMap((c) => c.modules.map((m) => ({ ...m, courseId: c.id, courseName: c.name })));
 }
 
+// Buckets a flat list (projects / feedback forms / online tests — anything
+// with a moduleId) into one section per module of the given (course-scoped)
+// module list, in module order. Every module is included even with zero
+// items, so gaps ("this module has no project yet") are visible rather than
+// the module silently disappearing from the list.
+function groupByModule<T extends { moduleId: string }>(
+  items: T[],
+  modules: (ModuleLite & { courseName: string })[],
+): { module: ModuleLite & { courseName: string }; items: T[] }[] {
+  return [...modules]
+    .sort((a, b) => a.order - b.order)
+    .map((m) => ({ module: m, items: items.filter((i) => i.moduleId === m.id) }));
+}
+
 function errMsg(err: unknown, fallback: string) {
   const e = err as { response?: { data?: { message?: string } } };
   return e.response?.data?.message || fallback;
@@ -2568,8 +2582,8 @@ type ContentSubTab = 'projects' | 'feedback' | 'tests';
 function ContentTab({ courses, canEdit, setError }: {
   courses: AcademyCourse[]; canEdit: boolean; setError: (s: string) => void;
 }) {
+  const [selectedCourseId, setSelectedCourseId] = useState<string | null>(null);
   const [subTab, setSubTab] = useState<ContentSubTab>('projects');
-  const modules = flattenModules(courses);
 
   const SUB_TABS: { id: ContentSubTab; label: string; icon: React.ComponentType<{ className?: string }> }[] = [
     { id: 'projects', label: 'Projects', icon: FileText },
@@ -2577,8 +2591,47 @@ function ContentTab({ courses, canEdit, setError }: {
     { id: 'tests', label: 'Online Tests', icon: ListChecks },
   ];
 
+  if (!selectedCourseId) {
+    return (
+      <div className="space-y-4">
+        <p className="text-sm text-muted-foreground">Select a course to manage its projects, feedback forms, and online tests.</p>
+        {courses.length === 0 ? (
+          <p className="text-sm text-muted-foreground py-8 text-center">Add a course first.</p>
+        ) : (
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+            {courses.map((c) => (
+              <button
+                key={c.id}
+                onClick={() => setSelectedCourseId(c.id)}
+                className="text-left border rounded-xl p-4 bg-card hover:border-blue-400 hover:shadow-sm transition"
+              >
+                <div className="flex items-center gap-2">
+                  <BookOpen className="w-4 h-4 text-blue-600 shrink-0" />
+                  <p className="font-semibold text-sm">{c.name}</p>
+                </div>
+                <p className="text-xs text-muted-foreground mt-1.5">
+                  {c.modules.length} module{c.modules.length === 1 ? '' : 's'}
+                  {c._count?.schedules ? ` · ${c._count.schedules} schedule${c._count.schedules === 1 ? '' : 's'}` : ''}
+                </p>
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  const course = courses.find((c) => c.id === selectedCourseId);
+  const modules = course ? flattenModules([course]) : [];
+
   return (
     <div className="space-y-4">
+      <div>
+        <button onClick={() => setSelectedCourseId(null)} className="text-xs text-blue-600 hover:underline flex items-center gap-1">
+          <ChevronLeft className="w-3.5 h-3.5" /> All courses
+        </button>
+        <h3 className="font-semibold text-lg mt-1">{course?.name ?? 'Course'}</h3>
+      </div>
       <div className="flex items-center gap-2 border-b">
         {SUB_TABS.map((t) => {
           const Icon = t.icon;
@@ -2596,7 +2649,7 @@ function ContentTab({ courses, canEdit, setError }: {
         })}
       </div>
       {modules.length === 0 ? (
-        <p className="text-sm text-muted-foreground py-8 text-center">Add a course with modules first.</p>
+        <p className="text-sm text-muted-foreground py-8 text-center">Add modules to this course first.</p>
       ) : subTab === 'projects' ? (
         <ProjectsPanel modules={modules} canEdit={canEdit} setError={setError} />
       ) : subTab === 'feedback' ? (
@@ -2634,21 +2687,32 @@ function ProjectsPanel({ modules, canEdit, setError }: {
       </div>
       {loading ? (
         <div className="text-center text-muted-foreground py-8">Loading...</div>
-      ) : projects.length === 0 ? (
-        <div className="text-center text-muted-foreground py-8">No projects yet.</div>
       ) : (
-        <div className="border rounded-lg divide-y">
-          {projects.map((p) => (
-            <div key={p.id} className="flex items-center justify-between px-4 py-3">
-              <div>
-                <p className="font-medium text-sm">{p.title}</p>
-                <p className="text-xs text-muted-foreground">
-                  {p.module.title} · {p._count?.releases ?? 0} release{(p._count?.releases ?? 0) === 1 ? '' : 's'}
-                </p>
+        <div className="space-y-4">
+          {groupByModule(projects, modules).map(({ module, items }) => (
+            <div key={module.id} className="border rounded-lg overflow-hidden">
+              <div className="px-4 py-2 bg-muted/30 border-b">
+                <p className="text-sm font-semibold">{module.title}</p>
               </div>
-              <a href={p.resourceUrl} target="_blank" rel="noreferrer" className="text-xs text-blue-600 hover:underline flex items-center gap-1">
-                <Download className="w-3 h-3" /> Resource
-              </a>
+              {items.length === 0 ? (
+                <p className="text-xs text-muted-foreground px-4 py-3">No projects for this module yet.</p>
+              ) : (
+                <div className="divide-y">
+                  {items.map((p) => (
+                    <div key={p.id} className="flex items-center justify-between px-4 py-3">
+                      <div>
+                        <p className="font-medium text-sm">{p.title}</p>
+                        <p className="text-xs text-muted-foreground">
+                          {p._count?.releases ?? 0} release{(p._count?.releases ?? 0) === 1 ? '' : 's'}
+                        </p>
+                      </div>
+                      <a href={p.resourceUrl} target="_blank" rel="noreferrer" className="text-xs text-blue-600 hover:underline flex items-center gap-1">
+                        <Download className="w-3 h-3" /> Resource
+                      </a>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
           ))}
         </div>
@@ -2757,26 +2821,37 @@ function FeedbackFormsPanel({ modules, canEdit, setError }: {
         <FeedbackResponsesPanel />
       ) : loading ? (
         <div className="text-center text-muted-foreground py-8">Loading...</div>
-      ) : forms.length === 0 ? (
-        <div className="text-center text-muted-foreground py-8">No feedback forms yet.</div>
       ) : (
-        <div className="border rounded-lg divide-y">
-          {forms.map((f) => (
-            <div key={f.id} className="flex items-center justify-between px-4 py-3">
-              <div>
-                <p className="font-medium text-sm">{f.title}</p>
-                <p className="text-xs text-muted-foreground">
-                  {f.module.title} · {f.questions.length} question{f.questions.length === 1 ? '' : 's'} · {f._count?.releases ?? 0} release{(f._count?.releases ?? 0) === 1 ? '' : 's'}
-                </p>
+        <div className="space-y-4">
+          {groupByModule(forms, modules).map(({ module, items }) => (
+            <div key={module.id} className="border rounded-lg overflow-hidden">
+              <div className="px-4 py-2 bg-muted/30 border-b">
+                <p className="text-sm font-semibold">{module.title}</p>
               </div>
-              {canEdit && (
-                <div className="flex items-center gap-3">
-                  <button onClick={() => { setEditing(f); setShowBuilder(true); }} className="text-xs text-blue-600 hover:underline flex items-center gap-1">
-                    <Pencil className="w-3 h-3" /> Edit
-                  </button>
-                  <button onClick={() => deleteForm(f)} className="text-xs text-red-600 hover:underline flex items-center gap-1">
-                    <Trash2 className="w-3 h-3" /> Delete
-                  </button>
+              {items.length === 0 ? (
+                <p className="text-xs text-muted-foreground px-4 py-3">No feedback forms for this module yet.</p>
+              ) : (
+                <div className="divide-y">
+                  {items.map((f) => (
+                    <div key={f.id} className="flex items-center justify-between px-4 py-3">
+                      <div>
+                        <p className="font-medium text-sm">{f.title}</p>
+                        <p className="text-xs text-muted-foreground">
+                          {f.questions.length} question{f.questions.length === 1 ? '' : 's'} · {f._count?.releases ?? 0} release{(f._count?.releases ?? 0) === 1 ? '' : 's'}
+                        </p>
+                      </div>
+                      {canEdit && (
+                        <div className="flex items-center gap-3">
+                          <button onClick={() => { setEditing(f); setShowBuilder(true); }} className="text-xs text-blue-600 hover:underline flex items-center gap-1">
+                            <Pencil className="w-3 h-3" /> Edit
+                          </button>
+                          <button onClick={() => deleteForm(f)} className="text-xs text-red-600 hover:underline flex items-center gap-1">
+                            <Trash2 className="w-3 h-3" /> Delete
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  ))}
                 </div>
               )}
             </div>
@@ -3188,20 +3263,31 @@ function OnlineTestsPanel({ modules, canEdit, setError }: {
       </div>
       {loading ? (
         <div className="text-center text-muted-foreground py-8">Loading...</div>
-      ) : tests.length === 0 ? (
-        <div className="text-center text-muted-foreground py-8">No online tests yet.</div>
       ) : (
-        <div className="border rounded-lg divide-y">
-          {tests.map((t) => (
-            <button key={t.id} onClick={() => setDetailId(t.id)} className="w-full flex items-center justify-between px-4 py-3 text-left hover:bg-muted/30">
-              <div>
-                <p className="font-medium text-sm">{t.title}</p>
-                <p className="text-xs text-muted-foreground">
-                  {t.module.title} · {t.durationMinutes} min · {t._count?.questions ?? 0} question{(t._count?.questions ?? 0) === 1 ? '' : 's'} · {t._count?.releases ?? 0} release{(t._count?.releases ?? 0) === 1 ? '' : 's'}
-                </p>
+        <div className="space-y-4">
+          {groupByModule(tests, modules).map(({ module, items }) => (
+            <div key={module.id} className="border rounded-lg overflow-hidden">
+              <div className="px-4 py-2 bg-muted/30 border-b">
+                <p className="text-sm font-semibold">{module.title}</p>
               </div>
-              <ChevronRight className="w-4 h-4 text-muted-foreground" />
-            </button>
+              {items.length === 0 ? (
+                <p className="text-xs text-muted-foreground px-4 py-3">No online tests for this module yet.</p>
+              ) : (
+                <div className="divide-y">
+                  {items.map((t) => (
+                    <button key={t.id} onClick={() => setDetailId(t.id)} className="w-full flex items-center justify-between px-4 py-3 text-left hover:bg-muted/30">
+                      <div>
+                        <p className="font-medium text-sm">{t.title}</p>
+                        <p className="text-xs text-muted-foreground">
+                          {t.durationMinutes} min · {t._count?.questions ?? 0} question{(t._count?.questions ?? 0) === 1 ? '' : 's'} · {t._count?.releases ?? 0} release{(t._count?.releases ?? 0) === 1 ? '' : 's'}
+                        </p>
+                      </div>
+                      <ChevronRight className="w-4 h-4 text-muted-foreground" />
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
           ))}
         </div>
       )}
