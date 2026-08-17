@@ -3,11 +3,12 @@ import { useSearchParams } from 'react-router-dom';
 import api from '@/lib/api';
 import { formatDate, formatDateTime } from '@/lib/utils';
 import { useModuleAccess } from '@/hooks/useModuleAccess';
+import * as XLSX from 'xlsx';
 import {
   Lock, Plus, X, Building2, CalendarClock, GraduationCap, TrendingUp, Users,
   CheckCircle2, XCircle, AlertTriangle, MessageSquare, FileUp, ListChecks,
   Briefcase, BarChart2, Search, User, Trophy, Star, Phone, MapPin,
-  BookOpen, Award, ChevronDown, ChevronRight, ExternalLink, Percent, IndianRupee,
+  BookOpen, Award, ChevronDown, ChevronRight, ExternalLink, Percent, IndianRupee, Download,
 } from 'lucide-react';
 import {
   ResponsiveContainer, BarChart, Bar, AreaChart, Area, XAxis, YAxis,
@@ -142,6 +143,7 @@ export default function PlacementsPage() {
   const [error, setError] = useState('');
   const [showAddDrive, setShowAddDrive] = useState(false);
   const [showAddPartner, setShowAddPartner] = useState(false);
+  const [showBulkPush, setShowBulkPush] = useState(false);
   const [resultsDrive, setResultsDrive] = useState<Drive | null>(null);
   const [saving, setSaving] = useState(false);
 
@@ -375,6 +377,11 @@ export default function PlacementsPage() {
                   <option value="">All Batches</option>
                   {filterOptions.batches.map((b) => <option key={b.id} value={b.id}>{b.code}</option>)}
                 </select>
+                {canEdit && (
+                  <button onClick={() => setShowBulkPush(true)} className="text-xs px-3 py-1.5 border rounded-lg hover:bg-muted/50 flex items-center gap-1.5 font-medium">
+                    <FileUp className="w-3.5 h-3.5" /> Bulk Upload
+                  </button>
+                )}
               </div>
             </div>
             <div className="flex gap-2 items-center flex-wrap">
@@ -760,6 +767,9 @@ export default function PlacementsPage() {
 
       {showAddPartner && (
         <AddPartnerModal saving={saving} setSaving={setSaving} onClose={() => setShowAddPartner(false)} onSaved={() => { setShowAddPartner(false); fetchAll(); }} setError={setError} />
+      )}
+      {showBulkPush && (
+        <BulkPushToPoolModal onClose={() => setShowBulkPush(false)} setError={setError} onSaved={() => fetchPool()} />
       )}
       {showAddDrive && (
         <AddDriveModal partners={partners} saving={saving} setSaving={setSaving} onClose={() => setShowAddDrive(false)} onSaved={() => { setShowAddDrive(false); fetchAll(); }} setError={setError} />
@@ -1217,6 +1227,126 @@ function AddPartnerModal({ saving, setSaving, onClose, onSaved, setError }: {
         <div className="flex justify-end gap-2">
           <button onClick={onClose} className="px-4 py-2 text-sm rounded-lg border">Cancel</button>
           <button onClick={submit} disabled={saving} className="px-4 py-2 text-sm rounded-lg bg-blue-600 text-white disabled:opacity-50">{saving ? 'Saving...' : 'Create'}</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+type BulkPushRow = { studentCode: string; outcome: 'pushed' | 'already_in_pool' | 'skipped' | 'not_found'; studentName?: string; message?: string };
+const BULK_PUSH_OUTCOME_LABEL: Record<BulkPushRow['outcome'], string> = {
+  pushed: 'Moved to Placement Pool', already_in_pool: 'Already in pool', skipped: 'Skipped', not_found: 'Not found',
+};
+const BULK_PUSH_OUTCOME_COLOR: Record<BulkPushRow['outcome'], string> = {
+  pushed: 'bg-green-50 text-green-700', already_in_pool: 'bg-indigo-50 text-indigo-700',
+  skipped: 'bg-amber-50 text-amber-700', not_found: 'bg-red-50 text-red-700',
+};
+
+function BulkPushToPoolModal({ onClose, setError, onSaved }: {
+  onClose: () => void; setError: (s: string) => void; onSaved: () => void;
+}) {
+  const [codes, setCodes] = useState<string[]>([]);
+  const [fileName, setFileName] = useState('');
+  const [uploading, setUploading] = useState(false);
+  const [results, setResults] = useState<BulkPushRow[] | null>(null);
+
+  const downloadTemplate = () => {
+    const ws = XLSX.utils.json_to_sheet([{ studentCode: 'VS70739' }, { studentCode: 'VS70770' }]);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Students');
+    XLSX.writeFile(wb, 'placement_pool_bulk_upload_template.xlsx');
+  };
+
+  const onFile = (file: File) => {
+    setFileName(file.name);
+    setResults(null);
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      try {
+        const data = e.target?.result;
+        const wb = XLSX.read(data, { type: 'binary' });
+        const sheet = wb.Sheets[wb.SheetNames[0]];
+        const json = XLSX.utils.sheet_to_json<Record<string, string>>(sheet, { defval: '' });
+        const parsed = json
+          .map((r) => String(r.studentCode || r.studentcode || r.StudentCode || r['Student Code'] || '').trim())
+          .filter(Boolean);
+        setCodes(parsed);
+      } catch {
+        setError('Could not parse the file. Please use the template format.');
+      }
+    };
+    reader.readAsBinaryString(file);
+  };
+
+  const submit = async () => {
+    if (!codes.length) { setError('Choose a file with a studentCode column first'); return; }
+    setUploading(true);
+    setError('');
+    try {
+      const res = await api.post('/api/placements/pool/bulk-push', { studentCodes: codes });
+      setResults(res.data.data.results);
+      onSaved();
+    } catch (err: unknown) {
+      setError(errMsg(err, 'Bulk push failed'));
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  const pushedCount = results?.filter((r) => r.outcome === 'pushed').length ?? 0;
+
+  return (
+    <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
+      <div className="bg-white rounded-xl w-full max-w-lg p-6 space-y-4">
+        <div className="flex items-center justify-between">
+          <h2 className="font-semibold text-lg">Bulk Upload to Placement Pool</h2>
+          <button onClick={onClose}><X className="w-4 h-4" /></button>
+        </div>
+        <div className="space-y-3 max-h-[65vh] overflow-y-auto pr-1">
+          <p className="text-xs text-muted-foreground">
+            Upload an Excel/CSV file with a single <code>studentCode</code> column (e.g. <code>VS70739</code>).
+            Every matching student's status is moved to <b>In Placement Pool</b> and their placement SLA clock starts
+            (preserved if already set) — the same flip Production &rarr; Students and the trainer's per-student review already do.
+          </p>
+          <button onClick={downloadTemplate} className="text-xs px-3 py-2 border rounded-lg hover:bg-muted/50 flex items-center gap-1">
+            <Download className="w-3 h-3" /> Download template
+          </button>
+          <input
+            type="file"
+            accept=".xlsx,.xls,.csv"
+            onChange={(e) => { const f = e.target.files?.[0]; if (f) onFile(f); }}
+            className="w-full text-sm border rounded-lg px-3 py-2"
+          />
+          {fileName && !results && (
+            <p className="text-xs text-muted-foreground">{fileName} — {codes.length} student code{codes.length === 1 ? '' : 's'} found.</p>
+          )}
+          {results && (
+            <div className="space-y-2">
+              <p className="text-sm font-medium">{pushedCount} moved to the pool, {results.length - pushedCount} skipped/not found</p>
+              <div className="border rounded-lg max-h-56 overflow-y-auto divide-y">
+                {results.map((r, i) => (
+                  <div key={i} className="flex items-center justify-between px-3 py-2 text-xs">
+                    <div>
+                      <span className="font-mono font-medium">{r.studentCode}</span>
+                      {r.studentName && <span className="text-muted-foreground"> — {r.studentName}</span>}
+                      {r.message && <p className="text-muted-foreground">{r.message}</p>}
+                    </div>
+                    <span className={`px-2 py-0.5 rounded-full font-medium whitespace-nowrap ${BULK_PUSH_OUTCOME_COLOR[r.outcome]}`}>
+                      {BULK_PUSH_OUTCOME_LABEL[r.outcome]}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+        <div className="flex justify-end gap-2">
+          <button onClick={onClose} className="px-4 py-2 text-sm rounded-lg border">{results ? 'Close' : 'Cancel'}</button>
+          {!results && (
+            <button onClick={submit} disabled={uploading || !codes.length} className="px-4 py-2 text-sm rounded-lg bg-blue-600 text-white disabled:opacity-50">
+              {uploading ? 'Uploading...' : `Push ${codes.length || ''} student${codes.length === 1 ? '' : 's'}`}
+            </button>
+          )}
         </div>
       </div>
     </div>
