@@ -49,7 +49,7 @@ type DeliveryMode = 'ONLINE' | 'OFFLINE' | 'HYBRID';
 type TrainerAssignment = { id: string; trainerId: string; trainer: EmployeeLite };
 type BatchCourseSchedule = {
   id: string; code?: string | null; batchId: string; courseId: string; timing: BatchTiming; dayPattern: DayPattern;
-  mode: DeliveryMode; startDate: string; endDate?: string | null; capacity?: number | null;
+  mode: DeliveryMode; startDate: string; endDate?: string | null; capacity?: number | null; status: BatchStatus;
   course: { id: string; name: string }; trainers: TrainerAssignment[]; _count?: { enrollments: number };
 };
 type Batch = {
@@ -762,6 +762,11 @@ function BatchesTab({ batches, employees, canEdit, setError, refresh }: {
     catch (err) { setError(errMsg(err, 'Failed to update batch')); }
   };
 
+  const updateScheduleStatus = async (scheduleId: string, status: BatchStatus) => {
+    try { await api.put(`/api/production/schedules/${scheduleId}`, { status }); refresh(); }
+    catch (err) { setError(errMsg(err, 'Failed to update sub-batch status')); }
+  };
+
   const removeTrainer = async (scheduleId: string, trainerId: string) => {
     try { await api.delete(`/api/production/schedules/${scheduleId}/trainers/${trainerId}`); refresh(); }
     catch (err) { setError(errMsg(err, 'Failed to remove trainer')); }
@@ -837,6 +842,17 @@ function BatchesTab({ batches, employees, canEdit, setError, refresh }: {
                         <span>{DAY_PATTERNS.find((d) => d.value === s.dayPattern)?.label}</span>
                         <span>{s.mode}</span>
                         <span>{s._count?.enrollments ?? 0}{s.capacity ? ` / ${s.capacity}` : ''} students</span>
+                        {canEdit ? (
+                          <select
+                            value={s.status}
+                            onChange={(e) => updateScheduleStatus(s.id, e.target.value as BatchStatus)}
+                            className={`text-xs font-medium px-2 py-1 rounded-full border-0 ${BATCH_STATUS_COLOR[s.status]}`}
+                          >
+                            {BATCH_STATUSES.map((st) => <option key={st} value={st}>{st}</option>)}
+                          </select>
+                        ) : (
+                          <span className={`text-xs font-medium px-2 py-1 rounded-full ${BATCH_STATUS_COLOR[s.status]}`}>{s.status}</span>
+                        )}
                         {canEdit && (
                           <button
                             onClick={() => setEditingSchedule(s)}
