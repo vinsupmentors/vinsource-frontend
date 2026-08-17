@@ -4264,7 +4264,7 @@ interface StudentReportData {
     movedToPlacementAt: string | null;
     readiness: { ready: boolean; missing: string[] };
     portfolio: { status: string; publicSlug: string | null } | null;
-    softskillAttendance: { id: string; type: 'SOFTSKILL' | 'APTITUDE'; topic: string; sessionDate: string; present: boolean; score: number | null }[];
+    softskillAttendance: { id: string; type: 'SOFTSKILL' | 'APTITUDE' | 'SK_APT'; topic: string; startDate: string; present: boolean; score: number | null }[];
     driveCandidacies: { id: string; status: string; partnerName: string; role: string; driveDate: string }[];
     interviews: { id: string; companyName: string | null; round: number; scheduledAt: string; outcome: string; rating: number | null; feedback: string | null; feedbackGivenBy: string | null }[];
     results: { id: string; partnerName: string; result: string; package: number | null; designation: string | null; joiningDate: string | null; offerLetterUrl: string | null }[];
@@ -4590,7 +4590,7 @@ function StudentReportPanel({ setError }: { setError: (s: string) => void }) {
                     <div className="flex flex-wrap gap-1.5">
                       {detail.placement.softskillAttendance.map((a) => (
                         <span key={a.id} className={`text-xs rounded-lg px-2 py-1 ${a.present ? 'bg-green-50 text-green-700' : 'bg-red-50 text-red-700'}`}>
-                          {a.topic} ({a.type}) · {new Date(a.sessionDate).toLocaleDateString()} · {a.present ? 'Present' : 'Absent'}{a.score !== null ? ` · ${a.score}` : ''}
+                          {a.topic} ({a.type}) · {new Date(a.startDate).toLocaleDateString()} · {a.present ? 'Present' : 'Absent'}{a.score !== null ? ` · ${a.score}` : ''}
                         </span>
                       ))}
                     </div>

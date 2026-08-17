@@ -18,7 +18,9 @@ import {
 type DriveStatus = 'SCHEDULED' | 'COMPLETED' | 'CANCELLED';
 type ResultStatus = 'PENDING' | 'SELECTED' | 'REJECTED';
 type InterviewOutcome = 'SCHEDULED' | 'SELECTED' | 'REJECTED' | 'NO_SHOW' | 'PENDING';
-type SoftskillType = 'SOFTSKILL' | 'APTITUDE';
+type SoftskillType = 'SOFTSKILL' | 'APTITUDE' | 'SK_APT';
+const SOFTSKILL_TYPE_LABEL: Record<SoftskillType, string> = { SOFTSKILL: 'Softskill', APTITUDE: 'Aptitude', SK_APT: 'Softskill & Aptitude' };
+interface ScheduleOption { id: string; code?: string | null; timing: string; batchCode: string; courseName: string; activeStudentCount: number; }
 
 interface Partner { id: string; name: string; industry?: string | null; _count?: { drives: number }; }
 interface Drive {
@@ -66,7 +68,7 @@ interface DriveCandidate {
 }
 
 interface SoftskillSession {
-  id: string; type: SoftskillType; topic: string; sessionDate: string; notes?: string | null;
+  id: string; type: SoftskillType; topic: string; startDate: string; endDate?: string | null; notes?: string | null;
   trainer?: { id: string; firstName: string; lastName: string } | null;
   _count?: { attendances: number };
 }
@@ -154,7 +156,7 @@ export default function PlacementsPage() {
   const [poolSearch, setPoolSearch] = useState('');
   const [poolCourseId, setPoolCourseId] = useState('');
   const [poolBatchId, setPoolBatchId] = useState('');
-  const [filterOptions, setFilterOptions] = useState<{ courses: { id: string; name: string }[]; batches: { id: string; code: string }[] }>({ courses: [], batches: [] });
+  const [filterOptions, setFilterOptions] = useState<{ courses: { id: string; name: string }[]; batches: { id: string; code: string }[]; schedules: ScheduleOption[] }>({ courses: [], batches: [], schedules: [] });
   const [shortlistStudent, setShortlistStudent] = useState<PoolStudent | null>(null);
   const [interviewStudent, setInterviewStudent] = useState<PoolStudent | null>(null);
   const [offerStudent, setOfferStudent] = useState<PoolStudent | null>(null);
@@ -608,14 +610,16 @@ export default function PlacementsPage() {
                 ) : sessions.map((sess) => (
                   <tr key={sess.id} className="hover:bg-muted/30">
                     <td className="px-4 py-3">
-                      <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${sess.type === 'SOFTSKILL' ? 'bg-purple-100 text-purple-700' : 'bg-teal-100 text-teal-700'}`}>{sess.type}</span>
+                      <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${sess.type === 'SOFTSKILL' ? 'bg-purple-100 text-purple-700' : sess.type === 'APTITUDE' ? 'bg-teal-100 text-teal-700' : 'bg-indigo-100 text-indigo-700'}`}>{SOFTSKILL_TYPE_LABEL[sess.type]}</span>
                     </td>
                     <td className="px-4 py-3 font-medium">{sess.topic}</td>
-                    <td className="px-4 py-3 text-muted-foreground">{new Date(sess.sessionDate).toLocaleDateString()}</td>
+                    <td className="px-4 py-3 text-muted-foreground">
+                      {new Date(sess.startDate).toLocaleDateString()}{sess.endDate ? ` – ${new Date(sess.endDate).toLocaleDateString()}` : ''}
+                    </td>
                     <td className="px-4 py-3 text-muted-foreground">{sess.trainer ? `${sess.trainer.firstName} ${sess.trainer.lastName}` : '—'}</td>
                     <td className="px-4 py-3">
                       <button onClick={() => setAttendanceSession(sess)} className="text-blue-600 hover:underline text-sm font-medium">
-                        {sess._count?.attendances ?? 0} marked{canEdit ? ' · Manage' : ''}
+                        {sess._count?.attendances ?? 0} student{sess._count?.attendances === 1 ? '' : 's'}{canEdit ? ' · Manage' : ''}
                       </button>
                     </td>
                   </tr>
@@ -818,9 +822,6 @@ export default function PlacementsPage() {
       {attendanceSession && (
         <AttendanceModal
           session={attendanceSession}
-          pool={pool}
-          poolLoaded={poolLoaded}
-          fetchPool={fetchPool}
           canEdit={canEdit}
           setError={setError}
           onClose={() => setAttendanceSession(null)}
@@ -1621,14 +1622,32 @@ function AddDriveModal({ partners, saving, setSaving, onClose, onSaved, setError
 function AddSessionModal({ saving, setSaving, onClose, onSaved, setError }: {
   saving: boolean; setSaving: (v: boolean) => void; onClose: () => void; onSaved: () => void; setError: (s: string) => void;
 }) {
-  const [form, setForm] = useState({ type: 'SOFTSKILL' as SoftskillType, topic: '', sessionDate: '', notes: '' });
+  const [form, setForm] = useState({ type: 'SOFTSKILL' as SoftskillType, topic: '', startDate: '', endDate: '', trainerId: '', notes: '' });
+  const [schedules, setSchedules] = useState<ScheduleOption[]>([]);
+  const [trainers, setTrainers] = useState<{ id: string; firstName: string; lastName: string }[]>([]);
+  const [scheduleIds, setScheduleIds] = useState<string[]>([]);
+
+  useEffect(() => {
+    api.get('/api/placements/filters').then((res) => setSchedules(res.data.data.schedules || [])).catch(() => setSchedules([]));
+    api.get('/api/employees', { params: { limit: 500 } })
+      .then((res) => setTrainers((res.data.data || []).filter((e: { status: string }) => e.status !== 'TERMINATED' && e.status !== 'RESIGNED')))
+      .catch(() => setTrainers([]));
+  }, []);
+
+  const toggleSchedule = (id: string) => setScheduleIds((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
+  const rosterCount = schedules.filter((s) => scheduleIds.includes(s.id)).reduce((sum, s) => sum + s.activeStudentCount, 0);
 
   const submit = async () => {
-    if (!form.topic || !form.sessionDate) { setError('Topic and date are required'); return; }
+    if (!form.topic || !form.startDate) { setError('Topic and start date are required'); return; }
     setSaving(true);
     setError('');
     try {
-      await api.post('/api/placements/softskill-sessions', form);
+      await api.post('/api/placements/softskill-sessions', {
+        ...form,
+        endDate: form.endDate || undefined,
+        trainerId: form.trainerId || undefined,
+        scheduleIds,
+      });
       onSaved();
     } catch (err: unknown) {
       setError(errMsg(err, 'Failed to create session'));
@@ -1639,18 +1658,50 @@ function AddSessionModal({ saving, setSaving, onClose, onSaved, setError }: {
 
   return (
     <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
-      <div className="bg-white rounded-xl w-full max-w-md p-6 space-y-4">
+      <div className="bg-white rounded-xl w-full max-w-lg p-6 space-y-4">
         <div className="flex items-center justify-between">
           <h2 className="font-semibold text-lg">New Session</h2>
           <button onClick={onClose}><X className="w-4 h-4" /></button>
         </div>
-        <div className="space-y-3">
+        <div className="space-y-3 max-h-[70vh] overflow-y-auto pr-1">
           <select className="w-full px-3 py-2 border rounded-lg text-sm" value={form.type} onChange={(e) => setForm({ ...form, type: e.target.value as SoftskillType })}>
             <option value="SOFTSKILL">Softskill</option>
             <option value="APTITUDE">Aptitude</option>
+            <option value="SK_APT">Softskill &amp; Aptitude</option>
           </select>
           <input className="w-full px-3 py-2 border rounded-lg text-sm" placeholder="Topic *" value={form.topic} onChange={(e) => setForm({ ...form, topic: e.target.value })} />
-          <input type="date" className="w-full px-3 py-2 border rounded-lg text-sm" value={form.sessionDate} onChange={(e) => setForm({ ...form, sessionDate: e.target.value })} />
+          <div className="flex gap-2">
+            <div className="flex-1">
+              <label className="text-xs text-muted-foreground">Start date *</label>
+              <input type="date" className="w-full px-3 py-2 border rounded-lg text-sm" value={form.startDate} onChange={(e) => setForm({ ...form, startDate: e.target.value })} />
+            </div>
+            <div className="flex-1">
+              <label className="text-xs text-muted-foreground">End date (optional)</label>
+              <input type="date" className="w-full px-3 py-2 border rounded-lg text-sm" value={form.endDate} onChange={(e) => setForm({ ...form, endDate: e.target.value })} />
+            </div>
+          </div>
+          <div>
+            <label className="text-xs text-muted-foreground">Trainer</label>
+            <select className="w-full px-3 py-2 border rounded-lg text-sm" value={form.trainerId} onChange={(e) => setForm({ ...form, trainerId: e.target.value })}>
+              <option value="">No trainer assigned yet</option>
+              {trainers.map((t) => <option key={t.id} value={t.id}>{t.firstName} {t.lastName}</option>)}
+            </select>
+          </div>
+          <div>
+            <label className="text-xs text-muted-foreground">Add students from sub-batch(es) — {rosterCount} student{rosterCount === 1 ? '' : 's'} selected</label>
+            <div className="border rounded-lg max-h-40 overflow-y-auto divide-y mt-1">
+              {schedules.length === 0 ? (
+                <p className="text-xs text-muted-foreground px-3 py-2">No sub-batches found.</p>
+              ) : schedules.map((s) => (
+                <label key={s.id} className="flex items-center gap-2 px-3 py-1.5 text-xs hover:bg-muted/30 cursor-pointer">
+                  <input type="checkbox" checked={scheduleIds.includes(s.id)} onChange={() => toggleSchedule(s.id)} />
+                  <span className="flex-1">{s.batchCode} · {s.courseName} ({s.timing})</span>
+                  <span className="text-muted-foreground">{s.activeStudentCount} active</span>
+                </label>
+              ))}
+            </div>
+            <p className="text-[11px] text-muted-foreground mt-1">You can add individual students afterward from the session's Attendance screen. Everyone added gets an email about this session.</p>
+          </div>
           <textarea rows={2} className="w-full px-3 py-2 border rounded-lg text-sm" placeholder="Notes (optional)" value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} />
         </div>
         <div className="flex justify-end gap-2">
@@ -1662,25 +1713,28 @@ function AddSessionModal({ saving, setSaving, onClose, onSaved, setError }: {
   );
 }
 
-function AttendanceModal({ session, pool, poolLoaded, fetchPool, canEdit, setError, onClose, onChanged }: {
-  session: SoftskillSession; pool: PoolStudent[]; poolLoaded: boolean; fetchPool: () => void; canEdit: boolean;
+function AttendanceModal({ session, canEdit, setError, onClose, onChanged }: {
+  session: SoftskillSession; canEdit: boolean;
   setError: (s: string) => void; onClose: () => void; onChanged: () => void;
 }) {
+  const [roster, setRoster] = useState<{ id: string; firstName: string; lastName: string; studentCode: string }[]>([]);
   const [marks, setMarks] = useState<Record<string, { present: boolean; score: string }>>({});
   const [saving, setSaving] = useState(false);
   const [loaded, setLoadedState] = useState(false);
+  const [showAddStudents, setShowAddStudents] = useState(false);
 
-  useEffect(() => {
-    if (!poolLoaded) { fetchPool(); return; }
-    (async () => {
-      const { data } = await api.get(`/api/placements/softskill-sessions/${session.id}/attendance`);
+  const load = useCallback(() => {
+    api.get(`/api/placements/softskill-sessions/${session.id}/attendance`).then(({ data }) => {
+      const rows = data.data || [];
+      setRoster(rows.map((a: { student: { id: string; firstName: string; lastName: string; studentCode: string } }) => a.student));
       const init: Record<string, { present: boolean; score: string }> = {};
-      for (const s of pool) init[s.id] = { present: false, score: '' };
-      for (const a of data.data || []) init[a.studentId] = { present: a.present, score: a.score?.toString() || '' };
+      for (const a of rows) init[a.studentId] = { present: a.present, score: a.score?.toString() || '' };
       setMarks(init);
       setLoadedState(true);
-    })();
-  }, [poolLoaded, session.id, pool, fetchPool]);
+    });
+  }, [session.id]);
+
+  useEffect(() => { load(); }, [load]);
 
   const toggle = (sid: string) => setMarks((m) => ({ ...m, [sid]: { ...m[sid], present: !m[sid]?.present } }));
   const setScore = (sid: string, val: string) => setMarks((m) => ({ ...m, [sid]: { ...m[sid], score: val } }));
@@ -1688,7 +1742,7 @@ function AttendanceModal({ session, pool, poolLoaded, fetchPool, canEdit, setErr
   const submit = async () => {
     setSaving(true);
     try {
-      const attendances = pool.map((s) => ({ studentId: s.id, present: marks[s.id]?.present || false, score: marks[s.id]?.score ? parseFloat(marks[s.id].score) : null }));
+      const attendances = roster.map((s) => ({ studentId: s.id, present: marks[s.id]?.present || false, score: marks[s.id]?.score ? parseFloat(marks[s.id].score) : null }));
       await api.post(`/api/placements/softskill-sessions/${session.id}/attendance`, { attendances });
       onChanged();
       onClose();
@@ -1703,18 +1757,28 @@ function AttendanceModal({ session, pool, poolLoaded, fetchPool, canEdit, setErr
     <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
       <div className="bg-white rounded-xl w-full max-w-lg p-6 space-y-4">
         <div className="flex items-center justify-between">
-          <h2 className="font-semibold text-lg">Attendance — {session.topic}</h2>
+          <div>
+            <h2 className="font-semibold text-lg">Attendance — {session.topic}</h2>
+            <p className="text-xs text-muted-foreground">{roster.length} student{roster.length === 1 ? '' : 's'} in roster</p>
+          </div>
           <button onClick={onClose}><X className="w-4 h-4" /></button>
         </div>
-        {!loaded ? <p className="text-center py-4 text-muted-foreground">Loading…</p> : (
+        {canEdit && (
+          <button onClick={() => setShowAddStudents(true)} className="text-xs text-blue-600 hover:underline flex items-center gap-1">
+            <Plus className="w-3.5 h-3.5" /> Add students
+          </button>
+        )}
+        {!loaded ? <p className="text-center py-4 text-muted-foreground">Loading…</p> : roster.length === 0 ? (
+          <p className="text-center py-4 text-muted-foreground text-sm">No students in this session yet.</p>
+        ) : (
           <div className="space-y-2 max-h-80 overflow-y-auto pr-1">
-            {pool.map((s) => (
+            {roster.map((s) => (
               <div key={s.id} className="flex items-center gap-3">
                 <input type="checkbox" checked={!!marks[s.id]?.present} onChange={() => toggle(s.id)} id={`att-${s.id}`} disabled={!canEdit} />
                 <label htmlFor={`att-${s.id}`} className="text-sm flex-1">
-                  {s.firstName} {s.lastName}
+                  {s.firstName} {s.lastName} <span className="text-xs text-muted-foreground">({s.studentCode})</span>
                 </label>
-                {session.type === 'APTITUDE' && (
+                {(session.type === 'APTITUDE' || session.type === 'SK_APT') && (
                   <input type="number" disabled={!canEdit} placeholder="Score" className="w-20 px-2 py-1 border rounded text-xs" value={marks[s.id]?.score || ''} onChange={(e) => setScore(s.id, e.target.value)} />
                 )}
               </div>
@@ -1726,6 +1790,69 @@ function AttendanceModal({ session, pool, poolLoaded, fetchPool, canEdit, setErr
             <button onClick={submit} disabled={saving || !loaded} className="px-4 py-2 text-sm rounded-lg bg-blue-600 text-white disabled:opacity-50">{saving ? 'Saving...' : 'Save Attendance'}</button>
           </div>
         )}
+      </div>
+      {showAddStudents && (
+        <AddStudentsToSessionModal
+          sessionId={session.id}
+          setError={setError}
+          onClose={() => setShowAddStudents(false)}
+          onSaved={() => { setShowAddStudents(false); load(); onChanged(); }}
+        />
+      )}
+    </div>
+  );
+}
+
+function AddStudentsToSessionModal({ sessionId, setError, onClose, onSaved }: {
+  sessionId: string; setError: (s: string) => void; onClose: () => void; onSaved: () => void;
+}) {
+  const [schedules, setSchedules] = useState<ScheduleOption[]>([]);
+  const [scheduleIds, setScheduleIds] = useState<string[]>([]);
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    api.get('/api/placements/filters').then((res) => setSchedules(res.data.data.schedules || [])).catch(() => setSchedules([]));
+  }, []);
+
+  const toggle = (id: string) => setScheduleIds((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
+
+  const submit = async () => {
+    if (!scheduleIds.length) { setError('Select at least one sub-batch'); return; }
+    setSaving(true);
+    setError('');
+    try {
+      await api.post(`/api/placements/softskill-sessions/${sessionId}/students`, { scheduleIds });
+      onSaved();
+    } catch (err: unknown) {
+      setError(errMsg(err, 'Failed to add students'));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-[60] p-4">
+      <div className="bg-white rounded-xl w-full max-w-md p-6 space-y-4">
+        <div className="flex items-center justify-between">
+          <h2 className="font-semibold text-lg">Add Students</h2>
+          <button onClick={onClose}><X className="w-4 h-4" /></button>
+        </div>
+        <div className="border rounded-lg max-h-56 overflow-y-auto divide-y">
+          {schedules.length === 0 ? (
+            <p className="text-xs text-muted-foreground px-3 py-2">No sub-batches found.</p>
+          ) : schedules.map((s) => (
+            <label key={s.id} className="flex items-center gap-2 px-3 py-1.5 text-xs hover:bg-muted/30 cursor-pointer">
+              <input type="checkbox" checked={scheduleIds.includes(s.id)} onChange={() => toggle(s.id)} />
+              <span className="flex-1">{s.batchCode} · {s.courseName} ({s.timing})</span>
+              <span className="text-muted-foreground">{s.activeStudentCount} active</span>
+            </label>
+          ))}
+        </div>
+        <p className="text-[11px] text-muted-foreground">Students already in this session are skipped automatically. Newly added students get an email.</p>
+        <div className="flex justify-end gap-2">
+          <button onClick={onClose} className="px-4 py-2 text-sm rounded-lg border">Cancel</button>
+          <button onClick={submit} disabled={saving} className="px-4 py-2 text-sm rounded-lg bg-blue-600 text-white disabled:opacity-50">{saving ? 'Adding...' : 'Add'}</button>
+        </div>
       </div>
     </div>
   );
