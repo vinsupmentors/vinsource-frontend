@@ -1176,7 +1176,7 @@ function EditScheduleModal({ schedule, onClose, setError, onSaved }: {
   schedule: BatchCourseSchedule; onClose: () => void; setError: (s: string) => void; onSaved: () => void;
 }) {
   const [form, setForm] = useState({
-    timing: schedule.timing, dayPattern: schedule.dayPattern, mode: schedule.mode,
+    timing: schedule.timing, dayPattern: schedule.dayPattern, mode: schedule.mode, status: schedule.status,
     startDate: schedule.startDate ? schedule.startDate.slice(0, 10) : '',
     endDate: schedule.endDate ? schedule.endDate.slice(0, 10) : '',
     capacity: schedule.capacity != null ? String(schedule.capacity) : '',
@@ -1211,6 +1211,12 @@ function EditScheduleModal({ schedule, onClose, setError, onSaved }: {
           <input type="date" className="w-full px-3 py-2 border rounded-lg text-sm" value={form.endDate} onChange={(e) => setForm({ ...form, endDate: e.target.value })} placeholder="End date" />
         </div>
         <input type="number" className="w-full px-3 py-2 border rounded-lg text-sm" placeholder="Capacity" value={form.capacity} onChange={(e) => setForm({ ...form, capacity: e.target.value })} />
+        <div>
+          <label className="text-xs font-medium text-muted-foreground">Status</label>
+          <select className="w-full mt-1 px-3 py-2 border rounded-lg text-sm" value={form.status} onChange={(e) => setForm({ ...form, status: e.target.value as BatchStatus })}>
+            {BATCH_STATUSES.map((s) => <option key={s} value={s}>{s}</option>)}
+          </select>
+        </div>
       </div>
       <ModalFooter onClose={onClose} onSubmit={submit} saving={saving} label="Save" />
     </Modal>
