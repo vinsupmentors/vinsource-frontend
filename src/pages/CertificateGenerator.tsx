@@ -43,7 +43,7 @@ const fmtD = (d?: string) => (d ? new Date(d).toLocaleDateString('en-IN', { day:
 
 // ─── Photo cropper: drag to position, slider to zoom, circular crop ─────────
 
-function PhotoCropper({ src, onApply, onCancel }: { src: string; onApply: (dataUrl: string) => void; onCancel: () => void }) {
+export function PhotoCropper({ src, onApply, onCancel }: { src: string; onApply: (dataUrl: string) => void; onCancel: () => void }) {
   const SIZE = 240; // viewport px
   const [zoom, setZoom] = useState(1);
   const [offset, setOffset] = useState({ x: 0, y: 0 });
@@ -403,7 +403,7 @@ function InternshipCompletionTemplate({ f, short }: { f: Record<string, string>;
   );
 }
 
-function CourseCompletionTemplate({ f }: { f: Record<string, string> }) {
+export function CourseCompletionTemplate({ f }: { f: Record<string, string> }) {
   // Pixel-perfect: the official design (course-completion-bg.png, 1414×2000 with
   // dynamic areas blanked) as background, live data overlaid at exact positions.
   // Sheet is fixed at 794px (= A4 width @96dpi), scale = 794/1414.

@@ -13,7 +13,7 @@ import {
   Wallet, GraduationCap, Target, Megaphone, KeyRound,
   BookOpen, PiggyBank, Store, Repeat, PieChart, X, Receipt, CheckCircle2,
   Presentation, CalendarClock, Handshake, ListChecks, Mic2, Network, FileBadge, Percent, Activity, RefreshCw,
-  FileSignature,
+  FileSignature, Award,
 } from 'lucide-react';
 
 const LEVEL_RANK: Record<AccessLevel, number> = { NONE: 0, VIEW: 1, EDIT: 2, ADMIN: 3 };
@@ -161,7 +161,16 @@ const moduleNavItems: ModuleNavItem[] = [
     ],
   },
   { label: 'Admin & Ops',        to: '/admin-ops',         icon: Building2,     module: 'ADMIN' },
-  { label: 'Certificate Generator', to: '/certificates',   icon: FileText,      module: 'CERTIFICATES' },
+  {
+    label: 'Certificate Generator',
+    to: '/certificates',
+    icon: FileText,
+    module: 'CERTIFICATES',
+    children: [
+      { label: 'Single Certificate',    to: '/certificates',       icon: FileText, module: 'CERTIFICATES' },
+      { label: 'Batch Certificates',    to: '/certificates/batch', icon: Award,    module: 'CERTIFICATES' },
+    ],
+  },
   {
     label: 'Production',
     to: '/production',

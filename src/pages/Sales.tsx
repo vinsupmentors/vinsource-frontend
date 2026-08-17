@@ -9,6 +9,7 @@ import {
   PhoneCall, Video, MapPin, RefreshCw, AlertTriangle, Settings, Trash2, Activity,
   ChevronLeft, ChevronRight, Upload, Download, Percent,
   Smartphone, PhoneIncoming, Link2, UserPlus, Copy, Ban, Check, History,
+  Target as TargetIcon, Trophy, Clock,
 } from 'lucide-react';
 
 const PAGE_SIZE = 100;
@@ -140,6 +141,35 @@ interface UnmatchedCall {
   calledBy?: EmployeeLite | null;
 }
 
+// KPI suite — per-salesperson leaderboard and the monthly goals set for them.
+interface TargetGoal { enrollmentGoal: number; revenueGoal: number }
+
+interface LeaderboardRow {
+  employeeId: string;
+  firstName: string;
+  lastName: string;
+  employeeCode: string;
+  callsMade: number;
+  leadsCreated: number;
+  demosBooked: number;
+  demosConducted: number;
+  enrolled: number;
+  lost: number;
+  revenue: number;
+  avgFirstContactHours: number | null;
+  target: TargetGoal | null;
+}
+
+interface TargetRow {
+  id: string;
+  employeeId: string;
+  month: number;
+  year: number;
+  enrollmentGoal: number;
+  revenueGoal: number;
+  employee: EmployeeLite;
+}
+
 // Global call log — every call (manual or auto-tracked), across all leads.
 interface CallLogRow {
   id: string;
@@ -259,15 +289,43 @@ function pctLabel(pct: number | null): string {
   return pct === null ? '—' : `${pct.toFixed(1)}%`;
 }
 
+// Shared date-range presets for Sales Pulse / Leaderboard — both let a
+// manager flip between "today", "this week", "this month", or an explicit
+// custom range without re-deriving the same date math twice.
+type RangePreset = 'today' | 'week' | 'month' | 'custom';
+function isoDate(d: Date): string { return d.toISOString().slice(0, 10); }
+function presetRange(preset: RangePreset): { start: string; end: string } {
+  const today = new Date();
+  const end = isoDate(today);
+  if (preset === 'week') {
+    const weekAgo = new Date(today); weekAgo.setDate(weekAgo.getDate() - 6);
+    return { start: isoDate(weekAgo), end };
+  }
+  if (preset === 'month') {
+    const monthStart = new Date(today.getFullYear(), today.getMonth(), 1);
+    return { start: isoDate(monthStart), end };
+  }
+  return { start: end, end };
+}
+function formatHours(h: number | null): string {
+  if (h == null) return '—';
+  if (h < 1) return `${Math.round(h * 60)}m`;
+  return `${h.toFixed(1)}h`;
+}
+function formatCurrency(n: number): string {
+  return `₹${n.toLocaleString('en-IN', { maximumFractionDigits: 0 })}`;
+}
+
 // ── Main page ────────────────────────────────────────────────────────────
-type Tab = 'leads' | 'pulse' | 'leadQuality' | 'demoBooked' | 'demoRescheduled' | 'demoConducted' | 'devices' | 'unmatchedCalls' | 'callLog';
-const VALID_TABS: Tab[] = ['leads', 'pulse', 'leadQuality', 'demoBooked', 'demoRescheduled', 'demoConducted', 'devices', 'unmatchedCalls', 'callLog'];
+type Tab = 'leads' | 'pulse' | 'leadQuality' | 'demoBooked' | 'demoRescheduled' | 'demoConducted' | 'devices' | 'unmatchedCalls' | 'callLog' | 'leaderboard' | 'targets';
+const VALID_TABS: Tab[] = ['leads', 'pulse', 'leadQuality', 'demoBooked', 'demoRescheduled', 'demoConducted', 'devices', 'unmatchedCalls', 'callLog', 'leaderboard', 'targets'];
 // Sales Pulse / Lead Quality are aggregate, cross-rep views — admin only.
 // BDAs get Demo Booked/Rescheduled/Conducted instead, scoped to their own leads.
 // Devices (issuing call-tracking tokens) is admin-only too. Unmatched Calls
 // is regular EDIT access, same level as logging a call manually — both admins
-// and BDAs can see and work it.
-const ADMIN_ONLY_TABS: Tab[] = ['pulse', 'leadQuality', 'devices'];
+// and BDAs can see and work it. Leaderboard/Targets are management-level KPI
+// views, same access tier as Pulse/Lead Quality.
+const ADMIN_ONLY_TABS: Tab[] = ['pulse', 'leadQuality', 'devices', 'leaderboard', 'targets'];
 const BDA_ONLY_TABS: Tab[] = ['demoBooked', 'demoRescheduled', 'demoConducted'];
 const EDIT_REQUIRED_TABS: Tab[] = ['unmatchedCalls'];
 
@@ -449,6 +507,8 @@ export default function SalesPage() {
               { id: 'leads' as Tab, label: 'Leads', icon: Users },
               { id: 'callLog' as Tab, label: 'Call Log', icon: History },
               { id: 'pulse' as Tab, label: 'Sales Pulse', icon: Activity },
+              { id: 'leaderboard' as Tab, label: 'Leaderboard', icon: Trophy },
+              { id: 'targets' as Tab, label: 'Targets', icon: TargetIcon },
               { id: 'leadQuality' as Tab, label: 'Lead Quality', icon: Percent },
               { id: 'unmatchedCalls' as Tab, label: 'Unmatched Calls', icon: PhoneIncoming },
               { id: 'devices' as Tab, label: 'Devices', icon: Smartphone },
@@ -639,6 +699,10 @@ export default function SalesPage() {
       {tab === 'pulse' && isAdmin && <SalesPulsePanel canEdit={canEdit} />}
 
       {tab === 'leadQuality' && isAdmin && <LeadQualityPanel />}
+
+      {tab === 'leaderboard' && isAdmin && <LeaderboardPanel />}
+
+      {tab === 'targets' && isAdmin && <TargetsPanel employees={employees} />}
 
       {tab === 'demoBooked' && !isAdmin && <DemoListPanel status="SCHEDULED" emptyLabel="No demos booked" onOpenLead={openLeadDetail} />}
 
@@ -1445,13 +1509,20 @@ function SalesPulsePanel({ canEdit }: { canEdit: boolean }) {
   const [newEmail, setNewEmail] = useState('');
   const [newName, setNewName] = useState('');
   const [savingRecipient, setSavingRecipient] = useState(false);
+  const [preset, setPreset] = useState<RangePreset>('today');
+  const [customStart, setCustomStart] = useState(isoDate(new Date()));
+  const [customEnd, setCustomEnd] = useState(isoDate(new Date()));
 
   const load = useCallback(async () => {
     setLoading(true);
     setError('');
     try {
+      // "today" omits start/end entirely so this stays byte-for-byte the same
+      // live query the hourly/EOD cron emails use — any other preset asks the
+      // same endpoint for a historical range instead.
+      const params = preset === 'today' ? {} : preset === 'custom' ? { start: customStart, end: customEnd } : presetRange(preset);
       const [pulseRes, recipRes] = await Promise.all([
-        api.get('/api/sales/pulse'),
+        api.get('/api/sales/pulse', { params }),
         api.get('/api/sales/report-recipients'),
       ]);
       setPulse(pulseRes.data.data);
@@ -1462,7 +1533,7 @@ function SalesPulsePanel({ canEdit }: { canEdit: boolean }) {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [preset, customStart, customEnd]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -1495,17 +1566,38 @@ function SalesPulsePanel({ canEdit }: { canEdit: boolean }) {
     <div className="space-y-6">
       {error && <div className="bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg px-4 py-3">{error}</div>}
 
-      <div className="flex items-center justify-between">
+      <div className="flex flex-wrap items-center justify-between gap-3">
         <p className="text-sm text-muted-foreground">
-          Live as of right now — the same numbers go out by email at 11, 12, 1, 2, 4, 5 and 6 (6 PM is the day's End of Day report).
+          {preset === 'today'
+            ? "Live as of right now — the same numbers go out by email at 11, 12, 1, 2, 4, 5 and 6 (6 PM is the day's End of Day report)."
+            : 'Historical totals for the selected range.'}
         </p>
         <button onClick={load} disabled={loading} className="flex items-center gap-2 px-3 py-2 border rounded-lg text-sm font-medium hover:bg-muted/50 disabled:opacity-50">
           <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} /> Refresh
         </button>
       </div>
 
+      <div className="flex flex-wrap items-center gap-2">
+        {(['today', 'week', 'month', 'custom'] as RangePreset[]).map((p) => (
+          <button
+            key={p}
+            onClick={() => setPreset(p)}
+            className={`px-3 py-1.5 text-xs font-medium rounded-lg border ${preset === p ? 'bg-blue-600 text-white border-blue-600' : 'hover:bg-muted/50'}`}
+          >
+            {p === 'today' ? 'Today' : p === 'week' ? 'Last 7 Days' : p === 'month' ? 'This Month' : 'Custom'}
+          </button>
+        ))}
+        {preset === 'custom' && (
+          <>
+            <input type="date" className="px-2 py-1.5 border rounded-lg text-xs" value={customStart} onChange={(e) => setCustomStart(e.target.value)} />
+            <span className="text-xs text-muted-foreground">to</span>
+            <input type="date" className="px-2 py-1.5 border rounded-lg text-xs" value={customEnd} onChange={(e) => setCustomEnd(e.target.value)} />
+          </>
+        )}
+      </div>
+
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-        <StatCard icon={PhoneCall} label="Calls Made Today" value={pulse?.callsMadeToday ?? 0} />
+        <StatCard icon={PhoneCall} label={preset === 'today' ? 'Calls Made Today' : 'Calls Made'} value={pulse?.callsMadeToday ?? 0} />
         <StatCard icon={Users} label="New Leads Today" value={pulse?.leadsCreatedToday ?? 0} />
         <StatCard icon={Calendar} label="Demos Booked Today" value={pulse?.demosBookedToday ?? 0} />
         <StatCard icon={Calendar} label="Demos Scheduled Today" value={pulse?.demosScheduledForToday ?? 0} />
@@ -2290,6 +2382,258 @@ function CreateLeadFromCallModal({ call, onClose, onCreated, setError }: {
             {saving ? 'Creating...' : 'Create Lead'}
           </button>
         </div>
+      </div>
+    </div>
+  );
+}
+
+// ── Leaderboard tab: per-salesperson KPI breakdown for a date range,
+// with target-vs-actual once a target's been set for that rep this month.
+function LeaderboardPanel() {
+  const [preset, setPreset] = useState<RangePreset>('month');
+  const [customStart, setCustomStart] = useState(isoDate(new Date()));
+  const [customEnd, setCustomEnd] = useState(isoDate(new Date()));
+  const [rows, setRows] = useState<LeaderboardRow[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+
+  const range = preset === 'custom' ? { start: customStart, end: customEnd } : presetRange(preset);
+  const now = new Date();
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    setError('');
+    try {
+      // Targets are monthly, so only meaningful to show when the selected
+      // range sits within a single calendar month (the common case: today,
+      // this week, or this month) — a custom multi-month range just won't
+      // carry target columns, since "goal" wouldn't mean anything summed.
+      const params: Record<string, string> = { start: range.start, end: range.end };
+      if (preset !== 'custom' || range.start.slice(0, 7) === range.end.slice(0, 7)) {
+        params.month = String(now.getMonth() + 1);
+        params.year = String(now.getFullYear());
+      }
+      const res = await api.get('/api/sales/leaderboard', { params });
+      setRows(res.data.data);
+    } catch (err: unknown) {
+      const e = err as { response?: { data?: { message?: string } } };
+      setError(e.response?.data?.message || 'Failed to load leaderboard');
+    } finally {
+      setLoading(false);
+    }
+  }, [range.start, range.end, preset]);
+
+  useEffect(() => { load(); }, [load]);
+
+  return (
+    <div className="space-y-6">
+      {error && <div className="bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg px-4 py-3">{error}</div>}
+
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <p className="text-sm text-muted-foreground">Every salesperson's activity and results, side by side, for the selected range.</p>
+        <button onClick={load} disabled={loading} className="flex items-center gap-2 px-3 py-2 border rounded-lg text-sm font-medium hover:bg-muted/50 disabled:opacity-50">
+          <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} /> Refresh
+        </button>
+      </div>
+
+      <div className="flex flex-wrap items-center gap-2">
+        {(['today', 'week', 'month', 'custom'] as RangePreset[]).map((p) => (
+          <button
+            key={p}
+            onClick={() => setPreset(p)}
+            className={`px-3 py-1.5 text-xs font-medium rounded-lg border ${preset === p ? 'bg-blue-600 text-white border-blue-600' : 'hover:bg-muted/50'}`}
+          >
+            {p === 'today' ? 'Today' : p === 'week' ? 'Last 7 Days' : p === 'month' ? 'This Month' : 'Custom'}
+          </button>
+        ))}
+        {preset === 'custom' && (
+          <>
+            <input type="date" className="px-2 py-1.5 border rounded-lg text-xs" value={customStart} onChange={(e) => setCustomStart(e.target.value)} />
+            <span className="text-xs text-muted-foreground">to</span>
+            <input type="date" className="px-2 py-1.5 border rounded-lg text-xs" value={customEnd} onChange={(e) => setCustomEnd(e.target.value)} />
+          </>
+        )}
+      </div>
+
+      <div className="bg-card border rounded-xl overflow-x-auto">
+        <table className="w-full text-sm">
+          <thead className="bg-muted/50 text-left text-xs uppercase text-muted-foreground">
+            <tr>
+              <th className="px-3 py-3">Salesperson</th>
+              <th className="px-3 py-3">Calls</th>
+              <th className="px-3 py-3">Leads</th>
+              <th className="px-3 py-3">Demos Booked</th>
+              <th className="px-3 py-3">Demos Done</th>
+              <th className="px-3 py-3">Enrolled</th>
+              <th className="px-3 py-3">Lost</th>
+              <th className="px-3 py-3">Revenue</th>
+              <th className="px-3 py-3">Avg First Contact</th>
+              <th className="px-3 py-3">Target (Enroll / Revenue)</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y">
+            {loading ? (
+              <tr><td colSpan={10} className="px-4 py-8 text-center text-muted-foreground">Loading...</td></tr>
+            ) : rows.length === 0 ? (
+              <tr><td colSpan={10} className="px-4 py-8 text-center text-muted-foreground">No activity in this range</td></tr>
+            ) : rows.map((r) => (
+              <tr key={r.employeeId} className="hover:bg-muted/30">
+                <td className="px-3 py-3 font-medium whitespace-nowrap">{r.firstName} {r.lastName}</td>
+                <td className="px-3 py-3">{r.callsMade}</td>
+                <td className="px-3 py-3">{r.leadsCreated}</td>
+                <td className="px-3 py-3">{r.demosBooked}</td>
+                <td className="px-3 py-3">{r.demosConducted}</td>
+                <td className="px-3 py-3 font-semibold text-green-600">{r.enrolled}</td>
+                <td className="px-3 py-3 text-red-600">{r.lost}</td>
+                <td className="px-3 py-3 font-semibold whitespace-nowrap">{formatCurrency(r.revenue)}</td>
+                <td className="px-3 py-3 text-xs text-muted-foreground whitespace-nowrap">
+                  <div className="flex items-center gap-1"><Clock className="w-3 h-3" /> {formatHours(r.avgFirstContactHours)}</div>
+                </td>
+                <td className="px-3 py-3 text-xs whitespace-nowrap">
+                  {r.target ? (
+                    <span className={r.enrolled >= r.target.enrollmentGoal ? 'text-green-600 font-medium' : 'text-muted-foreground'}>
+                      {r.enrolled}/{r.target.enrollmentGoal} · {formatCurrency(r.revenue)}/{formatCurrency(r.target.revenueGoal)}
+                    </span>
+                  ) : <span className="text-muted-foreground">No target set</span>}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+// ── Targets tab: monthly enrollment + revenue goals per salesperson.
+function TargetsPanel({ employees }: { employees: EmployeeLite[] }) {
+  const now = new Date();
+  const [month, setMonth] = useState(now.getMonth() + 1);
+  const [year, setYear] = useState(now.getFullYear());
+  const [targets, setTargets] = useState<TargetRow[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+  const [editingId, setEditingId] = useState<string | null>(null); // employeeId being edited
+  const [enrollmentGoal, setEnrollmentGoal] = useState('');
+  const [revenueGoal, setRevenueGoal] = useState('');
+  const [saving, setSaving] = useState(false);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    setError('');
+    try {
+      const res = await api.get('/api/sales/targets', { params: { month: String(month), year: String(year) } });
+      setTargets(res.data.data);
+    } catch (err: unknown) {
+      const e = err as { response?: { data?: { message?: string } } };
+      setError(e.response?.data?.message || 'Failed to load targets');
+    } finally {
+      setLoading(false);
+    }
+  }, [month, year]);
+
+  useEffect(() => { load(); }, [load]);
+
+  const targetByEmployee = new Map(targets.map((t) => [t.employeeId, t]));
+
+  const startEdit = (employeeId: string) => {
+    const existing = targetByEmployee.get(employeeId);
+    setEditingId(employeeId);
+    setEnrollmentGoal(existing ? String(existing.enrollmentGoal) : '');
+    setRevenueGoal(existing ? String(existing.revenueGoal) : '');
+  };
+
+  const save = async (employeeId: string) => {
+    setSaving(true);
+    setError('');
+    try {
+      await api.post('/api/sales/targets', {
+        employeeId, month, year,
+        enrollmentGoal: Number(enrollmentGoal) || 0,
+        revenueGoal: Number(revenueGoal) || 0,
+      });
+      setEditingId(null);
+      load();
+    } catch (err: unknown) {
+      const e = err as { response?: { data?: { message?: string } } };
+      setError(e.response?.data?.message || 'Failed to save target');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const monthNames = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+
+  return (
+    <div className="space-y-6">
+      {error && <div className="bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg px-4 py-3">{error}</div>}
+
+      <div className="flex flex-wrap items-center gap-3">
+        <select className="px-3 py-2 border rounded-lg text-sm" value={month} onChange={(e) => setMonth(Number(e.target.value))}>
+          {monthNames.map((m, i) => <option key={m} value={i + 1}>{m}</option>)}
+        </select>
+        <select className="px-3 py-2 border rounded-lg text-sm" value={year} onChange={(e) => setYear(Number(e.target.value))}>
+          {[year - 1, year, year + 1].map((y) => <option key={y} value={y}>{y}</option>)}
+        </select>
+        <button onClick={load} disabled={loading} className="flex items-center gap-2 px-3 py-2 border rounded-lg text-sm font-medium hover:bg-muted/50 disabled:opacity-50 ml-auto">
+          <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} /> Refresh
+        </button>
+      </div>
+
+      <div className="bg-card border rounded-xl overflow-x-auto">
+        <table className="w-full text-sm">
+          <thead className="bg-muted/50 text-left text-xs uppercase text-muted-foreground">
+            <tr>
+              <th className="px-3 py-3">Salesperson</th>
+              <th className="px-3 py-3">Enrollment Goal</th>
+              <th className="px-3 py-3">Revenue Goal</th>
+              <th className="px-3 py-3"></th>
+            </tr>
+          </thead>
+          <tbody className="divide-y">
+            {loading ? (
+              <tr><td colSpan={4} className="px-4 py-8 text-center text-muted-foreground">Loading...</td></tr>
+            ) : employees.length === 0 ? (
+              <tr><td colSpan={4} className="px-4 py-8 text-center text-muted-foreground">No salespeople found</td></tr>
+            ) : employees.map((emp) => {
+              const existing = targetByEmployee.get(emp.id);
+              const isEditing = editingId === emp.id;
+              return (
+                <tr key={emp.id} className="hover:bg-muted/30">
+                  <td className="px-3 py-3 font-medium whitespace-nowrap">{emp.firstName} {emp.lastName}</td>
+                  {isEditing ? (
+                    <>
+                      <td className="px-3 py-3">
+                        <input type="number" className="w-24 px-2 py-1 border rounded-lg text-xs" value={enrollmentGoal} onChange={(e) => setEnrollmentGoal(e.target.value)} />
+                      </td>
+                      <td className="px-3 py-3">
+                        <input type="number" className="w-28 px-2 py-1 border rounded-lg text-xs" value={revenueGoal} onChange={(e) => setRevenueGoal(e.target.value)} />
+                      </td>
+                      <td className="px-3 py-3 whitespace-nowrap">
+                        <div className="flex items-center gap-2">
+                          <button onClick={() => save(emp.id)} disabled={saving} className="text-xs font-medium text-blue-600 hover:underline disabled:opacity-50">
+                            {saving ? 'Saving...' : 'Save'}
+                          </button>
+                          <button onClick={() => setEditingId(null)} className="text-xs text-muted-foreground hover:underline">Cancel</button>
+                        </div>
+                      </td>
+                    </>
+                  ) : (
+                    <>
+                      <td className="px-3 py-3">{existing?.enrollmentGoal ?? '—'}</td>
+                      <td className="px-3 py-3">{existing ? formatCurrency(existing.revenueGoal) : '—'}</td>
+                      <td className="px-3 py-3">
+                        <button onClick={() => startEdit(emp.id)} className="text-xs font-medium text-blue-600 hover:underline">
+                          {existing ? 'Edit' : 'Set Target'}
+                        </button>
+                      </td>
+                    </>
+                  )}
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
       </div>
     </div>
   );
