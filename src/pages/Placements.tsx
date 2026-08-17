@@ -7,8 +7,12 @@ import {
   Lock, Plus, X, Building2, CalendarClock, GraduationCap, TrendingUp, Users,
   CheckCircle2, XCircle, AlertTriangle, MessageSquare, FileUp, ListChecks,
   Briefcase, BarChart2, Search, User, Trophy, Star, Phone, MapPin,
-  BookOpen, Award, ChevronDown, ChevronRight, ExternalLink,
+  BookOpen, Award, ChevronDown, ChevronRight, ExternalLink, Percent, IndianRupee,
 } from 'lucide-react';
+import {
+  ResponsiveContainer, BarChart, Bar, AreaChart, Area, XAxis, YAxis,
+  CartesianGrid, Tooltip, Cell,
+} from 'recharts';
 
 type DriveStatus = 'SCHEDULED' | 'COMPLETED' | 'CANCELLED';
 type ResultStatus = 'PENDING' | 'SELECTED' | 'REJECTED';
@@ -24,6 +28,7 @@ interface Drive {
 interface PlacementResultRow {
   id: string; studentName: string; result: string; package?: number | null; createdAt: string;
   designation?: string | null; joiningDate?: string | null; offerLetterUrl?: string | null;
+  offerStatus?: string;
 }
 interface Stats { totalPartners: number; upcomingDrives: number; totalPlaced: number; avgPackage: number; }
 
@@ -41,7 +46,8 @@ interface PoolStudent {
   placementReadiness: { ready: boolean; missing: string[] };
   interviewSummary: { count: number; lastOutcome: string | null };
   isPlaced: boolean;
-  placedInfo?: { package: number | null; designation: string | null } | null;
+  placedInfo?: { id: string; package: number | null; designation: string | null; offerStatus: string } | null;
+  sla: { daysInPool: number | null; slaAtRisk: boolean };
 }
 
 interface Interview {
@@ -74,6 +80,16 @@ interface ReportData {
   byBatch: { batchCode: string; total: number; ready: number; notReady: number; placed: number; firstInterviewGiven: number }[];
 }
 
+interface AnalyticsData {
+  placementRate: number;
+  poolCount: number;
+  placedCount: number;
+  funnel: { shortlisted: number; interviewed: number; selected: number };
+  packageDistribution: { min: number; max: number; avg: number; median: number; count: number } | null;
+  offerResponseBreakdown: Record<string, number>;
+  trend: { month: string; placements: number }[];
+}
+
 const STATUSES: DriveStatus[] = ['SCHEDULED', 'COMPLETED', 'CANCELLED'];
 const STATUS_COLOR: Record<DriveStatus, string> = {
   SCHEDULED: 'bg-blue-100 text-blue-700',
@@ -85,6 +101,11 @@ const RESULT_COLOR: Record<string, string> = {
   PENDING: 'bg-amber-100 text-amber-700',
   SELECTED: 'bg-green-100 text-green-700',
   REJECTED: 'bg-red-100 text-red-700',
+};
+const OFFER_STATUS_COLOR: Record<string, string> = {
+  PENDING: 'bg-amber-100 text-amber-700',
+  ACCEPTED: 'bg-green-100 text-green-700',
+  DECLINED: 'bg-red-100 text-red-700',
 };
 const OUTCOME_COLOR: Record<string, string> = {
   SCHEDULED: 'bg-blue-100 text-blue-700',
@@ -105,7 +126,8 @@ export default function PlacementsPage() {
   const level = modules.PLACEMENTS;
   const canEdit = hasModule('PLACEMENTS', 'EDIT');
 
-  type Tab = 'drives' | 'partners' | 'pool' | 'softskill' | 'reports';
+  type Tab = 'drives' | 'partners' | 'pool' | 'softskill' | 'reports' | 'analytics';
+  const isAdmin = hasModule('PLACEMENTS', 'ADMIN');
   const [searchParams, setSearchParams] = useSearchParams();
   const tabFromUrl = searchParams.get('tab') as Tab | null;
   const [tab, setTabState] = useState<Tab>(tabFromUrl || 'drives');
@@ -126,7 +148,7 @@ export default function PlacementsPage() {
   const [pool, setPool] = useState<PoolStudent[]>([]);
   const [poolLoading, setPoolLoading] = useState(false);
   const [poolLoaded, setPoolLoaded] = useState(false);
-  const [poolFilter, setPoolFilter] = useState<'all' | 'ready' | 'not_ready' | 'placed'>('all');
+  const [poolFilter, setPoolFilter] = useState<'all' | 'ready' | 'not_ready' | 'placed' | 'sla_at_risk'>('all');
   const [poolSearch, setPoolSearch] = useState('');
   const [poolCourseId, setPoolCourseId] = useState('');
   const [poolBatchId, setPoolBatchId] = useState('');
@@ -254,6 +276,15 @@ export default function PlacementsPage() {
     }
   };
 
+  const respondToOffer = async (resultId: string, offerStatus: 'ACCEPTED' | 'DECLINED') => {
+    try {
+      await api.put(`/api/placements/results/${resultId}/offer-response`, { offerStatus });
+      fetchPool();
+    } catch (err: unknown) {
+      setError(errMsg(err, 'Failed to record offer response'));
+    }
+  };
+
   if (loaded && !level) {
     return (
       <div className="flex flex-col items-center justify-center h-64 text-center gap-3">
@@ -268,10 +299,12 @@ export default function PlacementsPage() {
 
   const readyCount = pool.filter((s) => s.placementReadiness?.ready).length;
   const placedCount = pool.filter((s) => s.isPlaced).length;
+  const slaAtRiskCount = pool.filter((s) => s.sla?.slaAtRisk).length;
   const filteredPool = pool.filter((s) => {
     if (poolFilter === 'ready') { if (!s.placementReadiness?.ready) return false; }
     else if (poolFilter === 'not_ready') { if (s.placementReadiness?.ready) return false; }
     else if (poolFilter === 'placed') { if (!s.isPlaced) return false; }
+    else if (poolFilter === 'sla_at_risk') { if (!s.sla?.slaAtRisk) return false; }
     if (poolSearch) {
       const q = poolSearch.toLowerCase();
       const name = `${s.firstName} ${s.lastName}`.toLowerCase();
@@ -314,6 +347,9 @@ export default function PlacementsPage() {
         <button onClick={() => setTab('pool')} className={`px-4 py-2 text-sm font-medium border-b-2 -mb-px whitespace-nowrap ${tab === 'pool' ? 'border-blue-600 text-blue-600' : 'border-transparent text-muted-foreground'}`}>Placement Pool{poolLoaded ? ` (${pool.length})` : ''}</button>
         <button onClick={() => setTab('softskill')} className={`px-4 py-2 text-sm font-medium border-b-2 -mb-px whitespace-nowrap ${tab === 'softskill' ? 'border-blue-600 text-blue-600' : 'border-transparent text-muted-foreground'}`}>Softskill &amp; Aptitude</button>
         <button onClick={() => setTab('reports')} className={`px-4 py-2 text-sm font-medium border-b-2 -mb-px whitespace-nowrap ${tab === 'reports' ? 'border-blue-600 text-blue-600' : 'border-transparent text-muted-foreground'}`}>Reports</button>
+        {isAdmin && (
+          <button onClick={() => setTab('analytics')} className={`px-4 py-2 text-sm font-medium border-b-2 -mb-px whitespace-nowrap ${tab === 'analytics' ? 'border-blue-600 text-blue-600' : 'border-transparent text-muted-foreground'}`}>Analytics</button>
+        )}
       </div>
 
       {tab === 'pool' ? (
@@ -326,6 +362,7 @@ export default function PlacementsPage() {
                 {poolLoaded && (
                   <span className="font-medium text-foreground">
                     {' '}{readyCount} ready · {placedCount} placed · {pool.length} total
+                    {slaAtRiskCount > 0 && <span className="text-red-600"> · {slaAtRiskCount} SLA at risk</span>}
                   </span>
                 )}
               </p>
@@ -358,6 +395,7 @@ export default function PlacementsPage() {
                   { key: 'ready', label: '✓ Ready' },
                   { key: 'not_ready', label: '⚠ Not Ready' },
                   { key: 'placed', label: '🎓 Placed' },
+                  { key: 'sla_at_risk', label: '⏰ SLA Risk' },
                 ] as const).map(({ key, label }) => (
                   <button key={key} onClick={() => setPoolFilter(key)}
                     className={`text-xs font-medium px-3 py-1.5 rounded-full transition-colors ${poolFilter === key ? 'bg-blue-600 text-white' : 'bg-muted text-muted-foreground hover:bg-muted/70'}`}>
@@ -428,6 +466,19 @@ export default function PlacementsPage() {
                           {s.placedInfo?.designation && (
                             <p className="text-[11px] text-muted-foreground mt-0.5">{s.placedInfo.designation}{s.placedInfo.package ? ` · ₹${s.placedInfo.package.toLocaleString('en-IN')}` : ''}</p>
                           )}
+                          {s.placedInfo && (
+                            <div className="mt-1">
+                              <span className={`text-[10px] font-medium px-1.5 py-0.5 rounded w-fit inline-block ${OFFER_STATUS_COLOR[s.placedInfo.offerStatus] || 'bg-gray-100 text-gray-600'}`}>
+                                Offer: {s.placedInfo.offerStatus}
+                              </span>
+                              {canEdit && s.placedInfo.offerStatus === 'PENDING' && (
+                                <div className="flex gap-2 mt-1">
+                                  <button onClick={() => respondToOffer(s.placedInfo!.id, 'ACCEPTED')} className="text-[11px] text-green-600 hover:underline">Accept</button>
+                                  <button onClick={() => respondToOffer(s.placedInfo!.id, 'DECLINED')} className="text-[11px] text-red-600 hover:underline">Decline</button>
+                                </div>
+                              )}
+                            </div>
+                          )}
                         </div>
                       ) : s.placementReadiness?.ready ? (
                         <span className="text-xs font-medium px-2 py-0.5 rounded-full inline-flex items-center gap-1 w-fit bg-green-50 text-green-700">
@@ -450,6 +501,14 @@ export default function PlacementsPage() {
 
                     {/* Interview Status — the key new column */}
                     <td className="px-4 py-3">
+                      {s.sla?.slaAtRisk && (
+                        <span
+                          className="block text-[11px] font-medium px-1.5 py-0.5 rounded w-fit mb-1 bg-red-100 text-red-700"
+                          title={`${s.sla.daysInPool} days in the pool with fewer than 3 interviews — SLA target is 3 interviews within 90 days`}
+                        >
+                          ⏰ SLA at risk · {s.sla.daysInPool}d in pool
+                        </span>
+                      )}
                       {(s.interviewSummary?.count ?? 0) === 0 ? (
                         <span className="text-xs text-muted-foreground/60 italic">No interviews yet</span>
                       ) : (
@@ -629,6 +688,8 @@ export default function PlacementsPage() {
             </>
           )}
         </div>
+      ) : tab === 'analytics' && isAdmin ? (
+        <PlacementsAnalyticsPanel />
       ) : tab === 'drives' ? (
         <div className="bg-card border rounded-xl overflow-hidden">
           <table className="w-full text-sm">
@@ -710,6 +771,7 @@ export default function PlacementsPage() {
           setError={setError}
           onClose={() => setResultsDrive(null)}
           onChanged={fetchAll}
+          respondToOffer={respondToOffer}
         />
       )}
       {profileStudent && (
@@ -768,6 +830,137 @@ function StatCard({ icon: Icon, label, value }: { icon: React.ComponentType<{ cl
       <div>
         <p className="text-xs text-muted-foreground">{label}</p>
         <p className="text-lg font-bold">{value}</p>
+      </div>
+    </div>
+  );
+}
+
+const MONTH_OPTIONS = [3, 6, 12, 24];
+
+function PlacementsAnalyticsPanel() {
+  const [data, setData] = useState<AnalyticsData | null>(null);
+  const [months, setMonths] = useState(6);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    setLoading(true);
+    setError('');
+    api.get('/api/placements/analytics', { params: { months } })
+      .then((res) => setData(res.data.data))
+      .catch((err: unknown) => setError(errMsg(err, 'Failed to load analytics')))
+      .finally(() => setLoading(false));
+  }, [months]);
+
+  if (loading || !data) {
+    return <div className="bg-card border rounded-xl p-8 text-center text-muted-foreground text-sm">{error || 'Loading analytics...'}</div>;
+  }
+
+  const funnelData = [
+    { stage: 'Shortlisted', count: data.funnel.shortlisted },
+    { stage: 'Interviewed', count: data.funnel.interviewed },
+    { stage: 'Selected', count: data.funnel.selected },
+  ];
+  const FUNNEL_COLORS = ['#3b82f6', '#7c3aed', '#16a34a'];
+
+  return (
+    <div className="space-y-4">
+      {error && <p className="text-sm text-red-600">{error}</p>}
+
+      <div className="flex items-center justify-between flex-wrap gap-2">
+        <p className="text-sm text-muted-foreground">Cross-cohort placement performance — placement rate, funnel, package spread, and trend.</p>
+        <select value={months} onChange={(e) => setMonths(Number(e.target.value))} className="text-sm border rounded-lg px-3 py-1.5 bg-background">
+          {MONTH_OPTIONS.map((m) => <option key={m} value={m}>Last {m} months</option>)}
+        </select>
+      </div>
+
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+        <StatCard icon={Percent} label="Placement Rate" value={`${data.placementRate}%`} />
+        <StatCard icon={Users} label="In Pool (ever)" value={data.poolCount} />
+        <StatCard icon={GraduationCap} label="Placed" value={data.placedCount} />
+        <StatCard icon={IndianRupee} label="Median Package" value={data.packageDistribution ? `₹${data.packageDistribution.median.toLocaleString('en-IN')}` : '—'} />
+      </div>
+
+      <div className="grid lg:grid-cols-2 gap-4">
+        {/* Funnel */}
+        <div className="bg-card border rounded-xl p-5">
+          <h2 className="font-semibold mb-4">Conversion Funnel</h2>
+          <ResponsiveContainer width="100%" height={220}>
+            <BarChart data={funnelData} layout="vertical" margin={{ left: 16 }}>
+              <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" horizontal={false} />
+              <XAxis type="number" tick={{ fontSize: 11 }} allowDecimals={false} />
+              <YAxis type="category" dataKey="stage" tick={{ fontSize: 12 }} width={90} />
+              <Tooltip contentStyle={{ fontSize: 12, borderRadius: 8, border: '1px solid hsl(var(--border))' }} />
+              <Bar dataKey="count" radius={[0, 6, 6, 0]}>
+                {funnelData.map((_, i) => <Cell key={i} fill={FUNNEL_COLORS[i]} />)}
+              </Bar>
+            </BarChart>
+          </ResponsiveContainer>
+          <p className="text-[11px] text-muted-foreground mt-1">Distinct students at each stage — not every shortlisted student gets interviewed, and not every interview results in an offer.</p>
+        </div>
+
+        {/* Package distribution */}
+        <div className="bg-card border rounded-xl p-5">
+          <h2 className="font-semibold mb-4">Package Distribution (₹, selected offers)</h2>
+          {data.packageDistribution ? (
+            <div className="grid grid-cols-2 gap-3">
+              <div className="bg-muted/40 rounded-lg p-3">
+                <p className="text-xs text-muted-foreground">Minimum</p>
+                <p className="text-lg font-bold">₹{data.packageDistribution.min.toLocaleString('en-IN')}</p>
+              </div>
+              <div className="bg-muted/40 rounded-lg p-3">
+                <p className="text-xs text-muted-foreground">Maximum</p>
+                <p className="text-lg font-bold">₹{data.packageDistribution.max.toLocaleString('en-IN')}</p>
+              </div>
+              <div className="bg-muted/40 rounded-lg p-3">
+                <p className="text-xs text-muted-foreground">Average</p>
+                <p className="text-lg font-bold">₹{data.packageDistribution.avg.toLocaleString('en-IN')}</p>
+              </div>
+              <div className="bg-muted/40 rounded-lg p-3">
+                <p className="text-xs text-muted-foreground">Median</p>
+                <p className="text-lg font-bold">₹{data.packageDistribution.median.toLocaleString('en-IN')}</p>
+              </div>
+            </div>
+          ) : (
+            <p className="text-sm text-muted-foreground">No offers with a recorded package yet.</p>
+          )}
+
+          {Object.keys(data.offerResponseBreakdown).length > 0 && (
+            <div className="mt-4 pt-4 border-t">
+              <p className="text-xs text-muted-foreground mb-2">Offer Responses</p>
+              <div className="flex gap-2 flex-wrap">
+                {Object.entries(data.offerResponseBreakdown).map(([status, count]) => (
+                  <span key={status} className={`text-xs font-medium px-2 py-1 rounded-full ${OFFER_STATUS_COLOR[status] || 'bg-gray-100 text-gray-700'}`}>
+                    {status}: {count}
+                  </span>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Trend */}
+      <div className="bg-card border rounded-xl p-5">
+        <h2 className="font-semibold mb-4">Placements Trend</h2>
+        <ResponsiveContainer width="100%" height={220}>
+          <AreaChart data={data.trend}>
+            <defs>
+              <linearGradient id="placementTrendGrad" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="5%" stopColor="#16a34a" stopOpacity={0.2} />
+                <stop offset="95%" stopColor="#16a34a" stopOpacity={0} />
+              </linearGradient>
+            </defs>
+            <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
+            <XAxis dataKey="month" tick={{ fontSize: 11 }} tickLine={false} />
+            <YAxis tick={{ fontSize: 11 }} tickLine={false} axisLine={false} allowDecimals={false} />
+            <Tooltip
+              contentStyle={{ fontSize: 12, borderRadius: 8, border: '1px solid hsl(var(--border))' }}
+              formatter={(v: number) => [v, 'Placements']}
+            />
+            <Area type="monotone" dataKey="placements" stroke="#16a34a" fill="url(#placementTrendGrad)" strokeWidth={2} dot={{ r: 3, fill: '#16a34a' }} />
+          </AreaChart>
+        </ResponsiveContainer>
       </div>
     </div>
   );
@@ -1030,8 +1223,9 @@ function AddPartnerModal({ saving, setSaving, onClose, onSaved, setError }: {
   );
 }
 
-function DriveResultsModal({ drive, canEdit, setError, onClose, onChanged }: {
+function DriveResultsModal({ drive, canEdit, setError, onClose, onChanged, respondToOffer }: {
   drive: Drive; canEdit: boolean; setError: (s: string) => void; onClose: () => void; onChanged: () => void;
+  respondToOffer: (resultId: string, offerStatus: 'ACCEPTED' | 'DECLINED') => Promise<void>;
 }) {
   const [results, setResults] = useState<PlacementResultRow[]>([]);
   const [candidates, setCandidates] = useState<DriveCandidate[]>([]);
@@ -1057,6 +1251,11 @@ function DriveResultsModal({ drive, canEdit, setError, onClose, onChanged }: {
   }, [drive.id, setError]);
 
   useEffect(() => { fetchData(); }, [fetchData]);
+
+  const handleOfferResponse = async (resultId: string, offerStatus: 'ACCEPTED' | 'DECLINED') => {
+    await respondToOffer(resultId, offerStatus);
+    fetchData();
+  };
 
   const pickCandidate = (studentId: string) => {
     const c = candidates.find((cand) => cand.student.id === studentId);
@@ -1111,6 +1310,19 @@ function DriveResultsModal({ drive, canEdit, setError, onClose, onChanged }: {
               <div>
                 <span>{r.studentName}</span>
                 {r.designation && <p className="text-xs text-muted-foreground">{r.designation}</p>}
+                {r.result === 'SELECTED' && r.offerStatus && (
+                  <div className="flex items-center gap-2 mt-0.5">
+                    <span className={`text-[10px] font-medium px-1.5 py-0.5 rounded ${OFFER_STATUS_COLOR[r.offerStatus] || 'bg-gray-100 text-gray-600'}`}>
+                      Offer: {r.offerStatus}
+                    </span>
+                    {canEdit && r.offerStatus === 'PENDING' && (
+                      <>
+                        <button onClick={() => handleOfferResponse(r.id, 'ACCEPTED')} className="text-[11px] text-green-600 hover:underline">Accept</button>
+                        <button onClick={() => handleOfferResponse(r.id, 'DECLINED')} className="text-[11px] text-red-600 hover:underline">Decline</button>
+                      </>
+                    )}
+                  </div>
+                )}
               </div>
               <div className="flex items-center gap-2">
                 {r.package != null && <span className="text-muted-foreground text-xs">{fmt(r.package)}</span>}

@@ -158,6 +158,7 @@ const moduleNavItems: ModuleNavItem[] = [
       { label: 'Placement Pool',       to: '/placements?tab=pool',      icon: ListChecks,    module: 'PLACEMENTS' },
       { label: 'Softskill & Aptitude', to: '/placements?tab=softskill', icon: Mic2,          module: 'PLACEMENTS' },
       { label: 'Reports',              to: '/placements?tab=reports',   icon: BarChart2,     module: 'PLACEMENTS' },
+      { label: 'Analytics',            to: '/placements?tab=analytics', icon: TrendingUp,    module: 'PLACEMENTS', minLevel: 'ADMIN' },
     ],
   },
   { label: 'Admin & Ops',        to: '/admin-ops',         icon: Building2,     module: 'ADMIN' },
