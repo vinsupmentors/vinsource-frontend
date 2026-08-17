@@ -5,7 +5,7 @@ import html2canvas from 'html2canvas';
 import jsPDF from 'jspdf';
 import {
   Award, Loader2, RefreshCw, Download, Pencil, Trash2, X, Check,
-  ImagePlus, Sparkles, ChevronDown, AlertTriangle, Move,
+  ImagePlus, Sparkles, ChevronDown, AlertTriangle, Move, Mail, MailCheck,
 } from 'lucide-react';
 import { PhotoCropper, CourseCompletionTemplate } from './CertificateGenerator';
 
@@ -24,6 +24,8 @@ interface CertRow {
   batchLabel: string;
   issuedOn: string;
   photoUrl: string | null;
+  emailedAt: string | null;
+  emailedTo: string | null;
   generatedBy?: { firstName: string; lastName: string; employeeCode: string } | null;
 }
 
@@ -385,6 +387,65 @@ export default function BatchCertificatesPage() {
     }
   };
 
+  // ── Email: render the PDF exactly like a download, then upload it to the
+  // backend instead of saving locally. The backend attaches it, sends it to
+  // the student, and CCs the fixed ops addresses.
+  const [emailingId, setEmailingId] = useState<string | null>(null);
+  const [bulkEmailing, setBulkEmailing] = useState(false);
+  const [bulkEmailProgress, setBulkEmailProgress] = useState(0);
+  const [bulkEmailSummary, setBulkEmailSummary] = useState('');
+
+  const emailOne = async (row: CertRow): Promise<'sent' | 'skipped' | 'failed'> => {
+    const blob = await renderPdfBlob(row);
+    if (!blob) return 'failed';
+    const fd = new FormData();
+    fd.append('pdf', blob, certFileName(row));
+    try {
+      const { data } = await api.post(`/api/batch-certificates/${row.id}/email`, fd, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+      });
+      setCerts((prev) => prev.map((c) => (c.id === row.id ? { ...c, ...data.data } : c)));
+      return 'sent';
+    } catch (e: any) {
+      const msg: string = e?.response?.data?.message || '';
+      if (msg.toLowerCase().includes('no real email')) return 'skipped';
+      console.error('Certificate email failed', e);
+      return 'failed';
+    }
+  };
+
+  const emailSingle = async (row: CertRow) => {
+    setEmailingId(row.id);
+    setError('');
+    const result = await emailOne(row);
+    setEmailingId(null);
+    if (result === 'skipped') setError(`${row.studentName} has no email on file — couldn't send.`);
+    else if (result === 'failed') setError(`Failed to email ${row.studentName}'s certificate. Please try again.`);
+  };
+
+  const emailAll = async () => {
+    if (!certs.length) return;
+    if (!window.confirm(`Email all ${certs.length} certificates to their students now? Every email is also CC'd to v7032vinsup@gmail.com and v7030vinsup@gmail.com.`)) return;
+    setBulkEmailing(true);
+    setBulkEmailProgress(0);
+    setBulkEmailSummary('');
+    setError('');
+    let sent = 0, skipped = 0, failed = 0;
+    for (let i = 0; i < certs.length; i++) {
+      const result = await emailOne(certs[i]);
+      if (result === 'sent') sent++;
+      else if (result === 'skipped') skipped++;
+      else failed++;
+      setBulkEmailProgress(i + 1);
+    }
+    setBulkEmailing(false);
+    setBulkEmailSummary(
+      `Emailed ${sent} certificate${sent === 1 ? '' : 's'}.` +
+      (skipped ? ` ${skipped} skipped (no email on file).` : '') +
+      (failed ? ` ${failed} failed — try those again individually.` : '')
+    );
+  };
+
   if (loaded && !canView) {
     return (
       <div className="flex items-center justify-center py-24">
@@ -437,18 +498,31 @@ export default function BatchCertificatesPage() {
         </button>
 
         {certs.length > 0 && (
-          <button
-            onClick={downloadAll}
-            disabled={bulkDownloading}
-            className="flex items-center gap-2 px-3 py-2 border rounded-lg text-sm hover:bg-accent disabled:opacity-50 ml-auto"
-          >
-            {bulkDownloading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />}
-            {bulkDownloading ? `Downloading ${bulkProgress}/${certs.length}…` : `Download All (${certs.length})`}
-          </button>
+          <div className="flex items-center gap-2 ml-auto">
+            <button
+              onClick={downloadAll}
+              disabled={bulkDownloading}
+              className="flex items-center gap-2 px-3 py-2 border rounded-lg text-sm hover:bg-accent disabled:opacity-50"
+            >
+              {bulkDownloading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />}
+              {bulkDownloading ? `Downloading ${bulkProgress}/${certs.length}…` : `Download All (${certs.length})`}
+            </button>
+            {canEdit && (
+              <button
+                onClick={emailAll}
+                disabled={bulkEmailing}
+                className="flex items-center gap-2 px-3 py-2 border rounded-lg text-sm hover:bg-accent disabled:opacity-50"
+              >
+                {bulkEmailing ? <Loader2 className="w-4 h-4 animate-spin" /> : <Mail className="w-4 h-4" />}
+                {bulkEmailing ? `Emailing ${bulkEmailProgress}/${certs.length}…` : `Email All (${certs.length})`}
+              </button>
+            )}
+          </div>
         )}
       </div>
 
       {genMsg && <p className="text-sm text-green-700 bg-green-50 border border-green-200 rounded-lg px-3 py-2">{genMsg}</p>}
+      {bulkEmailSummary && <p className="text-sm text-blue-700 bg-blue-50 border border-blue-200 rounded-lg px-3 py-2">{bulkEmailSummary}</p>}
       {error && <p className="text-sm text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2">{error}</p>}
 
       {loading ? (
@@ -472,6 +546,11 @@ export default function BatchCertificatesPage() {
                 <p className="font-medium text-sm truncate" title={row.studentName}>{row.studentName}</p>
                 <p className="text-[11px] text-muted-foreground font-mono truncate">{row.certNo}</p>
                 <p className="text-[11px] text-muted-foreground truncate">{row.course} · {dmy(row.issuedOn)}</p>
+                {row.emailedAt && (
+                  <p className="text-[10px] text-green-700 flex items-center gap-1 mt-0.5" title={`Sent to ${row.emailedTo}`}>
+                    <MailCheck className="w-3 h-3" /> Emailed {dmy(row.emailedAt)}
+                  </p>
+                )}
               </div>
               <div className="flex gap-1.5">
                 <button onClick={() => setEditing(row)} className="flex-1 flex items-center justify-center gap-1 px-2 py-1.5 border rounded-lg text-xs hover:bg-accent">
@@ -481,6 +560,16 @@ export default function BatchCertificatesPage() {
                   <Download className="w-3.5 h-3.5" /> PDF
                 </button>
               </div>
+              {canEdit && (
+                <button
+                  onClick={() => emailSingle(row)}
+                  disabled={emailingId === row.id || bulkEmailing}
+                  className="w-full flex items-center justify-center gap-1 px-2 py-1.5 border rounded-lg text-xs hover:bg-accent disabled:opacity-50"
+                >
+                  {emailingId === row.id ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Mail className="w-3.5 h-3.5" />}
+                  {emailingId === row.id ? 'Sending…' : row.emailedAt ? 'Re-send Email' : 'Email to Student'}
+                </button>
+              )}
             </div>
           ))}
         </div>
