@@ -1629,8 +1629,14 @@ function AddSessionModal({ saving, setSaving, onClose, onSaved, setError }: {
 
   useEffect(() => {
     api.get('/api/placements/filters').then((res) => setSchedules(res.data.data.schedules || [])).catch(() => setSchedules([]));
+    // Same convention as Production.tsx's trainer pickers (AssignTrainerModal /
+    // ReportFilterBar) — no backend "trainer" concept exists, so we filter the
+    // full employee list to the Production department by name substring (the
+    // DB has duplicate "Production" department rows) and exclude departed staff.
     api.get('/api/employees', { params: { limit: 500 } })
-      .then((res) => setTrainers((res.data.data || []).filter((e: { status: string }) => e.status !== 'TERMINATED' && e.status !== 'RESIGNED')))
+      .then((res) => setTrainers((res.data.data || []).filter((e: { department?: { name?: string }; status: string }) =>
+        e.department?.name?.toLowerCase().includes('production') && e.status !== 'TERMINATED' && e.status !== 'RESIGNED'
+      )))
       .catch(() => setTrainers([]));
   }, []);
 
