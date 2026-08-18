@@ -49,7 +49,7 @@ interface PoolTrainerFeedback {
 }
 interface PoolStudent {
   id: string; studentCode: string; firstName: string; lastName: string; phone: string;
-  track: 'JRP' | 'IOP' | 'PAP'; movedToPlacementAt?: string | null;
+  track: 'JRP' | 'IOP' | 'PAP' | 'PT'; movedToPlacementAt?: string | null;
   photo?: string | null;
   enrollments: { id: string; schedule: { course: { name: string }; batch: { code: string } } }[];
   trainerFeedbacks?: PoolTrainerFeedback[];
@@ -153,6 +153,7 @@ export default function PlacementsPage() {
   const [showAddDrive, setShowAddDrive] = useState(false);
   const [showAddPartner, setShowAddPartner] = useState(false);
   const [showBulkPush, setShowBulkPush] = useState(false);
+  const [showAddPt, setShowAddPt] = useState(false);
   const [resultsDrive, setResultsDrive] = useState<Drive | null>(null);
   const [saving, setSaving] = useState(false);
 
@@ -387,6 +388,11 @@ export default function PlacementsPage() {
                   <option value="">All Batches</option>
                   {filterOptions.batches.map((b) => <option key={b.id} value={b.id}>{b.code}</option>)}
                 </select>
+                {canEdit && (
+                  <button onClick={() => setShowAddPt(true)} className="text-xs px-3 py-1.5 border rounded-lg hover:bg-muted/50 flex items-center gap-1.5 font-medium">
+                    <Plus className="w-3.5 h-3.5" /> Add PT Student
+                  </button>
+                )}
                 {canEdit && (
                   <button onClick={() => setShowBulkPush(true)} className="text-xs px-3 py-1.5 border rounded-lg hover:bg-muted/50 flex items-center gap-1.5 font-medium">
                     <FileUp className="w-3.5 h-3.5" /> Bulk Upload
@@ -788,6 +794,9 @@ export default function PlacementsPage() {
       )}
       {showBulkPush && (
         <BulkPushToPoolModal onClose={() => setShowBulkPush(false)} setError={setError} onSaved={() => fetchPool()} />
+      )}
+      {showAddPt && (
+        <AddPtStudentModal onClose={() => setShowAddPt(false)} setError={setError} onSaved={() => fetchPool()} />
       )}
       {showAddDrive && (
         <AddDriveModal partners={partners} saving={saving} setSaving={setSaving} onClose={() => setShowAddDrive(false)} onSaved={() => { setShowAddDrive(false); fetchAll(); }} setError={setError} />
@@ -1370,6 +1379,74 @@ function BulkPushToPoolModal({ onClose, setError, onSaved }: {
               {uploading ? 'Uploading...' : `Push ${codes.length || ''} student${codes.length === 1 ? '' : 's'}`}
             </button>
           )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// PT ("Placement Training") students join directly for placement services —
+// no course, no rank card, no trainer projects/tests. They land straight in
+// the pool via this modal, then behave like any other pool candidate: same
+// welcome email, same track-scoped onboarding document e-sign, same
+// portfolio-only readiness gate.
+function AddPtStudentModal({ onClose, setError, onSaved }: {
+  onClose: () => void; setError: (s: string) => void; onSaved: () => void;
+}) {
+  const [studentCode, setStudentCode] = useState('');
+  const [firstName, setFirstName] = useState('');
+  const [lastName, setLastName] = useState('');
+  const [email, setEmail] = useState('');
+  const [phone, setPhone] = useState('');
+  const [saving, setSaving] = useState(false);
+
+  const submit = async () => {
+    if (!studentCode.trim() || !firstName.trim() || !email.trim()) {
+      setError('Student ID, first name, and email are required');
+      return;
+    }
+    setSaving(true);
+    setError('');
+    try {
+      await api.post('/api/placements/pool/add-pt-student', {
+        studentCode: studentCode.trim(), firstName: firstName.trim(), lastName: lastName.trim(),
+        email: email.trim(), phone: phone.trim(),
+      });
+      onSaved();
+      onClose();
+    } catch (err: unknown) {
+      setError(errMsg(err, 'Failed to add student'));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
+      <div className="bg-white rounded-xl w-full max-w-md p-6 space-y-4">
+        <div className="flex items-center justify-between">
+          <h2 className="font-semibold text-lg">Add PT Student</h2>
+          <button onClick={onClose}><X className="w-4 h-4" /></button>
+        </div>
+        <p className="text-xs text-muted-foreground">
+          PT students join directly for placement — no course, no rank card. They're added straight to the
+          Placement Pool, get their login emailed immediately, and follow the same onboarding document
+          e-sign + portfolio steps as everyone else before they're marked ready.
+        </p>
+        <div className="space-y-3">
+          <input className="w-full px-3 py-2 border rounded-lg text-sm" placeholder="Student ID *" value={studentCode} onChange={(e) => setStudentCode(e.target.value)} />
+          <div className="grid grid-cols-2 gap-2">
+            <input className="w-full px-3 py-2 border rounded-lg text-sm" placeholder="First Name *" value={firstName} onChange={(e) => setFirstName(e.target.value)} />
+            <input className="w-full px-3 py-2 border rounded-lg text-sm" placeholder="Last Name" value={lastName} onChange={(e) => setLastName(e.target.value)} />
+          </div>
+          <input className="w-full px-3 py-2 border rounded-lg text-sm" placeholder="Email *" type="email" value={email} onChange={(e) => setEmail(e.target.value)} />
+          <input className="w-full px-3 py-2 border rounded-lg text-sm" placeholder="Phone" value={phone} onChange={(e) => setPhone(e.target.value)} />
+        </div>
+        <div className="flex justify-end gap-2">
+          <button onClick={onClose} className="px-4 py-2 text-sm rounded-lg border">Cancel</button>
+          <button onClick={submit} disabled={saving} className="px-4 py-2 text-sm rounded-lg bg-blue-600 text-white disabled:opacity-50">
+            {saving ? 'Adding...' : 'Add to Pool'}
+          </button>
         </div>
       </div>
     </div>

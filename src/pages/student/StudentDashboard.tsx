@@ -29,6 +29,7 @@ interface CourseBlock {
 
 const TRACK_LABEL: Record<string, string> = {
   JRP: 'Job Ready Program', IOP: 'Industry Oriented Program', PAP: 'Placement Assurance Program',
+  PT: 'Placement Training',
 };
 
 interface BadgeRow { id: string; emoji: string; label: string; desc: string; earned: boolean }

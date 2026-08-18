@@ -14,7 +14,7 @@ export interface StudentProfile {
   email?: string;
   phone?: string;
   photo?: string;
-  track: 'JRP' | 'IOP' | 'PAP';
+  track: 'JRP' | 'IOP' | 'PAP' | 'PT';
   status: string;
   joiningDate?: string;
   dateOfBirth?: string;

@@ -57,7 +57,7 @@ type Batch = {
   createdBy?: EmployeeLite | null; schedules: BatchCourseSchedule[];
 };
 
-type StudentTrack = 'JRP' | 'IOP' | 'PAP';
+type StudentTrack = 'JRP' | 'IOP' | 'PAP' | 'PT';
 type StudentStatus = 'ENROLLED' | 'ONBOARDED' | 'ACTIVE' | 'INACTIVE' | 'COMPLETED' | 'IN_PLACEMENT' | 'PLACED' | 'BATCH_TRANSFER';
 type EnrollmentStatus = 'ACTIVE' | 'COMPLETED' | 'DROPPED';
 type StudentBatchEnrollment = {
@@ -106,9 +106,10 @@ const DAY_PATTERNS: { value: DayPattern; label: string }[] = [
   { value: 'MON_SAT', label: 'Mon – Sat' }, { value: 'SAT_SUN', label: 'Sat – Sun' }, { value: 'SUNDAY_ONLY', label: 'Sunday only' },
 ];
 const MODES: DeliveryMode[] = ['ONLINE', 'OFFLINE', 'HYBRID'];
-const TRACKS: StudentTrack[] = ['JRP', 'IOP', 'PAP'];
+const TRACKS: StudentTrack[] = ['JRP', 'IOP', 'PAP', 'PT'];
 const TRACK_LABEL: Record<StudentTrack, string> = {
   JRP: 'JRP — Job Readiness', IOP: 'IOP — Interview Opportunities', PAP: 'PAP — Placement Assurance',
+  PT: 'PT — Placement Training (direct)',
 };
 const STUDENT_STATUSES: StudentStatus[] = ['ENROLLED', 'ONBOARDED', 'ACTIVE', 'INACTIVE', 'COMPLETED', 'IN_PLACEMENT', 'PLACED', 'BATCH_TRANSFER'];
 const STUDENT_STATUS_LABEL: Record<StudentStatus, string> = {

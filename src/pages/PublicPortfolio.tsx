@@ -29,6 +29,7 @@ const LEVEL_PCT: Record<string, number> = {
 
 const TRACK_LABEL: Record<string, string> = {
   JRP: 'Job Ready Program', IOP: 'Industry Oriented Program', PAP: 'Placement Assurance Program',
+  PT: 'Placement Training',
 };
 
 /** The polished portfolio rendering — used by the public QR/link page. */

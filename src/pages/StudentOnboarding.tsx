@@ -65,7 +65,7 @@ interface DocumentTemplate {
   _count: { signatures: number };
 }
 
-const TRACKS = ['JRP', 'IOP', 'PAP'] as const;
+const TRACKS = ['JRP', 'IOP', 'PAP', 'PT'] as const;
 
 interface BatchSummary {
   id: string;
