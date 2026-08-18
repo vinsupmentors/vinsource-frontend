@@ -1,7 +1,13 @@
 import { Fragment, useEffect, useState, useCallback } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import api from '@/lib/api';
+import api, { BASE_URL } from '@/lib/api';
 import { formatDate, formatDateTime } from '@/lib/utils';
+
+// Files uploaded by the backend (project submissions) come back as relative
+// paths like "/uploads/...". A bare <a href> resolves those against the
+// frontend's own origin, not the API. Absolute URLs (a pasted link
+// submission) are left untouched.
+const fileUrl = (path: string) => (/^https?:\/\//i.test(path) ? path : `${BASE_URL}${path}`);
 import { useModuleAccess } from '@/hooks/useModuleAccess';
 import * as XLSX from 'xlsx';
 import {
@@ -2194,9 +2200,11 @@ interface StudentProfileData {
     scheduleId: string; courseName: string; batchCode: string;
     rank: number | null; totalStudents: number;
     marksObtained: number; marksMax: number; percentage: number; classAverage: number;
+    attendance: { present: number; absent: number; late: number; total: number };
+    tests: { id: string; title: string; type: 'Offline' | 'Online'; marksObtained: number; maxMarks: number; date: string }[];
     projects: {
       id: string; projectTitle: string; moduleTitle: string; isCapstone: boolean;
-      status: string; submittedAt: string; graded: boolean;
+      status: string; submittedAt: string; fileUrl?: string | null; linkUrl?: string | null; graded: boolean;
       grade?: number | null; maxGrade?: number | null; reviewNote?: string | null;
     }[];
     moduleFeedback: {
@@ -2324,6 +2332,11 @@ function PlacementStudentProfileModal({ student: poolStudent, onClose }: {
                           <div>
                             <p className="text-sm font-medium">{p.projectTitle}{p.isCapstone ? ' 🎓' : ''}</p>
                             <p className="text-xs text-muted-foreground">{p.moduleTitle} · {p.courseName}</p>
+                            {(p.fileUrl || p.linkUrl) && (
+                              <a href={p.fileUrl ? fileUrl(p.fileUrl) : p.linkUrl!} target="_blank" rel="noreferrer" className="text-xs text-blue-600 hover:underline">
+                                View submission
+                              </a>
+                            )}
                           </div>
                           <div className="text-right flex-shrink-0">
                             <span className={`text-[11px] font-medium px-2 py-0.5 rounded-full ${p.status === 'REVIEWED' ? 'bg-green-100 text-green-700' : p.status === 'SUBMITTED' ? 'bg-blue-100 text-blue-700' : 'bg-gray-100 text-gray-600'}`}>{p.status}</span>
@@ -2427,6 +2440,38 @@ function PlacementStudentProfileModal({ student: poolStudent, onClose }: {
                       </div>
                     ))}
                   </div>
+                  {rc.attendance.total > 0 && (
+                    <div className="p-4 border-b space-y-2">
+                      <h5 className="text-xs font-semibold uppercase text-muted-foreground tracking-wide flex items-center gap-1">
+                        <CalendarClock className="w-3.5 h-3.5" /> Attendance
+                      </h5>
+                      <div className="flex items-center gap-4 text-sm">
+                        <span className="font-semibold text-green-700">{rc.attendance.present} present</span>
+                        {rc.attendance.late > 0 && <span className="font-semibold text-amber-600">{rc.attendance.late} late</span>}
+                        {rc.attendance.absent > 0 && <span className="font-semibold text-red-600">{rc.attendance.absent} absent</span>}
+                        <span className="text-muted-foreground">of {rc.attendance.total} classes</span>
+                        <span className="text-xs text-muted-foreground ml-auto">
+                          {Math.round(((rc.attendance.present + rc.attendance.late) / rc.attendance.total) * 100)}%
+                        </span>
+                      </div>
+                    </div>
+                  )}
+                  {rc.tests.length > 0 && (
+                    <div className="p-4 border-b space-y-2">
+                      <h5 className="text-xs font-semibold uppercase text-muted-foreground tracking-wide flex items-center gap-1">
+                        <ListChecks className="w-3.5 h-3.5" /> Test Marks
+                      </h5>
+                      {rc.tests.map((t) => (
+                        <div key={t.id} className="flex items-center justify-between gap-2 py-1.5 border-b last:border-0">
+                          <div className="flex items-center gap-2">
+                            <span className={`text-[10px] font-medium px-1.5 py-0.5 rounded ${t.type === 'Online' ? 'bg-purple-100 text-purple-700' : 'bg-gray-100 text-gray-600'}`}>{t.type}</span>
+                            <p className="text-sm font-medium">{t.title}</p>
+                          </div>
+                          <p className="text-sm font-bold flex-shrink-0">{t.marksObtained}/{t.maxMarks}</p>
+                        </div>
+                      ))}
+                    </div>
+                  )}
                   {rc.projects.length > 0 && (
                     <div className="p-4 space-y-2">
                       <h5 className="text-xs font-semibold uppercase text-muted-foreground tracking-wide flex items-center gap-1">
@@ -2437,6 +2482,11 @@ function PlacementStudentProfileModal({ student: poolStudent, onClose }: {
                           <div>
                             <p className="text-sm font-medium">{p.projectTitle}{p.isCapstone ? ' 🎓' : ''}</p>
                             <p className="text-xs text-muted-foreground">{p.moduleTitle}</p>
+                            {(p.fileUrl || p.linkUrl) && (
+                              <a href={p.fileUrl ? fileUrl(p.fileUrl) : p.linkUrl!} target="_blank" rel="noreferrer" className="text-xs text-blue-600 hover:underline">
+                                View submission
+                              </a>
+                            )}
                           </div>
                           <div className="text-right flex-shrink-0">
                             <span className={`text-[11px] font-medium px-1.5 py-0.5 rounded ${p.status === 'REVIEWED' ? 'bg-green-100 text-green-700' : p.status === 'SUBMITTED' ? 'bg-blue-100 text-blue-700' : 'bg-gray-100 text-gray-600'}`}>{p.status}</span>
