@@ -1619,16 +1619,42 @@ function AddDriveModal({ partners, saving, setSaving, onClose, onSaved, setError
   );
 }
 
+function parseStudentCodeFile(file: File, onParsed: (codes: string[]) => void, onError: (msg: string) => void) {
+  const reader = new FileReader();
+  reader.onload = (e) => {
+    try {
+      const data = e.target?.result;
+      const wb = XLSX.read(data, { type: 'binary' });
+      const sheet = wb.Sheets[wb.SheetNames[0]];
+      const json = XLSX.utils.sheet_to_json<Record<string, string>>(sheet, { defval: '' });
+      const parsed = json
+        .map((r) => String(r.studentCode || r.studentcode || r.StudentCode || r['Student Code'] || '').trim())
+        .filter(Boolean);
+      onParsed(parsed);
+    } catch {
+      onError('Could not parse the file. Please use the template format.');
+    }
+  };
+  reader.readAsBinaryString(file);
+}
+
+function downloadStudentCodeTemplate(filename: string) {
+  const ws = XLSX.utils.json_to_sheet([{ studentCode: 'VS70739' }, { studentCode: 'VS70770' }]);
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, 'Students');
+  XLSX.writeFile(wb, filename);
+}
+
 function AddSessionModal({ saving, setSaving, onClose, onSaved, setError }: {
   saving: boolean; setSaving: (v: boolean) => void; onClose: () => void; onSaved: () => void; setError: (s: string) => void;
 }) {
   const [form, setForm] = useState({ type: 'SOFTSKILL' as SoftskillType, topic: '', startDate: '', endDate: '', trainerId: '', notes: '' });
-  const [schedules, setSchedules] = useState<ScheduleOption[]>([]);
   const [trainers, setTrainers] = useState<{ id: string; firstName: string; lastName: string }[]>([]);
-  const [scheduleIds, setScheduleIds] = useState<string[]>([]);
+  const [codes, setCodes] = useState<string[]>([]);
+  const [fileName, setFileName] = useState('');
+  const [result, setResult] = useState<{ createdCount: number; notFoundCodes: string[] } | null>(null);
 
   useEffect(() => {
-    api.get('/api/placements/filters').then((res) => setSchedules(res.data.data.schedules || [])).catch(() => setSchedules([]));
     // Same convention as Production.tsx's trainer pickers (AssignTrainerModal /
     // ReportFilterBar) — no backend "trainer" concept exists, so we filter the
     // full employee list to the Production department by name substring (the
@@ -1640,27 +1666,51 @@ function AddSessionModal({ saving, setSaving, onClose, onSaved, setError }: {
       .catch(() => setTrainers([]));
   }, []);
 
-  const toggleSchedule = (id: string) => setScheduleIds((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
-  const rosterCount = schedules.filter((s) => scheduleIds.includes(s.id)).reduce((sum, s) => sum + s.activeStudentCount, 0);
+  const onFile = (file: File) => {
+    setFileName(file.name);
+    parseStudentCodeFile(file, setCodes, setError);
+  };
 
   const submit = async () => {
     if (!form.topic || !form.startDate) { setError('Topic and start date are required'); return; }
     setSaving(true);
     setError('');
     try {
-      await api.post('/api/placements/softskill-sessions', {
+      const res = await api.post('/api/placements/softskill-sessions', {
         ...form,
         endDate: form.endDate || undefined,
         trainerId: form.trainerId || undefined,
-        scheduleIds,
+        studentCodes: codes,
       });
-      onSaved();
+      setResult({ createdCount: res.data.data.rosterCount ?? 0, notFoundCodes: res.data.data.notFoundCodes || [] });
     } catch (err: unknown) {
       setError(errMsg(err, 'Failed to create session'));
     } finally {
       setSaving(false);
     }
   };
+
+  if (result) {
+    return (
+      <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
+        <div className="bg-white rounded-xl w-full max-w-lg p-6 space-y-4">
+          <h2 className="font-semibold text-lg">Session Created</h2>
+          <p className="text-sm">{result.createdCount} student{result.createdCount === 1 ? '' : 's'} added to the roster and emailed.</p>
+          {result.notFoundCodes.length > 0 && (
+            <div className="space-y-1">
+              <p className="text-sm text-amber-700 font-medium">{result.notFoundCodes.length} code{result.notFoundCodes.length === 1 ? '' : 's'} not found:</p>
+              <div className="border rounded-lg max-h-32 overflow-y-auto p-2 text-xs font-mono text-muted-foreground">
+                {result.notFoundCodes.join(', ')}
+              </div>
+            </div>
+          )}
+          <div className="flex justify-end">
+            <button onClick={onSaved} className="px-4 py-2 text-sm rounded-lg bg-blue-600 text-white">Done</button>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
@@ -1694,19 +1744,20 @@ function AddSessionModal({ saving, setSaving, onClose, onSaved, setError }: {
             </select>
           </div>
           <div>
-            <label className="text-xs text-muted-foreground">Add students from sub-batch(es) — {rosterCount} student{rosterCount === 1 ? '' : 's'} selected</label>
-            <div className="border rounded-lg max-h-40 overflow-y-auto divide-y mt-1">
-              {schedules.length === 0 ? (
-                <p className="text-xs text-muted-foreground px-3 py-2">No sub-batches found.</p>
-              ) : schedules.map((s) => (
-                <label key={s.id} className="flex items-center gap-2 px-3 py-1.5 text-xs hover:bg-muted/30 cursor-pointer">
-                  <input type="checkbox" checked={scheduleIds.includes(s.id)} onChange={() => toggleSchedule(s.id)} />
-                  <span className="flex-1">{s.batchCode} · {s.courseName} ({s.timing})</span>
-                  <span className="text-muted-foreground">{s.activeStudentCount} active</span>
-                </label>
-              ))}
+            <label className="text-xs text-muted-foreground">Add students (optional) — {codes.length} student code{codes.length === 1 ? '' : 's'}</label>
+            <div className="flex items-center gap-2 mt-1">
+              <button type="button" onClick={() => downloadStudentCodeTemplate('softskill_session_students_template.xlsx')} className="text-xs px-3 py-2 border rounded-lg hover:bg-muted/50 flex items-center gap-1 shrink-0">
+                <Download className="w-3 h-3" /> Template
+              </button>
+              <input
+                type="file"
+                accept=".xlsx,.xls,.csv"
+                onChange={(e) => { const f = e.target.files?.[0]; if (f) onFile(f); }}
+                className="w-full text-xs border rounded-lg px-2 py-1.5"
+              />
             </div>
-            <p className="text-[11px] text-muted-foreground mt-1">You can add individual students afterward from the session's Attendance screen. Everyone added gets an email about this session.</p>
+            {fileName && <p className="text-xs text-muted-foreground mt-1">{fileName} — {codes.length} code{codes.length === 1 ? '' : 's'} found.</p>}
+            <p className="text-[11px] text-muted-foreground mt-1">Upload an Excel/CSV with a <code>studentCode</code> column. You can add more students afterward from the session's Attendance screen. Everyone added gets an email about this session.</p>
           </div>
           <textarea rows={2} className="w-full px-3 py-2 border rounded-lg text-sm" placeholder="Notes (optional)" value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} />
         </div>
@@ -1812,29 +1863,51 @@ function AttendanceModal({ session, canEdit, setError, onClose, onChanged }: {
 function AddStudentsToSessionModal({ sessionId, setError, onClose, onSaved }: {
   sessionId: string; setError: (s: string) => void; onClose: () => void; onSaved: () => void;
 }) {
-  const [schedules, setSchedules] = useState<ScheduleOption[]>([]);
-  const [scheduleIds, setScheduleIds] = useState<string[]>([]);
+  const [codes, setCodes] = useState<string[]>([]);
+  const [fileName, setFileName] = useState('');
   const [saving, setSaving] = useState(false);
+  const [result, setResult] = useState<{ added: number; alreadyIn: number; notFoundCodes: string[] } | null>(null);
 
-  useEffect(() => {
-    api.get('/api/placements/filters').then((res) => setSchedules(res.data.data.schedules || [])).catch(() => setSchedules([]));
-  }, []);
-
-  const toggle = (id: string) => setScheduleIds((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
+  const onFile = (file: File) => {
+    setFileName(file.name);
+    parseStudentCodeFile(file, setCodes, setError);
+  };
 
   const submit = async () => {
-    if (!scheduleIds.length) { setError('Select at least one sub-batch'); return; }
+    if (!codes.length) { setError('Choose a file with a studentCode column first'); return; }
     setSaving(true);
     setError('');
     try {
-      await api.post(`/api/placements/softskill-sessions/${sessionId}/students`, { scheduleIds });
-      onSaved();
+      const res = await api.post(`/api/placements/softskill-sessions/${sessionId}/students`, { studentCodes: codes });
+      setResult(res.data.data);
     } catch (err: unknown) {
       setError(errMsg(err, 'Failed to add students'));
     } finally {
       setSaving(false);
     }
   };
+
+  if (result) {
+    return (
+      <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-[60] p-4">
+        <div className="bg-white rounded-xl w-full max-w-md p-6 space-y-4">
+          <h2 className="font-semibold text-lg">Students Added</h2>
+          <p className="text-sm">{result.added} added and emailed{result.alreadyIn ? `, ${result.alreadyIn} already in the session` : ''}.</p>
+          {result.notFoundCodes.length > 0 && (
+            <div className="space-y-1">
+              <p className="text-sm text-amber-700 font-medium">{result.notFoundCodes.length} code{result.notFoundCodes.length === 1 ? '' : 's'} not found:</p>
+              <div className="border rounded-lg max-h-32 overflow-y-auto p-2 text-xs font-mono text-muted-foreground">
+                {result.notFoundCodes.join(', ')}
+              </div>
+            </div>
+          )}
+          <div className="flex justify-end">
+            <button onClick={onSaved} className="px-4 py-2 text-sm rounded-lg bg-blue-600 text-white">Done</button>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-[60] p-4">
@@ -1843,21 +1916,23 @@ function AddStudentsToSessionModal({ sessionId, setError, onClose, onSaved }: {
           <h2 className="font-semibold text-lg">Add Students</h2>
           <button onClick={onClose}><X className="w-4 h-4" /></button>
         </div>
-        <div className="border rounded-lg max-h-56 overflow-y-auto divide-y">
-          {schedules.length === 0 ? (
-            <p className="text-xs text-muted-foreground px-3 py-2">No sub-batches found.</p>
-          ) : schedules.map((s) => (
-            <label key={s.id} className="flex items-center gap-2 px-3 py-1.5 text-xs hover:bg-muted/30 cursor-pointer">
-              <input type="checkbox" checked={scheduleIds.includes(s.id)} onChange={() => toggle(s.id)} />
-              <span className="flex-1">{s.batchCode} · {s.courseName} ({s.timing})</span>
-              <span className="text-muted-foreground">{s.activeStudentCount} active</span>
-            </label>
-          ))}
+        <p className="text-xs text-muted-foreground">Upload an Excel/CSV file with a single <code>studentCode</code> column (e.g. <code>VS70739</code>) — same format as the Placement Pool bulk upload.</p>
+        <div className="flex items-center gap-2">
+          <button type="button" onClick={() => downloadStudentCodeTemplate('softskill_session_students_template.xlsx')} className="text-xs px-3 py-2 border rounded-lg hover:bg-muted/50 flex items-center gap-1 shrink-0">
+            <Download className="w-3 h-3" /> Template
+          </button>
+          <input
+            type="file"
+            accept=".xlsx,.xls,.csv"
+            onChange={(e) => { const f = e.target.files?.[0]; if (f) onFile(f); }}
+            className="w-full text-xs border rounded-lg px-2 py-1.5"
+          />
         </div>
+        {fileName && <p className="text-xs text-muted-foreground">{fileName} — {codes.length} code{codes.length === 1 ? '' : 's'} found.</p>}
         <p className="text-[11px] text-muted-foreground">Students already in this session are skipped automatically. Newly added students get an email.</p>
         <div className="flex justify-end gap-2">
           <button onClick={onClose} className="px-4 py-2 text-sm rounded-lg border">Cancel</button>
-          <button onClick={submit} disabled={saving} className="px-4 py-2 text-sm rounded-lg bg-blue-600 text-white disabled:opacity-50">{saving ? 'Adding...' : 'Add'}</button>
+          <button onClick={submit} disabled={saving || !codes.length} className="px-4 py-2 text-sm rounded-lg bg-blue-600 text-white disabled:opacity-50">{saving ? 'Adding...' : `Add ${codes.length || ''} student${codes.length === 1 ? '' : 's'}`}</button>
         </div>
       </div>
     </div>
