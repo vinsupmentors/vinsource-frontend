@@ -2187,7 +2187,8 @@ interface StudentProfileData {
   results: {
     id: string; result: string; package?: number | null; designation?: string | null;
     joiningDate?: string | null; offerLetterUrl?: string | null;
-    drive: { id: string; partner: { name: string } };
+    companyName?: string | null;
+    drive?: { id: string; partner: { name: string } } | null;
   }[];
   rankCard: {
     scheduleId: string; courseName: string; batchCode: string;
@@ -2336,7 +2337,7 @@ function PlacementStudentProfileModal({ student: poolStudent, onClose }: {
                     {data.results.map((r) => (
                       <div key={r.id} className={`rounded-xl p-4 space-y-1 ${r.result === 'SELECTED' ? 'bg-green-50' : 'bg-muted/20'}`}>
                         <div className="flex items-center justify-between">
-                          <span className="font-medium text-sm">{r.drive.partner.name}</span>
+                          <span className="font-medium text-sm">{r.drive?.partner.name || r.companyName || 'Direct offer'}</span>
                           <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${RESULT_COLOR[r.result] || 'bg-gray-100 text-gray-600'}`}>{r.result}</span>
                         </div>
                         {r.designation && <p className="text-xs text-muted-foreground">{r.designation}{r.package ? ` · ${fmt(r.package)} LPA` : ''}</p>}
