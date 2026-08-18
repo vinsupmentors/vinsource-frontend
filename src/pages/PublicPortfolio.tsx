@@ -210,6 +210,11 @@ export function PortfolioView({ data }: { data: PublicPortfolioData }) {
             )}
           </div>
         </div>
+
+        {/* ── Footer ── */}
+        <div className="text-center pt-6">
+          <p className="text-xs text-slate-400">Portfolio by <span className="font-semibold text-slate-500">Vinsup Skill Academy</span></p>
+        </div>
       </div>
     </div>
   );

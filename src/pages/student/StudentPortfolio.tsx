@@ -43,14 +43,82 @@ const normalizeSkill = (s: Skill): Skill =>
 // quick-add suggestion chips once a role is picked. "Other" has no
 // suggestions — the student just adds their own skills manually.
 const ROLE_SKILLS: Record<string, string[]> = {
-  'Data Analyst': ['SQL', 'Excel', 'Python', 'Power BI', 'Tableau', 'Statistics', 'Data Cleaning', 'Data Visualization'],
-  'Data Scientist': ['Python', 'Machine Learning', 'Pandas', 'NumPy', 'SQL', 'Data Visualization', 'Statistics', 'Deep Learning'],
-  'Digital Marketing Executive': ['SEO', 'Social Media Marketing', 'Google Ads', 'Meta Ads', 'Content Marketing', 'Google Analytics', 'Email Marketing', 'Copywriting'],
-  'UI/UX & Graphic Designer': ['Figma', 'Adobe XD', 'Photoshop', 'Illustrator', 'Wireframing', 'Prototyping', 'User Research', 'Canva'],
-  'Full Stack Developer': ['HTML', 'CSS', 'JavaScript', 'React', 'Node.js', 'MongoDB', 'Express', 'Git'],
+  'Data Analyst': [
+    'SQL', 'Excel', 'Python', 'R', 'Power BI', 'Tableau', 'Statistics', 'Data Cleaning',
+    'Data Visualization', 'Google Sheets', 'Data Wrangling', 'Pandas', 'NumPy', 'A/B Testing',
+    'Business Intelligence', 'Data Modeling', 'ETL', 'Google Analytics', 'Dashboarding', 'Storytelling with Data',
+  ],
+  'Data Scientist': [
+    'Python', 'Machine Learning', 'Deep Learning', 'Pandas', 'NumPy', 'SQL', 'Data Visualization',
+    'Statistics', 'Scikit-learn', 'TensorFlow', 'PyTorch', 'Natural Language Processing', 'Feature Engineering',
+    'Data Wrangling', 'R', 'Big Data', 'Hadoop', 'Spark', 'Model Deployment', 'A/B Testing',
+  ],
+  'Frontend Developer': [
+    'HTML', 'CSS', 'JavaScript', 'TypeScript', 'React', 'Vue.js', 'Angular', 'Responsive Design',
+    'Tailwind CSS', 'Bootstrap', 'Sass', 'Webpack', 'Git', 'REST APIs', 'DOM Manipulation', 'Redux',
+    'Figma', 'Cross-Browser Testing', 'Web Accessibility', 'Performance Optimization',
+  ],
+  'Backend Developer': [
+    'Node.js', 'Express.js', 'Python', 'Django', 'Flask', 'Java', 'Spring Boot', 'REST APIs',
+    'GraphQL', 'SQL', 'MongoDB', 'PostgreSQL', 'MySQL', 'Redis', 'Authentication & Authorization',
+    'Microservices', 'Docker', 'Git', 'API Design', 'System Design',
+  ],
+  'Full Stack Developer': [
+    'HTML', 'CSS', 'JavaScript', 'React', 'Node.js', 'Express.js', 'MongoDB', 'SQL', 'REST APIs',
+    'Git', 'Docker', 'TypeScript', 'Redux', 'Authentication', 'System Design', 'AWS', 'CI/CD',
+    'Testing (Jest)', 'Responsive Design', 'GraphQL',
+  ],
+  'MERN Stack Developer': [
+    'MongoDB', 'Express.js', 'React', 'Node.js', 'JavaScript', 'Redux', 'REST APIs', 'JWT Authentication',
+    'Mongoose', 'HTML', 'CSS', 'Tailwind CSS', 'Git', 'Postman', 'API Integration', 'Responsive Design',
+    'Context API', 'Webpack', 'Deployment (Vercel/Heroku)', 'Debugging',
+  ],
+  'UI/UX Designer': [
+    'Figma', 'Adobe XD', 'Photoshop', 'Illustrator', 'Wireframing', 'Prototyping', 'User Research',
+    'Usability Testing', 'Canva', 'Sketch', 'Design Systems', 'Interaction Design', 'Typography',
+    'Color Theory', 'Information Architecture', 'Persona Development', 'User Journey Mapping',
+    'Responsive Design', 'Accessibility', 'InVision',
+  ],
+  'Digital Marketer': [
+    'SEO', 'Social Media Marketing', 'Google Ads', 'Meta Ads', 'Content Marketing', 'Google Analytics',
+    'Email Marketing', 'Copywriting', 'Content Creation', 'Canva', 'SEM', 'Affiliate Marketing',
+    'Influencer Marketing', 'Marketing Automation', 'Lead Generation', 'Brand Strategy', 'Keyword Research',
+    'WordPress', 'Video Marketing', 'Conversion Rate Optimization',
+  ],
+  'Cyber Security Analyst': [
+    'Network Security', 'Ethical Hacking', 'Penetration Testing', 'Firewalls', 'SIEM', 'Vulnerability Assessment',
+    'Cryptography', 'Malware Analysis', 'Incident Response', 'Kali Linux', 'Wireshark', 'Nmap', 'Metasploit',
+    'Security Auditing', 'Risk Assessment', 'Identity & Access Management', 'OWASP', 'Cloud Security',
+    'Compliance (ISO 27001/GDPR)', 'Threat Intelligence',
+  ],
+  'SAP Consultant': [
+    'SAP ERP', 'SAP FICO', 'SAP MM', 'SAP SD', 'SAP HCM', 'SAP ABAP', 'SAP HANA', 'SAP Basis',
+    'SAP PP', 'SAP WM', 'SAP Business Intelligence', 'SAP Fiori', 'SAP Analytics Cloud', 'SAP Configuration',
+    'SAP Implementation', 'Business Process Analysis', 'SAP Reporting', 'SAP Integration', 'SAP Testing', 'SAP Support',
+  ],
+  'Network Engineer': [
+    'TCP/IP', 'LAN/WAN', 'Routing & Switching', 'Cisco IOS', 'Network Security', 'Firewalls', 'VPN',
+    'DNS', 'DHCP', 'Subnetting', 'Network Troubleshooting', 'CCNA Concepts', 'Wireless Networking',
+    'Network Monitoring', 'Load Balancing', 'VLAN', 'Network Protocols', 'Cloud Networking', 'SD-WAN', 'Network Documentation',
+  ],
+  'Ethical Hacker': [
+    'Penetration Testing', 'Kali Linux', 'Metasploit', 'Nmap', 'Wireshark', 'Burp Suite', 'SQL Injection',
+    'Cross-Site Scripting (XSS)', 'Vulnerability Assessment', 'Network Security', 'Social Engineering',
+    'Cryptography', 'Malware Analysis', 'OWASP Top 10', 'Reconnaissance', 'Exploitation Techniques',
+    'Web Application Security', 'Wireless Security', 'Reporting & Documentation', 'Bug Bounty',
+  ],
   'Other': [],
 };
 const ROLES = Object.keys(ROLE_SKILLS);
+
+// Soft skills apply regardless of the role picked, so they're suggested
+// unconditionally alongside the role-specific technical ones.
+const SOFT_SKILLS: string[] = [
+  'Communication', 'Teamwork', 'Time Management', 'Problem Solving', 'Adaptability', 'Leadership',
+  'Critical Thinking', 'Creativity', 'Work Ethic', 'Attention to Detail', 'Collaboration', 'Decision Making',
+  'Public Speaking', 'Negotiation', 'Stress Management', 'Active Listening', 'Interpersonal Skills',
+  'Positive Attitude', 'Conflict Resolution', 'Emotional Intelligence',
+];
 
 export default function StudentPortfolio() {
   const [portfolio, setPortfolio] = useState<Portfolio | null>(null);
@@ -205,27 +273,20 @@ export default function StudentPortfolio() {
         </div>
 
         {targetRole && ROLE_SKILLS[targetRole]?.length > 0 && (
-          <div className="space-y-1.5">
-            <p className="text-xs text-muted-foreground">Suggested for {targetRole} — click to add:</p>
-            <div className="flex flex-wrap gap-1.5">
-              {ROLE_SKILLS[targetRole]
-                .filter((sk) => !skills.some((s) => s.name.toLowerCase() === sk.toLowerCase()))
-                .map((sk) => (
-                  <button
-                    key={sk}
-                    onClick={() => {
-                      const next = skills.filter((s) => s.name.trim() !== '');
-                      next.push({ name: sk, stars: 3 });
-                      setSkills(next.length ? next : [{ name: sk, stars: 3 }]);
-                    }}
-                    className="text-xs px-2.5 py-1 rounded-full border border-blue-200 text-blue-700 bg-blue-50 hover:bg-blue-100"
-                  >
-                    + {sk}
-                  </button>
-                ))}
-            </div>
-          </div>
+          <SkillSuggestions
+            label={`Suggested for ${targetRole} — click to add:`}
+            options={ROLE_SKILLS[targetRole]}
+            skills={skills}
+            setSkills={setSkills}
+          />
         )}
+
+        <SkillSuggestions
+          label="Soft skills — click to add:"
+          options={SOFT_SKILLS}
+          skills={skills}
+          setSkills={setSkills}
+        />
 
         <div className="space-y-2">
           {skills.map((s, idx) => (
@@ -293,6 +354,33 @@ export default function StudentPortfolio() {
         >
           {saving ? 'Submitting...' : portfolio ? 'Resubmit for Review' : 'Submit Portfolio'}
         </button>
+      </div>
+    </div>
+  );
+}
+
+function SkillSuggestions({ label, options, skills, setSkills }: {
+  label: string; options: string[]; skills: Skill[]; setSkills: (s: Skill[]) => void;
+}) {
+  const remaining = options.filter((sk) => !skills.some((s) => s.name.toLowerCase() === sk.toLowerCase()));
+  if (!remaining.length) return null;
+  return (
+    <div className="space-y-1.5">
+      <p className="text-xs text-muted-foreground">{label}</p>
+      <div className="flex flex-wrap gap-1.5">
+        {remaining.map((sk) => (
+          <button
+            key={sk}
+            onClick={() => {
+              const next = skills.filter((s) => s.name.trim() !== '');
+              next.push({ name: sk, stars: 3 });
+              setSkills(next);
+            }}
+            className="text-xs px-2.5 py-1 rounded-full border border-blue-200 text-blue-700 bg-blue-50 hover:bg-blue-100"
+          >
+            + {sk}
+          </button>
+        ))}
       </div>
     </div>
   );
