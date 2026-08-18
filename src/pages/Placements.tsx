@@ -2314,6 +2314,26 @@ function PlacementStudentProfileModal({ student: poolStudent, onClose }: {
                 <div className={`rounded-xl p-4 text-sm ${s?.portfolio?.status === 'APPROVED' ? 'bg-green-50 text-green-700' : s?.portfolio?.status === 'SUBMITTED' ? 'bg-blue-50 text-blue-700' : 'bg-muted/20 text-muted-foreground'}`}>
                   {s?.portfolio ? <span className="font-medium">{s.portfolio.status}{s.portfolio.submittedAt ? ` · ${formatDate(s.portfolio.submittedAt)}` : ''}</span> : <span>Not submitted</span>}
                 </div>
+                {(() => {
+                  const allProjects = data.rankCard.flatMap((rc) => rc.projects.map((p) => ({ ...p, courseName: rc.courseName })));
+                  return allProjects.length > 0 && (
+                    <>
+                      <h3 className="font-semibold text-sm uppercase text-muted-foreground tracking-wide mt-4">Projects</h3>
+                      {allProjects.map((p) => (
+                        <div key={p.id} className="bg-muted/20 rounded-xl p-4 flex items-start justify-between gap-2">
+                          <div>
+                            <p className="text-sm font-medium">{p.projectTitle}{p.isCapstone ? ' 🎓' : ''}</p>
+                            <p className="text-xs text-muted-foreground">{p.moduleTitle} · {p.courseName}</p>
+                          </div>
+                          <div className="text-right flex-shrink-0">
+                            <span className={`text-[11px] font-medium px-2 py-0.5 rounded-full ${p.status === 'REVIEWED' ? 'bg-green-100 text-green-700' : p.status === 'SUBMITTED' ? 'bg-blue-100 text-blue-700' : 'bg-gray-100 text-gray-600'}`}>{p.status}</span>
+                            {p.graded && <p className="text-xs font-bold mt-1">{p.grade}/{p.maxGrade}</p>}
+                          </div>
+                        </div>
+                      ))}
+                    </>
+                  );
+                })()}
                 {s && s.trainerFeedbacks.length > 0 && (
                   <>
                     <h3 className="font-semibold text-sm uppercase text-muted-foreground tracking-wide mt-4">Trainer Feedback</h3>
