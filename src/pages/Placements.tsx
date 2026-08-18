@@ -1949,37 +1949,54 @@ function PlacementContentModal({ session, canEdit, setError, onClose }: {
   );
 }
 
+function defaultSessionAttendanceDate(session: SoftskillSession): string {
+  const toDay = (d: string) => d.slice(0, 10);
+  const start = toDay(session.startDate);
+  const end = session.endDate ? toDay(session.endDate) : start;
+  const today = new Date().toISOString().slice(0, 10);
+  if (today < start) return start;
+  if (today > end) return end;
+  return today;
+}
+
 function AttendanceModal({ session, canEdit, setError, onClose, onChanged }: {
   session: SoftskillSession; canEdit: boolean;
   setError: (s: string) => void; onClose: () => void; onChanged: () => void;
 }) {
-  const [roster, setRoster] = useState<{ id: string; firstName: string; lastName: string; studentCode: string }[]>([]);
-  const [marks, setMarks] = useState<Record<string, { present: boolean; score: string }>>({});
+  const [date, setDate] = useState(() => defaultSessionAttendanceDate(session));
+  const [roster, setRoster] = useState<{ student: { id: string; firstName: string; lastName: string; studentCode: string }; status: string | null; score: string }[]>([]);
   const [saving, setSaving] = useState(false);
   const [loaded, setLoadedState] = useState(false);
   const [showAddStudents, setShowAddStudents] = useState(false);
 
   const load = useCallback(() => {
-    api.get(`/api/placements/softskill-sessions/${session.id}/attendance`).then(({ data }) => {
+    setLoadedState(false);
+    api.get(`/api/placements/softskill-sessions/${session.id}/attendance`, { params: { date } }).then(({ data }) => {
       const rows = data.data || [];
-      setRoster(rows.map((a: { student: { id: string; firstName: string; lastName: string; studentCode: string } }) => a.student));
-      const init: Record<string, { present: boolean; score: string }> = {};
-      for (const a of rows) init[a.studentId] = { present: a.present, score: a.score?.toString() || '' };
-      setMarks(init);
+      setRoster(rows.map((r: { student: { id: string; firstName: string; lastName: string; studentCode: string }; status: string | null; score: number | null }) => ({
+        student: r.student, status: r.status, score: r.score?.toString() || '',
+      })));
       setLoadedState(true);
     });
-  }, [session.id]);
+  }, [session.id, date]);
 
   useEffect(() => { load(); }, [load]);
 
-  const toggle = (sid: string) => setMarks((m) => ({ ...m, [sid]: { ...m[sid], present: !m[sid]?.present } }));
-  const setScore = (sid: string, val: string) => setMarks((m) => ({ ...m, [sid]: { ...m[sid], score: val } }));
+  const setStatus = (sid: string, status: string) => {
+    setRoster((rows) => rows.map((r) => (r.student.id === sid ? { ...r, status } : r)));
+  };
+  const setScore = (sid: string, val: string) => {
+    setRoster((rows) => rows.map((r) => (r.student.id === sid ? { ...r, score: val } : r)));
+  };
 
   const submit = async () => {
+    const marked = roster.filter((r) => r.status);
     setSaving(true);
     try {
-      const attendances = roster.map((s) => ({ studentId: s.id, present: marks[s.id]?.present || false, score: marks[s.id]?.score ? parseFloat(marks[s.id].score) : null }));
-      await api.post(`/api/placements/softskill-sessions/${session.id}/attendance`, { attendances });
+      await api.post(`/api/placements/softskill-sessions/${session.id}/attendance`, {
+        date,
+        records: marked.map((r) => ({ studentId: r.student.id, status: r.status, score: r.score ? parseFloat(r.score) : null })),
+      });
       onChanged();
       onClose();
     } catch (err: unknown) {
@@ -1988,6 +2005,9 @@ function AttendanceModal({ session, canEdit, setError, onClose, onChanged }: {
       setSaving(false);
     }
   };
+
+  const dateMin = session.startDate.slice(0, 10);
+  const dateMax = (session.endDate || session.startDate).slice(0, 10);
 
   return (
     <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
@@ -1999,23 +2019,48 @@ function AttendanceModal({ session, canEdit, setError, onClose, onChanged }: {
           </div>
           <button onClick={onClose}><X className="w-4 h-4" /></button>
         </div>
-        {canEdit && (
-          <button onClick={() => setShowAddStudents(true)} className="text-xs text-blue-600 hover:underline flex items-center gap-1">
-            <Plus className="w-3.5 h-3.5" /> Add students
-          </button>
-        )}
+        <div className="flex items-center justify-between gap-2">
+          <input
+            type="date"
+            value={date}
+            min={dateMin}
+            max={dateMax}
+            onChange={(e) => setDate(e.target.value)}
+            className="px-3 py-2 rounded-lg border bg-background text-sm"
+          />
+          {canEdit && (
+            <button onClick={() => setShowAddStudents(true)} className="text-xs text-blue-600 hover:underline flex items-center gap-1">
+              <Plus className="w-3.5 h-3.5" /> Add students
+            </button>
+          )}
+        </div>
         {!loaded ? <p className="text-center py-4 text-muted-foreground">Loading…</p> : roster.length === 0 ? (
           <p className="text-center py-4 text-muted-foreground text-sm">No students in this session yet.</p>
         ) : (
           <div className="space-y-2 max-h-80 overflow-y-auto pr-1">
-            {roster.map((s) => (
-              <div key={s.id} className="flex items-center gap-3">
-                <input type="checkbox" checked={!!marks[s.id]?.present} onChange={() => toggle(s.id)} id={`att-${s.id}`} disabled={!canEdit} />
-                <label htmlFor={`att-${s.id}`} className="text-sm flex-1">
-                  {s.firstName} {s.lastName} <span className="text-xs text-muted-foreground">({s.studentCode})</span>
-                </label>
+            {roster.map((r) => (
+              <div key={r.student.id} className="flex items-center gap-3 flex-wrap">
+                <span className="text-sm flex-1">
+                  {r.student.firstName} {r.student.lastName} <span className="text-xs text-muted-foreground">({r.student.studentCode})</span>
+                </span>
+                <div className="flex gap-1.5">
+                  {(['PRESENT', 'LATE', 'ABSENT'] as const).map((s) => (
+                    <button
+                      key={s}
+                      disabled={!canEdit}
+                      onClick={() => setStatus(r.student.id, s)}
+                      className={`text-xs px-2.5 py-1 rounded-full font-medium border transition disabled:opacity-50 ${
+                        r.status === s
+                          ? s === 'PRESENT' ? 'bg-green-600 text-white border-green-600' : s === 'LATE' ? 'bg-amber-500 text-white border-amber-500' : 'bg-red-600 text-white border-red-600'
+                          : 'bg-background text-muted-foreground border-border hover:bg-muted'
+                      }`}
+                    >
+                      {s}
+                    </button>
+                  ))}
+                </div>
                 {(session.type === 'APTITUDE' || session.type === 'SK_APT') && (
-                  <input type="number" disabled={!canEdit} placeholder="Score" className="w-20 px-2 py-1 border rounded text-xs" value={marks[s.id]?.score || ''} onChange={(e) => setScore(s.id, e.target.value)} />
+                  <input type="number" disabled={!canEdit} placeholder="Score" className="w-20 px-2 py-1 border rounded text-xs" value={r.score} onChange={(e) => setScore(r.student.id, e.target.value)} />
                 )}
               </div>
             ))}
