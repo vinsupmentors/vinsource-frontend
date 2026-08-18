@@ -9,6 +9,7 @@ import {
   CheckCircle2, XCircle, AlertTriangle, MessageSquare, FileUp, ListChecks,
   Briefcase, BarChart2, Search, User, Trophy, Star, Phone, MapPin,
   BookOpen, Award, ChevronDown, ChevronRight, ExternalLink, Percent, IndianRupee, Download,
+  Loader2, Rocket, FileText,
 } from 'lucide-react';
 import {
   ResponsiveContainer, BarChart, Bar, AreaChart, Area, XAxis, YAxis,
@@ -168,6 +169,7 @@ export default function PlacementsPage() {
   const [sessionsLoaded, setSessionsLoaded] = useState(false);
   const [showAddSession, setShowAddSession] = useState(false);
   const [attendanceSession, setAttendanceSession] = useState<SoftskillSession | null>(null);
+  const [contentSession, setContentSession] = useState<SoftskillSession | null>(null);
 
   const [reportMonth, setReportMonth] = useState(() => {
     const d = new Date();
@@ -600,13 +602,14 @@ export default function PlacementsPage() {
                   <th className="px-4 py-3">Date</th>
                   <th className="px-4 py-3">Trainer</th>
                   <th className="px-4 py-3">Attendance</th>
+                  <th className="px-4 py-3">Content</th>
                 </tr>
               </thead>
               <tbody className="divide-y">
                 {!sessionsLoaded ? (
-                  <tr><td colSpan={5} className="px-4 py-8 text-center text-muted-foreground">Loading...</td></tr>
+                  <tr><td colSpan={6} className="px-4 py-8 text-center text-muted-foreground">Loading...</td></tr>
                 ) : sessions.length === 0 ? (
-                  <tr><td colSpan={5} className="px-4 py-8 text-center text-muted-foreground">No sessions scheduled yet</td></tr>
+                  <tr><td colSpan={6} className="px-4 py-8 text-center text-muted-foreground">No sessions scheduled yet</td></tr>
                 ) : sessions.map((sess) => (
                   <tr key={sess.id} className="hover:bg-muted/30">
                     <td className="px-4 py-3">
@@ -620,6 +623,11 @@ export default function PlacementsPage() {
                     <td className="px-4 py-3">
                       <button onClick={() => setAttendanceSession(sess)} className="text-blue-600 hover:underline text-sm font-medium">
                         {sess._count?.attendances ?? 0} student{sess._count?.attendances === 1 ? '' : 's'}{canEdit ? ' · Manage' : ''}
+                      </button>
+                    </td>
+                    <td className="px-4 py-3">
+                      <button onClick={() => setContentSession(sess)} className="text-blue-600 hover:underline text-sm font-medium">
+                        {canEdit ? 'Release' : 'View'}
                       </button>
                     </td>
                   </tr>
@@ -826,6 +834,14 @@ export default function PlacementsPage() {
           setError={setError}
           onClose={() => setAttendanceSession(null)}
           onChanged={fetchSessions}
+        />
+      )}
+      {contentSession && (
+        <PlacementContentModal
+          session={contentSession}
+          canEdit={canEdit}
+          setError={setError}
+          onClose={() => setContentSession(null)}
         />
       )}
     </div>
@@ -1765,6 +1781,169 @@ function AddSessionModal({ saving, setSaving, onClose, onSaved, setError }: {
           <button onClick={onClose} className="px-4 py-2 text-sm rounded-lg border">Cancel</button>
           <button onClick={submit} disabled={saving} className="px-4 py-2 text-sm rounded-lg bg-blue-600 text-white disabled:opacity-50">{saving ? 'Saving...' : 'Create'}</button>
         </div>
+      </div>
+    </div>
+  );
+}
+
+interface PlacementReleaseLite { id: string; status: 'ACTIVE' | 'CLOSED'; deadline?: string | null; }
+interface PlacementProjectLite { id: string; title: string; releases: PlacementReleaseLite[]; }
+interface PlacementTestLite { id: string; title: string; durationMinutes: number; _count: { questions: number }; releases: PlacementReleaseLite[]; }
+
+function PlacementContentModal({ session, canEdit, setError, onClose }: {
+  session: SoftskillSession; canEdit: boolean; setError: (s: string) => void; onClose: () => void;
+}) {
+  const [projects, setProjects] = useState<PlacementProjectLite[]>([]);
+  const [tests, setTests] = useState<PlacementTestLite[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [busyId, setBusyId] = useState<string | null>(null);
+  const [deadlines, setDeadlines] = useState<Record<string, string>>({});
+
+  const load = useCallback(() => {
+    setLoading(true);
+    api.get(`/api/placements/softskill-sessions/${session.id}/placement-content`)
+      .then((r) => { setProjects(r.data.data.projects); setTests(r.data.data.tests); })
+      .catch(() => setError('Failed to load placement content'))
+      .finally(() => setLoading(false));
+  }, [session.id, setError]);
+
+  useEffect(() => { load(); }, [load]);
+
+  const release = async (kind: 'project' | 'test', id: string) => {
+    setBusyId(id);
+    setError('');
+    try {
+      const deadline = deadlines[id] ? new Date(deadlines[id]).toISOString() : undefined;
+      if (kind === 'project') {
+        await api.post(`/api/placements/softskill-sessions/${session.id}/placement-content/release-project`, { projectId: id, deadline });
+      } else {
+        await api.post(`/api/placements/softskill-sessions/${session.id}/placement-content/activate-test`, { testId: id, deadline });
+      }
+      load();
+    } catch (err) { setError(errMsg(err, 'Could not release')); } finally { setBusyId(null); }
+  };
+
+  const closeRelease = async (kind: 'project' | 'test', releaseId: string) => {
+    if (!window.confirm('Close this release? Students will no longer be able to access it.')) return;
+    setBusyId(releaseId);
+    setError('');
+    try {
+      await api.post(`/api/placements/softskill-sessions/${session.id}/placement-content/close-release`, { kind, releaseId });
+      load();
+    } catch (err) { setError(errMsg(err, 'Could not close release')); } finally { setBusyId(null); }
+  };
+
+  const DeadlineInput = ({ id }: { id: string }) => (
+    <input
+      type="datetime-local"
+      value={deadlines[id] || ''}
+      onChange={(e) => setDeadlines((d) => ({ ...d, [id]: e.target.value }))}
+      title="Optional deadline"
+      className="px-2 py-1.5 rounded-lg border text-xs"
+    />
+  );
+
+  return (
+    <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
+      <div className="bg-white rounded-xl w-full max-w-2xl p-6 space-y-4 max-h-[85vh] overflow-y-auto">
+        <div className="flex items-center justify-between">
+          <div>
+            <h2 className="font-semibold text-lg">Placement Content — {session.topic}</h2>
+            <p className="text-xs text-muted-foreground">Release Projects and Tests authored in Production to this session's roster.</p>
+          </div>
+          <button onClick={onClose}><X className="w-4 h-4" /></button>
+        </div>
+
+        {loading ? (
+          <div className="flex justify-center py-8"><Loader2 className="w-5 h-5 animate-spin text-primary" /></div>
+        ) : (
+          <div className="space-y-6">
+            <div className="space-y-2">
+              <h3 className="text-sm font-semibold flex items-center gap-1.5"><FileText className="w-4 h-4" /> Projects</h3>
+              {projects.length === 0 ? (
+                <p className="text-xs text-muted-foreground">No placement projects authored yet — add one in Production &rarr; Placement Training.</p>
+              ) : (
+                projects.map((p) => {
+                  const rel = p.releases[0];
+                  const active = rel?.status === 'ACTIVE';
+                  return (
+                    <div key={p.id} className="border rounded-lg p-3 flex items-center justify-between gap-3">
+                      <p className="text-sm font-medium">{p.title}</p>
+                      <div className="flex items-center gap-2">
+                        {rel ? (
+                          <>
+                            <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${active ? 'bg-green-100 text-green-700' : 'bg-muted text-muted-foreground'}`}>{rel.status}</span>
+                            {canEdit && active && (
+                              <button onClick={() => closeRelease('project', rel.id)} disabled={busyId === rel.id} className="px-3 py-1.5 rounded-lg border text-xs font-medium text-red-600 hover:bg-red-50 disabled:opacity-60">Close</button>
+                            )}
+                          </>
+                        ) : canEdit ? (
+                          <>
+                            <DeadlineInput id={p.id} />
+                            <button onClick={() => release('project', p.id)} disabled={busyId === p.id} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-blue-600 text-white text-xs font-medium hover:bg-blue-700 disabled:opacity-60">
+                              {busyId === p.id ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Rocket className="w-3.5 h-3.5" />} Release
+                            </button>
+                          </>
+                        ) : (
+                          <span className="text-xs text-muted-foreground">Not released</span>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })
+              )}
+            </div>
+
+            <div className="space-y-2">
+              <h3 className="text-sm font-semibold flex items-center gap-1.5"><ListChecks className="w-4 h-4" /> Tests</h3>
+              {tests.length === 0 ? (
+                <p className="text-xs text-muted-foreground">No placement tests authored yet — add one in Production &rarr; Placement Training.</p>
+              ) : (
+                tests.map((t) => {
+                  const rel = t.releases[0];
+                  const active = rel?.status === 'ACTIVE';
+                  const noQuestions = t._count.questions === 0;
+                  return (
+                    <div key={t.id} className="border rounded-lg p-3 flex items-center justify-between gap-3">
+                      <div>
+                        <p className="text-sm font-medium">{t.title}</p>
+                        <p className="text-xs text-muted-foreground">{t.durationMinutes} min · {t._count.questions} question{t._count.questions === 1 ? '' : 's'}</p>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        {rel ? (
+                          <>
+                            <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${active ? 'bg-green-100 text-green-700' : 'bg-muted text-muted-foreground'}`}>{rel.status}</span>
+                            {canEdit && active && (
+                              <button onClick={() => closeRelease('test', rel.id)} disabled={busyId === rel.id} className="px-3 py-1.5 rounded-lg border text-xs font-medium text-red-600 hover:bg-red-50 disabled:opacity-60">Close</button>
+                            )}
+                          </>
+                        ) : canEdit ? (
+                          <>
+                            <DeadlineInput id={t.id} />
+                            <button
+                              onClick={() => release('test', t.id)}
+                              disabled={busyId === t.id || noQuestions}
+                              title={noQuestions ? 'Add questions to this test in Production first' : undefined}
+                              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-blue-600 text-white text-xs font-medium hover:bg-blue-700 disabled:opacity-60"
+                            >
+                              {busyId === t.id ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Rocket className="w-3.5 h-3.5" />} Release
+                            </button>
+                          </>
+                        ) : (
+                          <span className="text-xs text-muted-foreground">Not released</span>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })
+              )}
+            </div>
+
+            <p className="text-[11px] text-muted-foreground">
+              Submissions and test results are reviewed by the session's assigned trainer from My Training.
+            </p>
+          </div>
+        )}
       </div>
     </div>
   );

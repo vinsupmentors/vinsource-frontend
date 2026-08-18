@@ -10,7 +10,7 @@ import {
   Lock, Plus, X, Users, BookOpen, CalendarRange, ChevronDown, ChevronRight,
   GraduationCap, PlayCircle, CalendarClock, Search, Upload, Pencil, ChevronLeft, Download, Trash2, UserPlus,
   FileText, ClipboardList, ListChecks, Star, Type as TypeIcon, CheckSquare, BarChart3, Mail, NotebookPen,
-  BadgeCheck, CheckCircle2, XCircle, QrCode, ExternalLink, Loader2, ShieldAlert,
+  BadgeCheck, CheckCircle2, XCircle, QrCode, ExternalLink, Loader2, ShieldAlert, Rocket,
 } from 'lucide-react';
 
 // Files uploaded by the backend (project submissions, student photos/aadhar) come back as
@@ -155,6 +155,19 @@ type OnlineTest = {
   questions?: OnlineTestQuestion[];
 };
 
+// Placement Training — standalone content, not tied to any course/module.
+type PlacementProject = {
+  id: string; title: string; description?: string | null; resourceUrl: string; createdAt: string;
+  createdBy?: { id: string; firstName: string; lastName: string } | null;
+  _count?: { releases: number };
+};
+type PlacementTest = {
+  id: string; title: string; durationMinutes: number; createdAt: string;
+  createdBy?: { id: string; firstName: string; lastName: string } | null;
+  _count?: { questions: number; releases: number };
+  questions?: OnlineTestQuestion[];
+};
+
 function flattenModules(courses: AcademyCourse[]): (ModuleLite & { courseName: string })[] {
   return courses.flatMap((c) => c.modules.map((m) => ({ ...m, courseId: c.id, courseName: c.name })));
 }
@@ -178,13 +191,14 @@ function errMsg(err: unknown, fallback: string) {
   return e.response?.data?.message || fallback;
 }
 
-type Tab = 'courses' | 'batches' | 'students' | 'content' | 'portfolios' | 'reports' | 'deletion-requests';
-const VALID_TABS: Tab[] = ['courses', 'batches', 'students', 'content', 'portfolios', 'reports', 'deletion-requests'];
+type Tab = 'courses' | 'batches' | 'students' | 'content' | 'placement-training' | 'portfolios' | 'reports' | 'deletion-requests';
+const VALID_TABS: Tab[] = ['courses', 'batches', 'students', 'content', 'placement-training', 'portfolios', 'reports', 'deletion-requests'];
 const TABS: { id: Tab; label: string; icon: React.ComponentType<{ className?: string }> }[] = [
   { id: 'courses', label: 'Courses', icon: BookOpen },
   { id: 'batches', label: 'Batches & Schedules', icon: CalendarRange },
   { id: 'students', label: 'Students', icon: GraduationCap },
   { id: 'content', label: 'Projects / Feedback / Tests', icon: FileText },
+  { id: 'placement-training', label: 'Placement Training', icon: Rocket },
   { id: 'portfolios', label: 'Portfolio Approvals', icon: BadgeCheck },
   { id: 'reports', label: 'Reports', icon: BarChart3 },
 ];
@@ -292,7 +306,7 @@ export default function ProductionPage() {
           <h1 className="text-2xl font-bold">Production (Training)</h1>
           <p className="text-muted-foreground text-sm">Courses, batches, trainers, and student tracks (JRP / IOP / PAP)</p>
         </div>
-        {canEdit && tab !== 'content' && tab !== 'reports' && tab !== 'portfolios' && tab !== 'deletion-requests' && (
+        {canEdit && tab !== 'content' && tab !== 'placement-training' && tab !== 'reports' && tab !== 'portfolios' && tab !== 'deletion-requests' && (
           <button
             onClick={() => (tab === 'courses' ? setShowAddCourse(true) : tab === 'batches' ? setShowAddBatch(true) : setShowAddStudent(true))}
             className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700"
@@ -336,6 +350,8 @@ export default function ProductionPage() {
         <BatchesTab batches={batches} employees={employees} canEdit={canEdit} setError={setError} refresh={() => { fetchTab(); fetchStats(); }} />
       ) : tab === 'content' ? (
         <ContentTab courses={courses} canEdit={canEdit} setError={setError} />
+      ) : tab === 'placement-training' ? (
+        <PlacementTrainingTab canEdit={canEdit} setError={setError} />
       ) : tab === 'portfolios' ? (
         <PortfoliosTab canEdit={canEdit} setError={setError} />
       ) : tab === 'reports' ? (
@@ -1664,14 +1680,14 @@ function BulkStatusModal({ studentIds, onClose, setError, onApplied }: {
 }) {
   const [status, setStatus] = useState<StudentStatus>('ACTIVE');
   const [saving, setSaving] = useState(false);
-  const [result, setResult] = useState<{ updated: number } | null>(null);
+  const [result, setResult] = useState<{ updated: number; skippedJrp?: number } | null>(null);
 
   const submit = async () => {
     setSaving(true);
     setError('');
     try {
       const res = await api.put('/api/production/students/bulk-status', { studentIds, status });
-      setResult({ updated: res.data.data.updated });
+      setResult({ updated: res.data.data.updated, skippedJrp: res.data.data.skippedJrp });
     } catch (err) {
       setError(errMsg(err, 'Failed to update student status'));
     } finally {
@@ -1687,6 +1703,11 @@ function BulkStatusModal({ studentIds, onClose, setError, onApplied }: {
             <CheckCircle2 className="w-5 h-5 flex-shrink-0" />
             <p className="text-sm">{result.updated} student{result.updated === 1 ? '' : 's'} updated to {STUDENT_STATUS_LABEL[status]}.</p>
           </div>
+          {!!result.skippedJrp && (
+            <p className="text-sm text-amber-700 bg-amber-50 rounded-lg px-3 py-3">
+              {result.skippedJrp} JRP student{result.skippedJrp === 1 ? '' : 's'} skipped — JRP is course-only and never eligible for the Placement Pool.
+            </p>
+          )}
           <div className="flex justify-end">
             <button onClick={onApplied} className="px-4 py-2 text-sm rounded-lg bg-blue-600 text-white">Done</button>
           </div>
@@ -1741,6 +1762,21 @@ function PushToPlacementsModal({ scheduleId, batchCode, courseName, track, estim
     }
   };
 
+  if (track === 'JRP') {
+    return (
+      <Modal title="Push Sub-batch to Placements" onClose={onClose}>
+        <div className="space-y-4">
+          <p className="text-sm text-red-700 bg-red-50 rounded-lg px-3 py-3">
+            JRP is course-only — JRP students are never eligible for the Placement Pool. Switch the track filter to IOP or PAP (or clear it) to push this sub-batch.
+          </p>
+          <div className="flex justify-end">
+            <button onClick={onClose} className="px-4 py-2 text-sm rounded-lg border">Close</button>
+          </div>
+        </div>
+      </Modal>
+    );
+  }
+
   return (
     <Modal title="Push Sub-batch to Placements" onClose={onClose}>
       {result ? (
@@ -1765,7 +1801,10 @@ function PushToPlacementsModal({ scheduleId, batchCode, courseName, track, estim
               start date recorded (preserved if already set). No eligibility check is applied; this is your judgment call based on the
               trainer feedback shown above. No placement result is created automatically.
             </p>
-            <p className="text-xs text-muted-foreground">~{estimatedCount} student{estimatedCount === 1 ? '' : 's'} currently match this filter (already-placed/transferred students are skipped automatically).</p>
+            <p className="text-xs text-muted-foreground">
+              ~{estimatedCount} student{estimatedCount === 1 ? '' : 's'} currently match this filter (already-placed/transferred students
+              are skipped automatically{track ? '' : ', and JRP students are always excluded'}).
+            </p>
           </div>
           <ModalFooter onClose={onClose} onSubmit={submit} saving={pushing} label="Push to Placements" />
         </>
@@ -2683,6 +2722,382 @@ function ContentTab({ courses, canEdit, setError }: {
   );
 }
 
+// ── PLACEMENT TRAINING (standalone Projects/Tests for Softskill & Aptitude sessions) ──
+type PlacementSubTab = 'projects' | 'tests';
+
+function PlacementTrainingTab({ canEdit, setError }: { canEdit: boolean; setError: (s: string) => void }) {
+  const [subTab, setSubTab] = useState<PlacementSubTab>('projects');
+
+  const SUB_TABS: { id: PlacementSubTab; label: string; icon: React.ComponentType<{ className?: string }> }[] = [
+    { id: 'projects', label: 'Projects', icon: FileText },
+    { id: 'tests', label: 'Tests', icon: ListChecks },
+  ];
+
+  return (
+    <div className="space-y-4">
+      <p className="text-sm text-muted-foreground">
+        Projects and tests here aren't tied to any course — they're released directly to Softskill &amp; Aptitude sessions
+        from the Placements menu.
+      </p>
+      <div className="flex items-center gap-2 border-b">
+        {SUB_TABS.map((t) => {
+          const Icon = t.icon;
+          return (
+            <button
+              key={t.id}
+              onClick={() => setSubTab(t.id)}
+              className={`flex items-center gap-2 px-3 py-2 text-sm font-medium border-b-2 -mb-px transition-colors ${
+                subTab === t.id ? 'border-blue-600 text-blue-600' : 'border-transparent text-muted-foreground hover:text-foreground'
+              }`}
+            >
+              <Icon className="w-4 h-4" /> {t.label}
+            </button>
+          );
+        })}
+      </div>
+      {subTab === 'projects' ? (
+        <PlacementProjectsPanel canEdit={canEdit} setError={setError} />
+      ) : (
+        <PlacementTestsPanel canEdit={canEdit} setError={setError} />
+      )}
+    </div>
+  );
+}
+
+function PlacementProjectsPanel({ canEdit, setError }: { canEdit: boolean; setError: (s: string) => void }) {
+  const [projects, setProjects] = useState<PlacementProject[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [showAdd, setShowAdd] = useState(false);
+  const [editing, setEditing] = useState<PlacementProject | null>(null);
+
+  const refresh = useCallback(() => {
+    setLoading(true);
+    api.get('/api/production/placement-projects').then((res) => setProjects(res.data.data)).catch(() => setProjects([])).finally(() => setLoading(false));
+  }, []);
+
+  useEffect(() => { refresh(); }, [refresh]);
+
+  return (
+    <div className="space-y-3">
+      <div className="flex justify-end">
+        {canEdit && (
+          <button onClick={() => setShowAdd(true)} className="flex items-center gap-2 px-3 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700">
+            <Plus className="w-4 h-4" /> New Project
+          </button>
+        )}
+      </div>
+      {loading ? (
+        <div className="text-center text-muted-foreground py-8">Loading...</div>
+      ) : projects.length === 0 ? (
+        <p className="text-sm text-muted-foreground py-8 text-center">No placement projects yet.</p>
+      ) : (
+        <div className="border rounded-lg divide-y">
+          {projects.map((p) => (
+            <div key={p.id} className="flex items-center justify-between px-4 py-3">
+              <div>
+                <p className="font-medium text-sm">{p.title}</p>
+                <p className="text-xs text-muted-foreground">
+                  {p._count?.releases ?? 0} release{(p._count?.releases ?? 0) === 1 ? '' : 's'}
+                </p>
+              </div>
+              <div className="flex items-center gap-3">
+                <a href={fileUrl(p.resourceUrl)} target="_blank" rel="noreferrer" className="text-xs text-blue-600 hover:underline flex items-center gap-1">
+                  <Download className="w-3 h-3" /> Resource
+                </a>
+                {canEdit && (
+                  <button onClick={() => setEditing(p)} title="Edit" className="text-muted-foreground hover:text-foreground">
+                    <Pencil className="w-3.5 h-3.5" />
+                  </button>
+                )}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+      {showAdd && (
+        <PlacementAddProjectModal onClose={() => setShowAdd(false)} setError={setError} onSaved={() => { setShowAdd(false); refresh(); }} />
+      )}
+      {editing && (
+        <PlacementAddProjectModal existing={editing} onClose={() => setEditing(null)} setError={setError} onSaved={() => { setEditing(null); refresh(); }} />
+      )}
+    </div>
+  );
+}
+
+function PlacementAddProjectModal({ existing, onClose, setError, onSaved }: {
+  existing?: PlacementProject; onClose: () => void; setError: (s: string) => void; onSaved: () => void;
+}) {
+  const [title, setTitle] = useState(existing?.title || '');
+  const [description, setDescription] = useState(existing?.description || '');
+  const [file, setFile] = useState<File | null>(null);
+  const [saving, setSaving] = useState(false);
+
+  const submit = async () => {
+    if (!title.trim() || (!existing && !file)) { setError('Title and a PDF or ZIP resource are required'); return; }
+    setSaving(true);
+    setError('');
+    try {
+      const fd = new FormData();
+      fd.append('title', title.trim());
+      fd.append('description', description.trim());
+      if (file) fd.append('resource', file);
+      if (existing) {
+        await api.put(`/api/production/placement-projects/${existing.id}`, fd, { headers: { 'Content-Type': 'multipart/form-data' } });
+      } else {
+        await api.post('/api/production/placement-projects', fd, { headers: { 'Content-Type': 'multipart/form-data' } });
+      }
+      onSaved();
+    } catch (err) { setError(errMsg(err, `Could not ${existing ? 'update' : 'create'} project`)); } finally { setSaving(false); }
+  };
+
+  return (
+    <Modal title={existing ? 'Edit Placement Project' : 'New Placement Project'} onClose={onClose}>
+      <div className="space-y-3">
+        <div>
+          <label className="text-xs font-medium text-muted-foreground">Title</label>
+          <input value={title} onChange={(e) => setTitle(e.target.value)} className="w-full mt-1 border rounded-lg px-3 py-2 text-sm" />
+        </div>
+        <div>
+          <label className="text-xs font-medium text-muted-foreground">Description (optional)</label>
+          <textarea value={description} onChange={(e) => setDescription(e.target.value)} rows={3} className="w-full mt-1 border rounded-lg px-3 py-2 text-sm" />
+        </div>
+        <div>
+          <label className="text-xs font-medium text-muted-foreground">{existing ? 'Replace resource (optional)' : 'Resource (PDF or ZIP)'}</label>
+          <input type="file" accept=".pdf,.zip" onChange={(e) => setFile(e.target.files?.[0] || null)} className="w-full mt-1 text-sm border rounded-lg px-3 py-2" />
+          <p className="text-[11px] text-muted-foreground mt-1">
+            {existing ? 'Leave blank to keep the current file.' : 'Up to 50 MB. Use a ZIP to bundle starter files or multiple assets.'}
+          </p>
+        </div>
+      </div>
+      <ModalFooter onClose={onClose} onSubmit={submit} saving={saving} label={existing ? 'Save' : 'Create'} />
+    </Modal>
+  );
+}
+
+function PlacementTestsPanel({ canEdit, setError }: { canEdit: boolean; setError: (s: string) => void }) {
+  const [tests, setTests] = useState<PlacementTest[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [showAdd, setShowAdd] = useState(false);
+  const [detailId, setDetailId] = useState<string | null>(null);
+
+  const refresh = useCallback(() => {
+    setLoading(true);
+    api.get('/api/production/placement-tests').then((res) => setTests(res.data.data)).catch(() => setTests([])).finally(() => setLoading(false));
+  }, []);
+
+  useEffect(() => { refresh(); }, [refresh]);
+
+  return (
+    <div className="space-y-3">
+      <div className="flex justify-end">
+        {canEdit && (
+          <button onClick={() => setShowAdd(true)} className="flex items-center gap-2 px-3 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700">
+            <Plus className="w-4 h-4" /> New Test
+          </button>
+        )}
+      </div>
+      {loading ? (
+        <div className="text-center text-muted-foreground py-8">Loading...</div>
+      ) : tests.length === 0 ? (
+        <p className="text-sm text-muted-foreground py-8 text-center">No placement tests yet.</p>
+      ) : (
+        <div className="border rounded-lg divide-y">
+          {tests.map((t) => (
+            <button key={t.id} onClick={() => setDetailId(t.id)} className="w-full flex items-center justify-between px-4 py-3 text-left hover:bg-muted/30">
+              <div>
+                <p className="font-medium text-sm">{t.title}</p>
+                <p className="text-xs text-muted-foreground">
+                  {t.durationMinutes} min · {t._count?.questions ?? 0} question{(t._count?.questions ?? 0) === 1 ? '' : 's'} · {t._count?.releases ?? 0} release{(t._count?.releases ?? 0) === 1 ? '' : 's'}
+                </p>
+              </div>
+              <ChevronRight className="w-4 h-4 text-muted-foreground" />
+            </button>
+          ))}
+        </div>
+      )}
+      {showAdd && (
+        <PlacementAddTestModal onClose={() => setShowAdd(false)} setError={setError} onSaved={(id) => { setShowAdd(false); refresh(); setDetailId(id); }} />
+      )}
+      {detailId && (
+        <PlacementTestDetailModal testId={detailId} canEdit={canEdit} onClose={() => { setDetailId(null); refresh(); }} setError={setError} />
+      )}
+    </div>
+  );
+}
+
+function PlacementAddTestModal({ onClose, setError, onSaved }: {
+  onClose: () => void; setError: (s: string) => void; onSaved: (id: string) => void;
+}) {
+  const [title, setTitle] = useState('');
+  const [durationMinutes, setDurationMinutes] = useState(45);
+  const [saving, setSaving] = useState(false);
+
+  const submit = async () => {
+    if (!title.trim()) { setError('Title is required'); return; }
+    setSaving(true);
+    setError('');
+    try {
+      const res = await api.post('/api/production/placement-tests', { title: title.trim(), durationMinutes });
+      onSaved(res.data.data.id);
+    } catch (err) { setError(errMsg(err, 'Could not create test')); } finally { setSaving(false); }
+  };
+
+  return (
+    <Modal title="New Placement Test" onClose={onClose}>
+      <div className="space-y-3">
+        <div>
+          <label className="text-xs font-medium text-muted-foreground">Title</label>
+          <input value={title} onChange={(e) => setTitle(e.target.value)} className="w-full mt-1 border rounded-lg px-3 py-2 text-sm" />
+        </div>
+        <div>
+          <label className="text-xs font-medium text-muted-foreground">Duration (minutes)</label>
+          <input type="number" min={1} value={durationMinutes} onChange={(e) => setDurationMinutes(Number(e.target.value) || 45)} className="w-full mt-1 border rounded-lg px-3 py-2 text-sm" />
+        </div>
+        <p className="text-[11px] text-muted-foreground">Add questions after creating the test.</p>
+      </div>
+      <ModalFooter onClose={onClose} onSubmit={submit} saving={saving} label="Create" />
+    </Modal>
+  );
+}
+
+function PlacementTestDetailModal({ testId, canEdit, onClose, setError }: {
+  testId: string; canEdit: boolean; onClose: () => void; setError: (s: string) => void;
+}) {
+  const [test, setTest] = useState<PlacementTest | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [showAddQ, setShowAddQ] = useState(false);
+  const [showBulk, setShowBulk] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const [editingMeta, setEditingMeta] = useState(false);
+  const [metaTitle, setMetaTitle] = useState('');
+  const [metaDuration, setMetaDuration] = useState(45);
+  const [savingMeta, setSavingMeta] = useState(false);
+
+  const refresh = useCallback(() => {
+    setLoading(true);
+    api.get(`/api/production/placement-tests/${testId}`).then((res) => setTest(res.data.data)).catch(() => setTest(null)).finally(() => setLoading(false));
+  }, [testId]);
+
+  useEffect(() => { refresh(); }, [refresh]);
+
+  const deleteTest = async () => {
+    if (!window.confirm('Delete this test and all its questions? This cannot be undone.')) return;
+    setDeleting(true);
+    try {
+      await api.delete(`/api/production/placement-tests/${testId}`);
+      onClose();
+    } catch (err) { setError(errMsg(err, 'Could not delete test')); setDeleting(false); }
+  };
+
+  const deleteQuestion = async (qId: string) => {
+    if (!window.confirm('Delete this question?')) return;
+    try {
+      await api.delete(`/api/production/placement-tests/${testId}/questions/${qId}`);
+      refresh();
+    } catch (err) { setError(errMsg(err, 'Could not delete question')); }
+  };
+
+  const startEditMeta = () => {
+    if (!test) return;
+    setMetaTitle(test.title);
+    setMetaDuration(test.durationMinutes);
+    setEditingMeta(true);
+  };
+
+  const saveMeta = async () => {
+    if (!metaTitle.trim()) { setError('Title is required'); return; }
+    setSavingMeta(true);
+    setError('');
+    try {
+      await api.put(`/api/production/placement-tests/${testId}`, { title: metaTitle.trim(), durationMinutes: metaDuration });
+      setEditingMeta(false);
+      refresh();
+    } catch (err) { setError(errMsg(err, 'Could not update test')); } finally { setSavingMeta(false); }
+  };
+
+  return (
+    <>
+      <Modal title={test ? test.title : 'Placement Test'} onClose={onClose} wide>
+        {loading ? (
+          <div className="text-center text-muted-foreground py-8">Loading...</div>
+        ) : !test ? (
+          <p className="text-sm text-muted-foreground">Could not load test.</p>
+        ) : (
+          <div className="space-y-4">
+            {editingMeta ? (
+              <div className="flex items-end gap-2 border rounded-lg p-3 bg-muted/20">
+                <div className="flex-1">
+                  <label className="text-xs font-medium text-muted-foreground">Title</label>
+                  <input value={metaTitle} onChange={(e) => setMetaTitle(e.target.value)} className="w-full mt-1 border rounded-lg px-3 py-2 text-sm" />
+                </div>
+                <div className="w-32">
+                  <label className="text-xs font-medium text-muted-foreground">Duration (min)</label>
+                  <input type="number" min={1} value={metaDuration} onChange={(e) => setMetaDuration(Number(e.target.value))} className="w-full mt-1 border rounded-lg px-3 py-2 text-sm" />
+                </div>
+                <button onClick={saveMeta} disabled={savingMeta} className="px-3 py-2 text-xs rounded-lg bg-blue-600 text-white disabled:opacity-50">{savingMeta ? 'Saving...' : 'Save'}</button>
+                <button onClick={() => setEditingMeta(false)} className="px-3 py-2 text-xs rounded-lg border">Cancel</button>
+              </div>
+            ) : (
+              <p className="text-xs text-muted-foreground flex items-center gap-2">
+                {test.durationMinutes} min duration · {test.questions?.length ?? 0} question{(test.questions?.length ?? 0) === 1 ? '' : 's'}
+                {canEdit && (
+                  <button onClick={startEditMeta} title="Edit title/duration" className="text-muted-foreground hover:text-foreground">
+                    <Pencil className="w-3 h-3" />
+                  </button>
+                )}
+              </p>
+            )}
+
+            {canEdit && (
+              <div className="flex gap-2">
+                <button onClick={() => setShowAddQ(true)} className="flex items-center gap-1.5 text-xs px-3 py-2 border rounded-lg hover:bg-muted/50">
+                  <Plus className="w-3 h-3" /> Add question
+                </button>
+                <button onClick={() => setShowBulk(true)} className="flex items-center gap-1.5 text-xs px-3 py-2 border rounded-lg hover:bg-muted/50">
+                  <Upload className="w-3 h-3" /> Bulk upload
+                </button>
+                <button onClick={deleteTest} disabled={deleting} className="ml-auto flex items-center gap-1.5 text-xs px-3 py-2 border border-red-200 text-red-600 rounded-lg hover:bg-red-50 disabled:opacity-60">
+                  <Trash2 className="w-3 h-3" /> Delete test
+                </button>
+              </div>
+            )}
+
+            <div className="space-y-2 max-h-[45vh] overflow-y-auto pr-1">
+              {(test.questions || []).length === 0 ? (
+                <p className="text-sm text-muted-foreground text-center py-6">No questions yet.</p>
+              ) : (
+                (test.questions || []).map((q, i) => (
+                  <div key={q.id} className="border rounded-lg p-3 space-y-1.5">
+                    <div className="flex items-start justify-between gap-2">
+                      <p className="text-sm font-medium">
+                        {i + 1}. {q.prompt} <span className="text-xs text-muted-foreground">({q.marks} mark{q.marks === 1 ? '' : 's'})</span>
+                      </p>
+                      {canEdit && (
+                        <button onClick={() => deleteQuestion(q.id)} className="text-red-600 p-1"><Trash2 className="w-3 h-3" /></button>
+                      )}
+                    </div>
+                    <div className="grid grid-cols-2 gap-1 text-xs">
+                      {q.options.map((opt, oIdx) => (
+                        <span key={oIdx} className={`px-2 py-1 rounded ${oIdx === q.correctIndex ? 'bg-green-100 text-green-700' : 'bg-muted/40'}`}>{opt}</span>
+                      ))}
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
+        )}
+      </Modal>
+      {showAddQ && (
+        <AddQuestionModal testId={testId} endpointBase="/api/production/placement-tests" onClose={() => setShowAddQ(false)} setError={setError} onSaved={() => { setShowAddQ(false); refresh(); }} />
+      )}
+      {showBulk && (
+        <BulkUploadQuestionsModal testId={testId} endpointBase="/api/production/placement-tests" onClose={() => setShowBulk(false)} setError={setError} onSaved={() => { setShowBulk(false); refresh(); }} />
+      )}
+    </>
+  );
+}
+
 // ── PROJECTS ─────────────────────────────────────────────────────────────────
 function ProjectsPanel({ modules, canEdit, setError }: {
   modules: (ModuleLite & { courseName: string })[]; canEdit: boolean; setError: (s: string) => void;
@@ -2690,6 +3105,7 @@ function ProjectsPanel({ modules, canEdit, setError }: {
   const [projects, setProjects] = useState<Project[]>([]);
   const [loading, setLoading] = useState(true);
   const [showAdd, setShowAdd] = useState(false);
+  const [editing, setEditing] = useState<Project | null>(null);
 
   const refresh = useCallback(() => {
     setLoading(true);
@@ -2728,9 +3144,16 @@ function ProjectsPanel({ modules, canEdit, setError }: {
                           {p._count?.releases ?? 0} release{(p._count?.releases ?? 0) === 1 ? '' : 's'}
                         </p>
                       </div>
-                      <a href={p.resourceUrl} target="_blank" rel="noreferrer" className="text-xs text-blue-600 hover:underline flex items-center gap-1">
-                        <Download className="w-3 h-3" /> Resource
-                      </a>
+                      <div className="flex items-center gap-3">
+                        <a href={p.resourceUrl} target="_blank" rel="noreferrer" className="text-xs text-blue-600 hover:underline flex items-center gap-1">
+                          <Download className="w-3 h-3" /> Resource
+                        </a>
+                        {canEdit && (
+                          <button onClick={() => setEditing(p)} title="Edit" className="text-muted-foreground hover:text-foreground">
+                            <Pencil className="w-3.5 h-3.5" />
+                          </button>
+                        )}
+                      </div>
                     </div>
                   ))}
                 </div>
@@ -2742,42 +3165,50 @@ function ProjectsPanel({ modules, canEdit, setError }: {
       {showAdd && (
         <AddProjectModal modules={modules} onClose={() => setShowAdd(false)} setError={setError} onSaved={() => { setShowAdd(false); refresh(); }} />
       )}
+      {editing && (
+        <AddProjectModal modules={modules} existing={editing} onClose={() => setEditing(null)} setError={setError} onSaved={() => { setEditing(null); refresh(); }} />
+      )}
     </div>
   );
 }
 
-function AddProjectModal({ modules, onClose, setError, onSaved }: {
-  modules: (ModuleLite & { courseName: string })[]; onClose: () => void; setError: (s: string) => void; onSaved: () => void;
+function AddProjectModal({ modules, existing, onClose, setError, onSaved }: {
+  modules: (ModuleLite & { courseName: string })[]; existing?: Project; onClose: () => void; setError: (s: string) => void; onSaved: () => void;
 }) {
-  const [moduleId, setModuleId] = useState(modules[0]?.id || '');
-  const [title, setTitle] = useState('');
-  const [description, setDescription] = useState('');
+  const [moduleId, setModuleId] = useState(existing?.moduleId || modules[0]?.id || '');
+  const [title, setTitle] = useState(existing?.title || '');
+  const [description, setDescription] = useState(existing?.description || '');
   const [file, setFile] = useState<File | null>(null);
   const [saving, setSaving] = useState(false);
 
   const submit = async () => {
-    if (!moduleId || !title.trim() || !file) { setError('Module, title, and a PDF or ZIP resource are required'); return; }
+    if (!moduleId || !title.trim() || (!existing && !file)) { setError('Module, title, and a PDF or ZIP resource are required'); return; }
     setSaving(true);
     setError('');
     try {
       const fd = new FormData();
-      fd.append('moduleId', moduleId);
+      if (!existing) fd.append('moduleId', moduleId);
       fd.append('title', title.trim());
-      if (description.trim()) fd.append('description', description.trim());
-      fd.append('resource', file);
-      await api.post('/api/production/projects', fd, { headers: { 'Content-Type': 'multipart/form-data' } });
+      fd.append('description', description.trim());
+      if (file) fd.append('resource', file);
+      if (existing) {
+        await api.put(`/api/production/projects/${existing.id}`, fd, { headers: { 'Content-Type': 'multipart/form-data' } });
+      } else {
+        await api.post('/api/production/projects', fd, { headers: { 'Content-Type': 'multipart/form-data' } });
+      }
       onSaved();
-    } catch (err) { setError(errMsg(err, 'Could not create project')); } finally { setSaving(false); }
+    } catch (err) { setError(errMsg(err, `Could not ${existing ? 'update' : 'create'} project`)); } finally { setSaving(false); }
   };
 
   return (
-    <Modal title="New Project" onClose={onClose}>
+    <Modal title={existing ? 'Edit Project' : 'New Project'} onClose={onClose}>
       <div className="space-y-3">
         <div>
           <label className="text-xs font-medium text-muted-foreground">Module</label>
-          <select value={moduleId} onChange={(e) => setModuleId(e.target.value)} className="w-full mt-1 border rounded-lg px-3 py-2 text-sm">
+          <select value={moduleId} onChange={(e) => setModuleId(e.target.value)} disabled={!!existing} className="w-full mt-1 border rounded-lg px-3 py-2 text-sm disabled:bg-muted/40 disabled:text-muted-foreground">
             {modules.map((m) => <option key={m.id} value={m.id}>{m.courseName} — {m.title}</option>)}
           </select>
+          {existing && <p className="text-[11px] text-muted-foreground mt-1">Module can't be changed after creation.</p>}
         </div>
         <div>
           <label className="text-xs font-medium text-muted-foreground">Title</label>
@@ -2788,12 +3219,14 @@ function AddProjectModal({ modules, onClose, setError, onSaved }: {
           <textarea value={description} onChange={(e) => setDescription(e.target.value)} rows={3} className="w-full mt-1 border rounded-lg px-3 py-2 text-sm" />
         </div>
         <div>
-          <label className="text-xs font-medium text-muted-foreground">Resource (PDF or ZIP)</label>
+          <label className="text-xs font-medium text-muted-foreground">{existing ? 'Replace resource (optional)' : 'Resource (PDF or ZIP)'}</label>
           <input type="file" accept=".pdf,.zip" onChange={(e) => setFile(e.target.files?.[0] || null)} className="w-full mt-1 text-sm border rounded-lg px-3 py-2" />
-          <p className="text-[11px] text-muted-foreground mt-1">Up to 50 MB. Use a ZIP to bundle starter files or multiple assets.</p>
+          <p className="text-[11px] text-muted-foreground mt-1">
+            {existing ? 'Leave blank to keep the current file.' : 'Up to 50 MB. Use a ZIP to bundle starter files or multiple assets.'}
+          </p>
         </div>
       </div>
-      <ModalFooter onClose={onClose} onSubmit={submit} saving={saving} label="Create" />
+      <ModalFooter onClose={onClose} onSubmit={submit} saving={saving} label={existing ? 'Save' : 'Create'} />
     </Modal>
   );
 }
@@ -3383,6 +3816,10 @@ function OnlineTestDetailModal({ testId, canEdit, onClose, setError }: {
   const [showAddQ, setShowAddQ] = useState(false);
   const [showBulk, setShowBulk] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [editingMeta, setEditingMeta] = useState(false);
+  const [metaTitle, setMetaTitle] = useState('');
+  const [metaDuration, setMetaDuration] = useState(45);
+  const [savingMeta, setSavingMeta] = useState(false);
 
   const refresh = useCallback(() => {
     setLoading(true);
@@ -3408,6 +3845,24 @@ function OnlineTestDetailModal({ testId, canEdit, onClose, setError }: {
     } catch (err) { setError(errMsg(err, 'Could not delete question')); }
   };
 
+  const startEditMeta = () => {
+    if (!test) return;
+    setMetaTitle(test.title);
+    setMetaDuration(test.durationMinutes);
+    setEditingMeta(true);
+  };
+
+  const saveMeta = async () => {
+    if (!metaTitle.trim()) { setError('Title is required'); return; }
+    setSavingMeta(true);
+    setError('');
+    try {
+      await api.put(`/api/production/online-tests/${testId}`, { title: metaTitle.trim(), durationMinutes: metaDuration });
+      setEditingMeta(false);
+      refresh();
+    } catch (err) { setError(errMsg(err, 'Could not update test')); } finally { setSavingMeta(false); }
+  };
+
   return (
     <>
       <Modal title={test ? test.title : 'Online Test'} onClose={onClose} wide>
@@ -3417,9 +3872,29 @@ function OnlineTestDetailModal({ testId, canEdit, onClose, setError }: {
           <p className="text-sm text-muted-foreground">Could not load test.</p>
         ) : (
           <div className="space-y-4">
-            <p className="text-xs text-muted-foreground">
-              {test.module.title} · {test.durationMinutes} min duration · {test.questions?.length ?? 0} question{(test.questions?.length ?? 0) === 1 ? '' : 's'}
-            </p>
+            {editingMeta ? (
+              <div className="flex items-end gap-2 border rounded-lg p-3 bg-muted/20">
+                <div className="flex-1">
+                  <label className="text-xs font-medium text-muted-foreground">Title</label>
+                  <input value={metaTitle} onChange={(e) => setMetaTitle(e.target.value)} className="w-full mt-1 border rounded-lg px-3 py-2 text-sm" />
+                </div>
+                <div className="w-32">
+                  <label className="text-xs font-medium text-muted-foreground">Duration (min)</label>
+                  <input type="number" min={1} value={metaDuration} onChange={(e) => setMetaDuration(Number(e.target.value))} className="w-full mt-1 border rounded-lg px-3 py-2 text-sm" />
+                </div>
+                <button onClick={saveMeta} disabled={savingMeta} className="px-3 py-2 text-xs rounded-lg bg-blue-600 text-white disabled:opacity-50">{savingMeta ? 'Saving...' : 'Save'}</button>
+                <button onClick={() => setEditingMeta(false)} className="px-3 py-2 text-xs rounded-lg border">Cancel</button>
+              </div>
+            ) : (
+              <p className="text-xs text-muted-foreground flex items-center gap-2">
+                {test.module.title} · {test.durationMinutes} min duration · {test.questions?.length ?? 0} question{(test.questions?.length ?? 0) === 1 ? '' : 's'}
+                {canEdit && (
+                  <button onClick={startEditMeta} title="Edit title/duration" className="text-muted-foreground hover:text-foreground">
+                    <Pencil className="w-3 h-3" />
+                  </button>
+                )}
+              </p>
+            )}
 
             {canEdit && (
               <div className="flex gap-2">
@@ -3471,8 +3946,8 @@ function OnlineTestDetailModal({ testId, canEdit, onClose, setError }: {
   );
 }
 
-function AddQuestionModal({ testId, onClose, setError, onSaved }: {
-  testId: string; onClose: () => void; setError: (s: string) => void; onSaved: () => void;
+function AddQuestionModal({ testId, endpointBase, onClose, setError, onSaved }: {
+  testId: string; endpointBase?: string; onClose: () => void; setError: (s: string) => void; onSaved: () => void;
 }) {
   const [prompt, setPrompt] = useState('');
   const [options, setOptions] = useState(['', '', '', '']);
@@ -3488,7 +3963,7 @@ function AddQuestionModal({ testId, onClose, setError, onSaved }: {
     setSaving(true);
     setError('');
     try {
-      await api.post(`/api/production/online-tests/${testId}/questions`, {
+      await api.post(`${endpointBase || '/api/production/online-tests'}/${testId}/questions`, {
         prompt: prompt.trim(), options: options.map((o) => o.trim()).filter(Boolean), correctIndex, marks,
       });
       onSaved();
@@ -3535,8 +4010,8 @@ type QuestionBulkRow = {
 };
 type QuestionBulkResult = { row: number; status: 'created' | 'failed'; message?: string };
 
-function BulkUploadQuestionsModal({ testId, onClose, setError, onSaved }: {
-  testId: string; onClose: () => void; setError: (s: string) => void; onSaved: () => void;
+function BulkUploadQuestionsModal({ testId, endpointBase, onClose, setError, onSaved }: {
+  testId: string; endpointBase?: string; onClose: () => void; setError: (s: string) => void; onSaved: () => void;
 }) {
   const [rows, setRows] = useState<QuestionBulkRow[]>([]);
   const [fileName, setFileName] = useState('');
@@ -3575,7 +4050,7 @@ function BulkUploadQuestionsModal({ testId, onClose, setError, onSaved }: {
     setUploading(true);
     setError('');
     try {
-      const res = await api.post(`/api/production/online-tests/${testId}/questions/bulk`, { questions: rows });
+      const res = await api.post(`${endpointBase || '/api/production/online-tests'}/${testId}/questions/bulk`, { questions: rows });
       setResults(res.data.data.results);
       onSaved();
     } catch (err) { setError(errMsg(err, 'Bulk upload failed')); } finally { setUploading(false); }

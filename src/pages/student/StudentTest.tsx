@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import api from '@/lib/api';
 import { useToast } from '@/components/ui/toaster';
 import { formatDate, formatDateTime } from '@/lib/utils';
-import { Loader2, ClipboardList, Clock, AlertTriangle, CheckCircle2, XCircle, Lock, X, ListChecks } from 'lucide-react';
+import { Loader2, ClipboardList, Clock, AlertTriangle, CheckCircle2, XCircle, Lock, X, ListChecks, Rocket } from 'lucide-react';
 
 // ── Offline / trainer-graded module tests (ModuleTest + ModuleMark) ─────────
 interface MarkRow {
@@ -19,12 +19,18 @@ interface MarkRow {
   };
 }
 
-// ── Online (self-administered, auto-graded) tests ───────────────────────────
+// ── Online (self-administered, auto-graded) tests — course tests AND
+// Placement Training tests released to Softskill/Aptitude sessions share this
+// exact shape/flow, distinguished only by `kind` and the endpoint it maps to. ─
+type TestKind = 'course' | 'placement';
+
 interface TestListItem {
+  kind: TestKind;
   releaseId: string;
   status: 'ACTIVE' | 'CLOSED';
   activatedAt: string;
-  test: { id: string; title: string; durationMinutes: number; module: { id: string; title: string; order: number }; questionCount: number };
+  test: { id: string; title: string; durationMinutes: number; module?: { id: string; title: string; order: number }; questionCount: number };
+  session?: { id: string; type: 'SOFTSKILL' | 'APTITUDE' | 'SK_APT'; topic: string };
   myAttempt: {
     id: string;
     status: 'IN_PROGRESS' | 'SUBMITTED' | 'AUTO_SUBMITTED_VIOLATION' | 'EXPIRED';
@@ -35,11 +41,17 @@ interface TestListItem {
   } | null;
 }
 
+const TEST_ENDPOINT: Record<TestKind, string> = {
+  course: '/api/student-portal/online-tests',
+  placement: '/api/student-portal/placement-tests',
+};
+
 interface AttemptQuestion { id: string; order: number; prompt: string; options: string[]; marks: number; }
 
 interface ReviewQuestion extends AttemptQuestion { correctIndex: number; selectedIndex: number | null; isCorrect: boolean; }
 
 interface ActiveAttempt {
+  kind: TestKind;
   attemptId: string;
   releaseId: string;
   testTitle: string;
@@ -135,7 +147,7 @@ export default function StudentTest() {
   const [active, setActive] = useState<ActiveAttempt | null>(null);
   const [remainingMs, setRemainingMs] = useState(0);
   const [submitting, setSubmitting] = useState(false);
-  const [reviewAttemptId, setReviewAttemptId] = useState<string | null>(null);
+  const [reviewAttempt, setReviewAttempt] = useState<{ id: string; kind: TestKind } | null>(null);
   const [cameraStatus, setCameraStatus] = useState<CameraStatus>('idle');
   const submittedRef = useRef(false);
   const videoRef = useRef<HTMLVideoElement | null>(null);
@@ -149,23 +161,26 @@ export default function StudentTest() {
     setLoading(true);
     Promise.all([
       api.get('/api/student-portal/marks').then((r) => setMarks(r.data.data || [])),
-      api.get('/api/student-portal/online-tests').then((r) => setReleases(r.data.data || [])),
-    ]).finally(() => setLoading(false));
+      api.get('/api/student-portal/online-tests').then((r) => (r.data.data || []).map((d: Omit<TestListItem, 'kind'>) => ({ ...d, kind: 'course' as const }))),
+      api.get('/api/student-portal/placement-tests').then((r) => (r.data.data || []).map((d: Omit<TestListItem, 'kind'>) => ({ ...d, kind: 'placement' as const }))),
+    ])
+      .then(([, course, placement]) => setReleases([...(course as TestListItem[]), ...(placement as TestListItem[])]))
+      .finally(() => setLoading(false));
   };
 
   useEffect(load, []);
 
   const start = async (release: TestListItem) => {
+    const base = TEST_ENDPOINT[release.kind];
     setStarting(release.releaseId);
     try {
-      await api.post(`/api/student-portal/online-tests/${release.releaseId}/start`, {});
+      await api.post(`${base}/${release.releaseId}/start`, {});
       // Fetch full state (handles both fresh start and resume) including any saved answers.
-      const listRes = await api.get('/api/student-portal/online-tests');
-      const fresh: TestListItem[] = listRes.data.data || [];
-      setReleases(fresh);
+      const listRes = await api.get(base);
+      const fresh: Omit<TestListItem, 'kind'>[] = listRes.data.data || [];
       const updated = fresh.find((r) => r.releaseId === release.releaseId);
       if (!updated?.myAttempt) throw new Error('Could not start attempt');
-      const attemptRes = await api.get(`/api/student-portal/online-tests/attempts/${updated.myAttempt.id}`);
+      const attemptRes = await api.get(`${base}/attempts/${updated.myAttempt.id}`);
       const { attempt, questions, answers } = attemptRes.data.data;
       if (attempt.status !== 'IN_PROGRESS') {
         // Expired the instant we tried to resume.
@@ -179,6 +194,7 @@ export default function StudentTest() {
         if (a.selectedIndex !== null && a.selectedIndex !== undefined) answersMap[a.questionId] = a.selectedIndex;
       }
       setActive({
+        kind: release.kind,
         attemptId: attempt.id,
         releaseId: release.releaseId,
         testTitle: release.test.title,
@@ -198,7 +214,7 @@ export default function StudentTest() {
   const selectAnswer = (questionId: string, selectedIndex: number) => {
     if (!active) return;
     setActive((a) => (a ? { ...a, answers: { ...a.answers, [questionId]: selectedIndex } } : a));
-    api.post(`/api/student-portal/online-tests/attempts/${active.attemptId}/answer`, { questionId, selectedIndex }).catch(() => {});
+    api.post(`${TEST_ENDPOINT[active.kind]}/attempts/${active.attemptId}/answer`, { questionId, selectedIndex }).catch(() => {});
   };
 
   const finishAttempt = useCallback(async () => {
@@ -206,7 +222,7 @@ export default function StudentTest() {
     submittedRef.current = true;
     setSubmitting(true);
     try {
-      const res = await api.post(`/api/student-portal/online-tests/attempts/${active.attemptId}/submit`, {});
+      const res = await api.post(`${TEST_ENDPOINT[active.kind]}/attempts/${active.attemptId}/submit`, {});
       const graded = res.data.data;
       setActive(null);
       load();
@@ -231,7 +247,7 @@ export default function StudentTest() {
       const form = new FormData();
       form.append('type', type);
       if (snapshotBlob) form.append('snapshot', snapshotBlob, `${type.toLowerCase()}_${Date.now()}.jpg`);
-      const res = await api.post(`/api/student-portal/online-tests/attempts/${active.attemptId}/violation`, form);
+      const res = await api.post(`${TEST_ENDPOINT[active.kind]}/attempts/${active.attemptId}/violation`, form);
       const { action, violationCount } = res.data.data as { action: 'warning' | 'ended' | 'none'; violationCount: number };
 
       if (action === 'warning') {
@@ -450,21 +466,27 @@ export default function StudentTest() {
     <div className="space-y-6">
       <div>
         <h1 className="text-xl font-bold">Test</h1>
-        <p className="text-sm text-muted-foreground mt-1">All tests for your courses — take an online test when it&apos;s open, or check marks for trainer-graded tests once released. Anything not yet available shows as locked.</p>
+        <p className="text-sm text-muted-foreground mt-1">All tests for your courses and Placement Training — take an online test when it&apos;s open, or check marks for trainer-graded tests once released. Anything not yet available shows as locked.</p>
       </div>
 
       {noTests ? (
         <div className="bg-card rounded-xl border p-10 text-center text-muted-foreground text-sm">No tests yet.</div>
       ) : (
         <div className="space-y-3">
-          {/* Online (self-administered) tests — take / resume / view score */}
+          {/* Online (self-administered) tests — course + Placement Training — take / resume / view score */}
           {releases.map((r) => {
             const closed = r.status === 'CLOSED';
             const attempt = r.myAttempt;
             return (
-              <div key={`online-${r.releaseId}`} className="bg-card rounded-xl border p-4 flex items-center justify-between gap-3 flex-wrap">
+              <div key={`${r.kind}-${r.releaseId}`} className="bg-card rounded-xl border p-4 flex items-center justify-between gap-3 flex-wrap">
                 <div>
-                  <p className="text-xs text-muted-foreground">Module: {r.test.module.title}</p>
+                  <p className="text-xs text-muted-foreground flex items-center gap-1.5">
+                    {r.kind === 'placement' ? (
+                      <><Rocket className="w-3.5 h-3.5" /> Placement Training · {r.session?.topic}</>
+                    ) : (
+                      <>Module: {r.test.module?.title}</>
+                    )}
+                  </p>
                   <h2 className="font-semibold text-sm mt-0.5 flex items-center gap-1.5"><ClipboardList className="w-4 h-4" /> {r.test.title}</h2>
                   <p className="text-xs text-muted-foreground mt-1">{r.test.durationMinutes} minutes · {r.test.questionCount} questions</p>
                 </div>
@@ -481,7 +503,7 @@ export default function StudentTest() {
                           {attempt.score ?? 0} / {attempt.totalMarks ?? 0} · {statusLabel(attempt.status)}
                         </span>
                         <button
-                          onClick={() => setReviewAttemptId(attempt.id)}
+                          onClick={() => setReviewAttempt({ id: attempt.id, kind: r.kind })}
                           className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-xs font-medium hover:bg-muted"
                         >
                           <ListChecks className="w-3.5 h-3.5" /> View answers
@@ -523,14 +545,14 @@ export default function StudentTest() {
         </div>
       )}
 
-      {reviewAttemptId && (
-        <TestReviewModal attemptId={reviewAttemptId} onClose={() => setReviewAttemptId(null)} />
+      {reviewAttempt && (
+        <TestReviewModal attemptId={reviewAttempt.id} kind={reviewAttempt.kind} onClose={() => setReviewAttempt(null)} />
       )}
     </div>
   );
 }
 
-function TestReviewModal({ attemptId, onClose }: { attemptId: string; onClose: () => void }) {
+function TestReviewModal({ attemptId, kind, onClose }: { attemptId: string; kind: TestKind; onClose: () => void }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [data, setData] = useState<{
@@ -541,11 +563,11 @@ function TestReviewModal({ attemptId, onClose }: { attemptId: string; onClose: (
 
   useEffect(() => {
     setLoading(true);
-    api.get(`/api/student-portal/online-tests/attempts/${attemptId}/review`)
+    api.get(`${TEST_ENDPOINT[kind]}/attempts/${attemptId}/review`)
       .then((r) => setData(r.data.data))
       .catch((e) => setError(e?.response?.data?.message || 'Could not load your answers.'))
       .finally(() => setLoading(false));
-  }, [attemptId]);
+  }, [attemptId, kind]);
 
   return (
     <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">

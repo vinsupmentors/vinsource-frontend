@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import api, { BASE_URL } from '@/lib/api';
 import { useToast } from '@/components/ui/toaster';
 import { formatDate } from '@/lib/utils';
-import { Loader2, FileText, Upload, Link as LinkIcon, CheckCircle2 } from 'lucide-react';
+import { Loader2, FileText, Upload, Link as LinkIcon, CheckCircle2, Rocket } from 'lucide-react';
 
 // Files uploaded by the backend (project briefs, student submissions) come back as
 // relative paths like "/uploads/...". A bare <a href> resolves those against the
@@ -11,6 +11,7 @@ import { Loader2, FileText, Upload, Link as LinkIcon, CheckCircle2 } from 'lucid
 const fileUrl = (path: string) => (/^https?:\/\//i.test(path) ? path : `${BASE_URL}${path}`);
 
 interface ProjectRelease {
+  kind: 'course' | 'placement';
   releaseId: string;
   status: 'ACTIVE' | 'CLOSED';
   releasedAt: string;
@@ -19,8 +20,9 @@ interface ProjectRelease {
     title: string;
     description: string | null;
     resourceUrl: string;
-    module: { id: string; title: string; order: number };
+    module?: { id: string; title: string; order: number };
   };
+  session?: { id: string; type: 'SOFTSKILL' | 'APTITUDE' | 'SK_APT'; topic: string };
   mySubmission: {
     id: string;
     fileUrl: string | null;
@@ -32,6 +34,11 @@ interface ProjectRelease {
   } | null;
 }
 
+const SUBMIT_ENDPOINT: Record<ProjectRelease['kind'], string> = {
+  course: '/api/student-portal/projects',
+  placement: '/api/student-portal/placement-projects',
+};
+
 export default function StudentProjects() {
   const [releases, setReleases] = useState<ProjectRelease[]>([]);
   const [loading, setLoading] = useState(true);
@@ -41,7 +48,12 @@ export default function StudentProjects() {
 
   const load = () => {
     setLoading(true);
-    api.get('/api/student-portal/projects').then((r) => setReleases(r.data.data || [])).finally(() => setLoading(false));
+    Promise.all([
+      api.get('/api/student-portal/projects').then((r) => (r.data.data || []).map((d: Omit<ProjectRelease, 'kind'>) => ({ ...d, kind: 'course' as const }))),
+      api.get('/api/student-portal/placement-projects').then((r) => (r.data.data || []).map((d: Omit<ProjectRelease, 'kind'>) => ({ ...d, kind: 'placement' as const }))),
+    ])
+      .then(([course, placement]) => setReleases([...course, ...placement]))
+      .finally(() => setLoading(false));
   };
 
   useEffect(load, []);
@@ -65,7 +77,7 @@ export default function StudentProjects() {
       if (draft.file) fd.append('file', draft.file);
       if (draft.linkUrl) fd.append('linkUrl', draft.linkUrl);
       if (draft.note) fd.append('note', draft.note);
-      await api.post(`/api/student-portal/projects/${release.releaseId}/submit`, fd, {
+      await api.post(`${SUBMIT_ENDPOINT[release.kind]}/${release.releaseId}/submit`, fd, {
         headers: { 'Content-Type': 'multipart/form-data' },
       });
       toast({ title: 'Project submitted', description: 'Your trainer will review it shortly.' });
@@ -84,7 +96,7 @@ export default function StudentProjects() {
     <div className="space-y-6">
       <div>
         <h1 className="text-xl font-bold">Projects</h1>
-        <p className="text-sm text-muted-foreground mt-1">Module projects released by your trainer. Submit a file or a link to your work.</p>
+        <p className="text-sm text-muted-foreground mt-1">Module and Placement Training projects released to you. Submit a file or a link to your work.</p>
       </div>
 
       {releases.length === 0 ? (
@@ -95,10 +107,16 @@ export default function StudentProjects() {
             const draft = drafts[r.releaseId] || { linkUrl: '', note: '', file: null };
             const closed = r.status === 'CLOSED';
             return (
-              <div key={r.releaseId} className="bg-card rounded-xl border p-5 space-y-4">
+              <div key={`${r.kind}-${r.releaseId}`} className="bg-card rounded-xl border p-5 space-y-4">
                 <div className="flex items-start justify-between gap-3">
                   <div>
-                    <p className="text-xs text-muted-foreground">Module: {r.project.module.title}</p>
+                    <p className="text-xs text-muted-foreground flex items-center gap-1.5">
+                      {r.kind === 'placement' ? (
+                        <><Rocket className="w-3.5 h-3.5" /> Placement Training · {r.session?.topic}</>
+                      ) : (
+                        <>Module: {r.project.module?.title}</>
+                      )}
+                    </p>
                     <h2 className="font-semibold text-sm mt-0.5">{r.project.title}</h2>
                     {r.project.description && <p className="text-sm text-muted-foreground mt-1">{r.project.description}</p>}
                     <a href={fileUrl(r.project.resourceUrl)} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1.5 text-xs text-blue-600 hover:underline mt-2">

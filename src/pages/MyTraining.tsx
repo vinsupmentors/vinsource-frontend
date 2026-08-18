@@ -1650,6 +1650,7 @@ function SoftskillAttendancePanel({ session, onBack }: { session: MySoftskillSes
   const [marks, setMarks] = useState<Record<string, { present: boolean; score: string }>>({});
   const [loaded, setLoaded] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [subView, setSubView] = useState<'attendance' | 'content'>('attendance');
   const { toast } = useToast();
 
   useEffect(() => {
@@ -1695,30 +1696,320 @@ function SoftskillAttendancePanel({ session, onBack }: { session: MySoftskillSes
         </p>
         {session.notes && <p className="text-sm text-muted-foreground mt-1">{session.notes}</p>}
       </div>
-      {!loaded ? (
+
+      <div className="flex items-center gap-1 border-b">
+        {([['attendance', 'Attendance'], ['content', 'Placement Content']] as const).map(([key, label]) => (
+          <button
+            key={key}
+            onClick={() => setSubView(key)}
+            className={`px-3 py-2 text-sm font-medium border-b-2 -mb-px transition-colors ${subView === key ? 'border-blue-600 text-blue-600' : 'border-transparent text-muted-foreground hover:text-foreground'}`}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+
+      {subView === 'content' ? (
+        <PlacementContentReviewPanel session={session} />
+      ) : !loaded ? (
         <div className="flex justify-center py-8"><Loader2 className="w-5 h-5 animate-spin text-primary" /></div>
       ) : roster.length === 0 ? (
         <p className="text-sm text-muted-foreground">No students have been added to this session yet — ask the Placements team to add them.</p>
       ) : (
-        <div className="bg-card rounded-xl border divide-y">
-          {roster.map((s) => (
-            <div key={s.id} className="flex items-center gap-3 px-4 py-2.5">
-              <input type="checkbox" checked={!!marks[s.id]?.present} onChange={() => toggle(s.id)} id={`ss-att-${s.id}`} />
-              <label htmlFor={`ss-att-${s.id}`} className="text-sm flex-1">
-                {s.firstName} {s.lastName} <span className="text-xs text-muted-foreground">({s.studentCode})</span>
-              </label>
-              {(session.type === 'APTITUDE' || session.type === 'SK_APT') && (
-                <input type="number" placeholder="Score" className="w-20 px-2 py-1 border rounded text-xs" value={marks[s.id]?.score || ''} onChange={(e) => setScore(s.id, e.target.value)} />
-              )}
-            </div>
-          ))}
+        <>
+          <div className="bg-card rounded-xl border divide-y">
+            {roster.map((s) => (
+              <div key={s.id} className="flex items-center gap-3 px-4 py-2.5">
+                <input type="checkbox" checked={!!marks[s.id]?.present} onChange={() => toggle(s.id)} id={`ss-att-${s.id}`} />
+                <label htmlFor={`ss-att-${s.id}`} className="text-sm flex-1">
+                  {s.firstName} {s.lastName} <span className="text-xs text-muted-foreground">({s.studentCode})</span>
+                </label>
+                {(session.type === 'APTITUDE' || session.type === 'SK_APT') && (
+                  <input type="number" placeholder="Score" className="w-20 px-2 py-1 border rounded text-xs" value={marks[s.id]?.score || ''} onChange={(e) => setScore(s.id, e.target.value)} />
+                )}
+              </div>
+            ))}
+          </div>
+          <button onClick={submit} disabled={saving || !loaded} className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 disabled:opacity-60">
+            {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />} Save Attendance
+          </button>
+        </>
+      )}
+    </div>
+  );
+}
+
+// ─── Placement Content review (submissions + test results) for a session ───
+
+interface PCRelease { id: string; status: 'ACTIVE' | 'CLOSED'; deadline?: string | null; }
+interface PCProject { id: string; title: string; releases: PCRelease[]; }
+interface PCTest { id: string; title: string; durationMinutes: number; _count: { questions: number }; releases: PCRelease[]; }
+
+function PlacementContentReviewPanel({ session }: { session: MySoftskillSession }) {
+  const [projects, setProjects] = useState<PCProject[]>([]);
+  const [tests, setTests] = useState<PCTest[]>([]);
+  const [loaded, setLoaded] = useState(false);
+  const [submissionsFor, setSubmissionsFor] = useState<{ release: PCRelease; title: string } | null>(null);
+  const [resultsFor, setResultsFor] = useState<{ release: PCRelease; title: string } | null>(null);
+
+  useEffect(() => {
+    api.get(`/api/trainer-portal/softskill-sessions/${session.id}/placement-content`).then(({ data }) => {
+      setProjects(data.data.projects || []);
+      setTests(data.data.tests || []);
+      setLoaded(true);
+    });
+  }, [session.id]);
+
+  if (!loaded) return <div className="flex justify-center py-8"><Loader2 className="w-5 h-5 animate-spin text-primary" /></div>;
+
+  const releasedProjects = projects.filter((p) => p.releases[0]);
+  const releasedTests = tests.filter((t) => t.releases[0]);
+
+  return (
+    <div className="space-y-6">
+      <div className="space-y-2">
+        <h3 className="text-sm font-semibold">Project Submissions</h3>
+        {releasedProjects.length === 0 ? (
+          <p className="text-xs text-muted-foreground">No projects released to this session yet — released by the Placements team.</p>
+        ) : (
+          releasedProjects.map((p) => {
+            const rel = p.releases[0];
+            return (
+              <div key={p.id} className="border rounded-lg p-3 flex items-center justify-between">
+                <div>
+                  <p className="text-sm font-medium">{p.title}</p>
+                  <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${rel.status === 'ACTIVE' ? 'bg-green-100 text-green-700' : 'bg-muted text-muted-foreground'}`}>{rel.status}</span>
+                </div>
+                <button onClick={() => setSubmissionsFor({ release: rel, title: p.title })} className="px-3 py-1.5 rounded-lg border text-xs font-medium hover:bg-muted">Submissions</button>
+              </div>
+            );
+          })
+        )}
+      </div>
+
+      <div className="space-y-2">
+        <h3 className="text-sm font-semibold">Test Results</h3>
+        {releasedTests.length === 0 ? (
+          <p className="text-xs text-muted-foreground">No tests released to this session yet — released by the Placements team.</p>
+        ) : (
+          releasedTests.map((t) => {
+            const rel = t.releases[0];
+            return (
+              <div key={t.id} className="border rounded-lg p-3 flex items-center justify-between">
+                <div>
+                  <p className="text-sm font-medium">{t.title}</p>
+                  <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${rel.status === 'ACTIVE' ? 'bg-green-100 text-green-700' : 'bg-muted text-muted-foreground'}`}>{rel.status}</span>
+                </div>
+                <button onClick={() => setResultsFor({ release: rel, title: t.title })} className="px-3 py-1.5 rounded-lg border text-xs font-medium hover:bg-muted">Results</button>
+              </div>
+            );
+          })
+        )}
+      </div>
+
+      {submissionsFor && (
+        <PlacementSubmissionsModal
+          sessionId={session.id}
+          releaseId={submissionsFor.release.id}
+          title={submissionsFor.title}
+          onClose={() => setSubmissionsFor(null)}
+        />
+      )}
+      {resultsFor && (
+        <PlacementResultsModal
+          sessionId={session.id}
+          releaseId={resultsFor.release.id}
+          title={resultsFor.title}
+          onClose={() => setResultsFor(null)}
+        />
+      )}
+    </div>
+  );
+}
+
+interface PCSubmission {
+  id: string; fileUrl?: string | null; linkUrl?: string | null; note?: string | null;
+  status: 'SUBMITTED' | 'REVIEWED'; grade?: number | null; maxGrade?: number | null; reviewNote?: string | null;
+}
+interface PCRosterRow { student: { id: string; studentCode: string; firstName: string; lastName: string }; submission: PCSubmission | null; }
+
+function PlacementSubmissionsModal({ sessionId, releaseId, title, onClose }: {
+  sessionId: string; releaseId: string; title: string; onClose: () => void;
+}) {
+  const [roster, setRoster] = useState<PCRosterRow[]>([]);
+  const [loaded, setLoaded] = useState(false);
+  const [grades, setGrades] = useState<Record<string, { grade: string; maxGrade: string; note: string }>>({});
+  const [savingId, setSavingId] = useState<string | null>(null);
+  const { toast } = useToast();
+
+  const load = () => {
+    api.get(`/api/trainer-portal/softskill-sessions/${sessionId}/placement-project-releases/${releaseId}/submissions`).then(({ data }) => {
+      const roster: PCRosterRow[] = data.data.roster || [];
+      setRoster(roster);
+      const init: Record<string, { grade: string; maxGrade: string; note: string }> = {};
+      for (const r of roster) {
+        if (r.submission) init[r.submission.id] = {
+          grade: r.submission.grade?.toString() || '',
+          maxGrade: r.submission.maxGrade?.toString() || '100',
+          note: r.submission.reviewNote || '',
+        };
+      }
+      setGrades(init);
+      setLoaded(true);
+    });
+  };
+
+  useEffect(load, [sessionId, releaseId]);
+
+  const review = async (submissionId: string) => {
+    setSavingId(submissionId);
+    try {
+      const g = grades[submissionId] || { grade: '', maxGrade: '100', note: '' };
+      await api.post(`/api/trainer-portal/softskill-sessions/${sessionId}/placement-project-submissions/${submissionId}/review`, {
+        grade: g.grade ? Number(g.grade) : undefined,
+        maxGrade: g.maxGrade ? Number(g.maxGrade) : undefined,
+        reviewNote: g.note || undefined,
+      });
+      toast({ title: 'Submission reviewed', variant: 'success' });
+      load();
+    } catch (e: unknown) {
+      const err = e as { response?: { data?: { message?: string } } };
+      toast({ title: 'Could not save review', description: err.response?.data?.message, variant: 'error' });
+    } finally {
+      setSavingId(null);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-[60] p-4">
+      <div className="bg-white rounded-xl w-full max-w-2xl p-6 space-y-4 max-h-[85vh] overflow-y-auto">
+        <div className="flex items-center justify-between">
+          <h2 className="font-semibold text-lg">Submissions — {title}</h2>
+          <button onClick={onClose}><X className="w-4 h-4" /></button>
         </div>
-      )}
-      {roster.length > 0 && (
-        <button onClick={submit} disabled={saving || !loaded} className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 disabled:opacity-60">
-          {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />} Save Attendance
-        </button>
-      )}
+        {!loaded ? (
+          <div className="flex justify-center py-8"><Loader2 className="w-5 h-5 animate-spin text-primary" /></div>
+        ) : roster.length === 0 ? (
+          <p className="text-sm text-muted-foreground">No students on this session's roster.</p>
+        ) : (
+          <div className="space-y-3">
+            {roster.map((r) => (
+              <div key={r.student.id} className="border rounded-lg p-3 space-y-2">
+                <div className="flex items-center justify-between">
+                  <p className="text-sm font-medium">{r.student.firstName} {r.student.lastName} <span className="text-xs text-muted-foreground">({r.student.studentCode})</span></p>
+                  {r.submission ? (
+                    <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${r.submission.status === 'REVIEWED' ? 'bg-green-100 text-green-700' : 'bg-amber-100 text-amber-700'}`}>{r.submission.status}</span>
+                  ) : (
+                    <span className="text-xs text-muted-foreground">Not submitted</span>
+                  )}
+                </div>
+                {r.submission && (
+                  <>
+                    <div className="flex items-center gap-3 text-xs">
+                      {r.submission.fileUrl && <a href={fileUrl(r.submission.fileUrl)} target="_blank" rel="noreferrer" className="text-blue-600 hover:underline">File</a>}
+                      {r.submission.linkUrl && <a href={r.submission.linkUrl} target="_blank" rel="noreferrer" className="text-blue-600 hover:underline">Link</a>}
+                      {r.submission.note && <span className="text-muted-foreground">{r.submission.note}</span>}
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <input type="number" placeholder="Grade" className="w-20 px-2 py-1 border rounded text-xs" value={grades[r.submission.id]?.grade || ''} onChange={(e) => setGrades((g) => ({ ...g, [r.submission!.id]: { ...g[r.submission!.id], grade: e.target.value } }))} />
+                      <span className="text-xs text-muted-foreground">/</span>
+                      <input type="number" placeholder="Max" className="w-16 px-2 py-1 border rounded text-xs" value={grades[r.submission.id]?.maxGrade || '100'} onChange={(e) => setGrades((g) => ({ ...g, [r.submission!.id]: { ...g[r.submission!.id], maxGrade: e.target.value } }))} />
+                      <input placeholder="Note (optional)" className="flex-1 px-2 py-1 border rounded text-xs" value={grades[r.submission.id]?.note || ''} onChange={(e) => setGrades((g) => ({ ...g, [r.submission!.id]: { ...g[r.submission!.id], note: e.target.value } }))} />
+                      <button onClick={() => review(r.submission!.id)} disabled={savingId === r.submission.id} className="px-3 py-1.5 rounded-lg bg-blue-600 text-white text-xs font-medium hover:bg-blue-700 disabled:opacity-60">
+                        {savingId === r.submission.id ? 'Saving...' : 'Save'}
+                      </button>
+                    </div>
+                  </>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+interface PCAttempt {
+  id: string; status: 'IN_PROGRESS' | 'SUBMITTED' | 'AUTO_SUBMITTED_VIOLATION' | 'EXPIRED';
+  score?: number | null; totalMarks?: number | null; violationCount: number;
+}
+interface PCResultRow { student: { id: string; studentCode: string; firstName: string; lastName: string }; attempt: PCAttempt | null; }
+
+function PlacementResultsModal({ sessionId, releaseId, title, onClose }: {
+  sessionId: string; releaseId: string; title: string; onClose: () => void;
+}) {
+  const [roster, setRoster] = useState<PCResultRow[]>([]);
+  const [loaded, setLoaded] = useState(false);
+  const [busyId, setBusyId] = useState<string | null>(null);
+  const { toast } = useToast();
+
+  const load = () => {
+    api.get(`/api/trainer-portal/softskill-sessions/${sessionId}/placement-test-releases/${releaseId}/results`).then(({ data }) => {
+      setRoster(data.data.roster || []);
+      setLoaded(true);
+    });
+  };
+
+  useEffect(load, [sessionId, releaseId]);
+
+  const reassign = async (studentId: string) => {
+    setBusyId(studentId);
+    try {
+      await api.post(`/api/trainer-portal/softskill-sessions/${sessionId}/placement-test-releases/${releaseId}/reassign`, { studentId });
+      toast({ title: 'Reassigned — student can retake the test', variant: 'success' });
+      load();
+    } catch (e: unknown) {
+      const err = e as { response?: { data?: { message?: string } } };
+      toast({ title: 'Could not reassign', description: err.response?.data?.message, variant: 'error' });
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  const ATTEMPT_LABEL: Record<PCAttempt['status'], string> = {
+    IN_PROGRESS: 'In progress', SUBMITTED: 'Submitted', AUTO_SUBMITTED_VIOLATION: 'Ended (violation)', EXPIRED: 'Expired',
+  };
+
+  return (
+    <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-[60] p-4">
+      <div className="bg-white rounded-xl w-full max-w-2xl p-6 space-y-4 max-h-[85vh] overflow-y-auto">
+        <div className="flex items-center justify-between">
+          <h2 className="font-semibold text-lg">Results — {title}</h2>
+          <button onClick={onClose}><X className="w-4 h-4" /></button>
+        </div>
+        {!loaded ? (
+          <div className="flex justify-center py-8"><Loader2 className="w-5 h-5 animate-spin text-primary" /></div>
+        ) : roster.length === 0 ? (
+          <p className="text-sm text-muted-foreground">No students on this session's roster.</p>
+        ) : (
+          <div className="border rounded-lg divide-y">
+            {roster.map((r) => (
+              <div key={r.student.id} className="flex items-center justify-between px-4 py-2.5">
+                <p className="text-sm">{r.student.firstName} {r.student.lastName} <span className="text-xs text-muted-foreground">({r.student.studentCode})</span></p>
+                {r.attempt ? (
+                  <div className="flex items-center gap-3 text-xs">
+                    <span className={`px-2 py-0.5 rounded-full font-medium ${r.attempt.status === 'SUBMITTED' ? 'bg-green-100 text-green-700' : r.attempt.status === 'IN_PROGRESS' ? 'bg-amber-100 text-amber-700' : 'bg-red-100 text-red-700'}`}>
+                      {ATTEMPT_LABEL[r.attempt.status]}
+                    </span>
+                    {r.attempt.score !== null && r.attempt.score !== undefined && (
+                      <span className="text-muted-foreground">{r.attempt.score}/{r.attempt.totalMarks}</span>
+                    )}
+                    {r.attempt.violationCount > 0 && <span className="text-red-600">{r.attempt.violationCount} violation{r.attempt.violationCount === 1 ? '' : 's'}</span>}
+                    {r.attempt.status !== 'IN_PROGRESS' && (
+                      <button onClick={() => reassign(r.student.id)} disabled={busyId === r.student.id} className="px-2 py-1 rounded border hover:bg-muted disabled:opacity-60">
+                        {busyId === r.student.id ? 'Reassigning...' : 'Reassign'}
+                      </button>
+                    )}
+                  </div>
+                ) : (
+                  <span className="text-xs text-muted-foreground">Not attempted</span>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
     </div>
   );
 }
