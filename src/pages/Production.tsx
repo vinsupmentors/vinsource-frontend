@@ -3187,7 +3187,7 @@ function AddProjectModal({ modules, existing, onClose, setError, onSaved }: {
     setError('');
     try {
       const fd = new FormData();
-      if (!existing) fd.append('moduleId', moduleId);
+      fd.append('moduleId', moduleId);
       fd.append('title', title.trim());
       fd.append('description', description.trim());
       if (file) fd.append('resource', file);
@@ -3205,10 +3205,9 @@ function AddProjectModal({ modules, existing, onClose, setError, onSaved }: {
       <div className="space-y-3">
         <div>
           <label className="text-xs font-medium text-muted-foreground">Module</label>
-          <select value={moduleId} onChange={(e) => setModuleId(e.target.value)} disabled={!!existing} className="w-full mt-1 border rounded-lg px-3 py-2 text-sm disabled:bg-muted/40 disabled:text-muted-foreground">
+          <select value={moduleId} onChange={(e) => setModuleId(e.target.value)} className="w-full mt-1 border rounded-lg px-3 py-2 text-sm">
             {modules.map((m) => <option key={m.id} value={m.id}>{m.courseName} — {m.title}</option>)}
           </select>
-          {existing && <p className="text-[11px] text-muted-foreground mt-1">Module can't be changed after creation.</p>}
         </div>
         <div>
           <label className="text-xs font-medium text-muted-foreground">Title</label>
@@ -3755,7 +3754,7 @@ function OnlineTestsPanel({ modules, canEdit, setError }: {
         />
       )}
       {detailId && (
-        <OnlineTestDetailModal testId={detailId} canEdit={canEdit} onClose={() => { setDetailId(null); refresh(); }} setError={setError} />
+        <OnlineTestDetailModal testId={detailId} modules={modules} canEdit={canEdit} onClose={() => { setDetailId(null); refresh(); }} setError={setError} />
       )}
     </div>
   );
@@ -3808,8 +3807,8 @@ function AddOnlineTestModal({ modules, onClose, setError, onSaved }: {
   );
 }
 
-function OnlineTestDetailModal({ testId, canEdit, onClose, setError }: {
-  testId: string; canEdit: boolean; onClose: () => void; setError: (s: string) => void;
+function OnlineTestDetailModal({ testId, modules, canEdit, onClose, setError }: {
+  testId: string; modules: (ModuleLite & { courseName: string })[]; canEdit: boolean; onClose: () => void; setError: (s: string) => void;
 }) {
   const [test, setTest] = useState<OnlineTest | null>(null);
   const [loading, setLoading] = useState(true);
@@ -3819,6 +3818,7 @@ function OnlineTestDetailModal({ testId, canEdit, onClose, setError }: {
   const [editingMeta, setEditingMeta] = useState(false);
   const [metaTitle, setMetaTitle] = useState('');
   const [metaDuration, setMetaDuration] = useState(45);
+  const [metaModuleId, setMetaModuleId] = useState('');
   const [savingMeta, setSavingMeta] = useState(false);
 
   const refresh = useCallback(() => {
@@ -3849,6 +3849,7 @@ function OnlineTestDetailModal({ testId, canEdit, onClose, setError }: {
     if (!test) return;
     setMetaTitle(test.title);
     setMetaDuration(test.durationMinutes);
+    setMetaModuleId(test.moduleId);
     setEditingMeta(true);
   };
 
@@ -3857,7 +3858,7 @@ function OnlineTestDetailModal({ testId, canEdit, onClose, setError }: {
     setSavingMeta(true);
     setError('');
     try {
-      await api.put(`/api/production/online-tests/${testId}`, { title: metaTitle.trim(), durationMinutes: metaDuration });
+      await api.put(`/api/production/online-tests/${testId}`, { title: metaTitle.trim(), durationMinutes: metaDuration, moduleId: metaModuleId });
       setEditingMeta(false);
       refresh();
     } catch (err) { setError(errMsg(err, 'Could not update test')); } finally { setSavingMeta(false); }
@@ -3873,17 +3874,25 @@ function OnlineTestDetailModal({ testId, canEdit, onClose, setError }: {
         ) : (
           <div className="space-y-4">
             {editingMeta ? (
-              <div className="flex items-end gap-2 border rounded-lg p-3 bg-muted/20">
-                <div className="flex-1">
-                  <label className="text-xs font-medium text-muted-foreground">Title</label>
-                  <input value={metaTitle} onChange={(e) => setMetaTitle(e.target.value)} className="w-full mt-1 border rounded-lg px-3 py-2 text-sm" />
+              <div className="space-y-2 border rounded-lg p-3 bg-muted/20">
+                <div>
+                  <label className="text-xs font-medium text-muted-foreground">Module</label>
+                  <select value={metaModuleId} onChange={(e) => setMetaModuleId(e.target.value)} className="w-full mt-1 border rounded-lg px-3 py-2 text-sm">
+                    {modules.map((m) => <option key={m.id} value={m.id}>{m.courseName} — {m.title}</option>)}
+                  </select>
                 </div>
-                <div className="w-32">
-                  <label className="text-xs font-medium text-muted-foreground">Duration (min)</label>
-                  <input type="number" min={1} value={metaDuration} onChange={(e) => setMetaDuration(Number(e.target.value))} className="w-full mt-1 border rounded-lg px-3 py-2 text-sm" />
+                <div className="flex items-end gap-2">
+                  <div className="flex-1">
+                    <label className="text-xs font-medium text-muted-foreground">Title</label>
+                    <input value={metaTitle} onChange={(e) => setMetaTitle(e.target.value)} className="w-full mt-1 border rounded-lg px-3 py-2 text-sm" />
+                  </div>
+                  <div className="w-32">
+                    <label className="text-xs font-medium text-muted-foreground">Duration (min)</label>
+                    <input type="number" min={1} value={metaDuration} onChange={(e) => setMetaDuration(Number(e.target.value))} className="w-full mt-1 border rounded-lg px-3 py-2 text-sm" />
+                  </div>
+                  <button onClick={saveMeta} disabled={savingMeta} className="px-3 py-2 text-xs rounded-lg bg-blue-600 text-white disabled:opacity-50">{savingMeta ? 'Saving...' : 'Save'}</button>
+                  <button onClick={() => setEditingMeta(false)} className="px-3 py-2 text-xs rounded-lg border">Cancel</button>
                 </div>
-                <button onClick={saveMeta} disabled={savingMeta} className="px-3 py-2 text-xs rounded-lg bg-blue-600 text-white disabled:opacity-50">{savingMeta ? 'Saving...' : 'Save'}</button>
-                <button onClick={() => setEditingMeta(false)} className="px-3 py-2 text-xs rounded-lg border">Cancel</button>
               </div>
             ) : (
               <p className="text-xs text-muted-foreground flex items-center gap-2">
