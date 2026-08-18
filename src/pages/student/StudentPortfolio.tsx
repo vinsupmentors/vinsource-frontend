@@ -2,16 +2,20 @@ import { useEffect, useState } from 'react';
 import { QRCodeSVG } from 'qrcode.react';
 import api, { BASE_URL } from '@/lib/api';
 import { useToast } from '@/components/ui/toaster';
-import { Loader2, Plus, Trash2, CheckCircle2, Clock, XCircle, ExternalLink } from 'lucide-react';
+import { Loader2, Plus, Trash2, CheckCircle2, Clock, XCircle, ExternalLink, Star } from 'lucide-react';
 
 interface Education { degree: string; institution: string; fieldOfStudy: string; year: string; grade: string }
-interface Skill { name: string; level: string }
+// `stars` (1-5) is the current shape. `level` is legacy free-text ("Beginner"/
+// "Intermediate"/...) from before the star rating existed — still read for
+// students who submitted before this change, converted to stars on load.
+interface Skill { name: string; stars?: number; level?: string }
 interface ProjectItem { title: string; description: string; link: string; techStack: string }
 interface Experience { company: string; role: string; duration: string; description: string }
 
 interface Portfolio {
   id: string;
   summary: string | null;
+  targetRole: string | null;
   education: Education[] | null;
   skills: Skill[] | null;
   projects: ProjectItem[] | null;
@@ -23,9 +27,30 @@ interface Portfolio {
 }
 
 const emptyEducation = (): Education => ({ degree: '', institution: '', fieldOfStudy: '', year: '', grade: '' });
-const emptySkill = (): Skill => ({ name: '', level: '' });
+const emptySkill = (): Skill => ({ name: '', stars: 3 });
 const emptyProject = (): ProjectItem => ({ title: '', description: '', link: '', techStack: '' });
 const emptyExperience = (): Experience => ({ company: '', role: '', duration: '', description: '' });
+
+// Legacy free-text level -> star rating, for portfolios submitted before the
+// star rating existed.
+const LEVEL_TO_STARS: Record<string, number> = {
+  beginner: 2, basic: 2, intermediate: 3, advanced: 4, expert: 5, proficient: 4,
+};
+const normalizeSkill = (s: Skill): Skill =>
+  s.stars ? s : { name: s.name, stars: LEVEL_TO_STARS[(s.level || '').toLowerCase()] ?? 3 };
+
+// Aspiring-role options and the skills commonly expected for each, shown as
+// quick-add suggestion chips once a role is picked. "Other" has no
+// suggestions — the student just adds their own skills manually.
+const ROLE_SKILLS: Record<string, string[]> = {
+  'Data Analyst': ['SQL', 'Excel', 'Python', 'Power BI', 'Tableau', 'Statistics', 'Data Cleaning', 'Data Visualization'],
+  'Data Scientist': ['Python', 'Machine Learning', 'Pandas', 'NumPy', 'SQL', 'Data Visualization', 'Statistics', 'Deep Learning'],
+  'Digital Marketing Executive': ['SEO', 'Social Media Marketing', 'Google Ads', 'Meta Ads', 'Content Marketing', 'Google Analytics', 'Email Marketing', 'Copywriting'],
+  'UI/UX & Graphic Designer': ['Figma', 'Adobe XD', 'Photoshop', 'Illustrator', 'Wireframing', 'Prototyping', 'User Research', 'Canva'],
+  'Full Stack Developer': ['HTML', 'CSS', 'JavaScript', 'React', 'Node.js', 'MongoDB', 'Express', 'Git'],
+  'Other': [],
+};
+const ROLES = Object.keys(ROLE_SKILLS);
 
 export default function StudentPortfolio() {
   const [portfolio, setPortfolio] = useState<Portfolio | null>(null);
@@ -34,6 +59,7 @@ export default function StudentPortfolio() {
   const { toast } = useToast();
 
   const [summary, setSummary] = useState('');
+  const [targetRole, setTargetRole] = useState('');
   const [education, setEducation] = useState<Education[]>([emptyEducation()]);
   const [skills, setSkills] = useState<Skill[]>([emptySkill()]);
   const [projects, setProjects] = useState<ProjectItem[]>([emptyProject()]);
@@ -47,8 +73,9 @@ export default function StudentPortfolio() {
         setPortfolio(data);
         if (data) {
           setSummary(data.summary || '');
+          setTargetRole(data.targetRole || '');
           setEducation(data.education?.length ? data.education : [emptyEducation()]);
-          setSkills(data.skills?.length ? data.skills : [emptySkill()]);
+          setSkills(data.skills?.length ? data.skills.map(normalizeSkill) : [emptySkill()]);
           setProjects(data.projects?.length ? data.projects : [emptyProject()]);
           setExperience(data.experience?.length ? data.experience : [emptyExperience()]);
         }
@@ -65,8 +92,12 @@ export default function StudentPortfolio() {
         rows.filter((r) => Object.values(r as Record<string, unknown>).some((v) => String(v ?? '').trim() !== ''));
       const res = await api.post('/api/student-portal/portfolio', {
         summary,
+        targetRole: targetRole || null,
         education: clean(education),
-        skills: clean(skills),
+        // Skills always carry a `stars` number (default 3), so the generic
+        // "any field non-empty" filter would keep blank rows — filter on
+        // name specifically instead.
+        skills: skills.filter((s) => s.name.trim() !== '').map((s) => ({ name: s.name.trim(), stars: s.stars || 3 })),
         projects: clean(projects),
         experience: clean(experience),
       });
@@ -150,16 +181,83 @@ export default function StudentPortfolio() {
         ]}
       />
 
-      <RepeatingSection
-        title="Skills"
-        rows={skills}
-        setRows={setSkills}
-        makeEmpty={emptySkill}
-        fields={[
-          { key: 'name', label: 'Skill' },
-          { key: 'level', label: 'Level (e.g. Beginner/Intermediate/Advanced)' },
-        ]}
-      />
+      {/* Aspiring role + skills — the role picked here drives both the public
+          page's "Aspiring <role>" badge and the quick-add skill suggestions
+          below. */}
+      <section className="space-y-2">
+        <h2 className="text-sm font-semibold">Aspiring Role</h2>
+        <select
+          value={targetRole}
+          onChange={(e) => setTargetRole(e.target.value)}
+          className="w-full border rounded-lg px-3 py-2 text-sm bg-background"
+        >
+          <option value="">Select a role…</option>
+          {ROLES.map((r) => <option key={r} value={r}>{r}</option>)}
+        </select>
+      </section>
+
+      <section className="space-y-2">
+        <div className="flex items-center justify-between">
+          <h2 className="text-sm font-semibold">Skills</h2>
+          <button onClick={() => setSkills([...skills, emptySkill()])} className="text-xs text-blue-600 flex items-center gap-1">
+            <Plus className="w-3 h-3" /> Add skill
+          </button>
+        </div>
+
+        {targetRole && ROLE_SKILLS[targetRole]?.length > 0 && (
+          <div className="space-y-1.5">
+            <p className="text-xs text-muted-foreground">Suggested for {targetRole} — click to add:</p>
+            <div className="flex flex-wrap gap-1.5">
+              {ROLE_SKILLS[targetRole]
+                .filter((sk) => !skills.some((s) => s.name.toLowerCase() === sk.toLowerCase()))
+                .map((sk) => (
+                  <button
+                    key={sk}
+                    onClick={() => {
+                      const next = skills.filter((s) => s.name.trim() !== '');
+                      next.push({ name: sk, stars: 3 });
+                      setSkills(next.length ? next : [{ name: sk, stars: 3 }]);
+                    }}
+                    className="text-xs px-2.5 py-1 rounded-full border border-blue-200 text-blue-700 bg-blue-50 hover:bg-blue-100"
+                  >
+                    + {sk}
+                  </button>
+                ))}
+            </div>
+          </div>
+        )}
+
+        <div className="space-y-2">
+          {skills.map((s, idx) => (
+            <div key={idx} className="border rounded-lg p-3 flex items-center gap-3">
+              <input
+                value={s.name}
+                onChange={(e) => {
+                  const next = skills.slice();
+                  next[idx] = { ...next[idx], name: e.target.value };
+                  setSkills(next);
+                }}
+                placeholder="Skill (e.g. Python)"
+                className="flex-1 border rounded-lg px-2 py-1.5 text-sm"
+              />
+              <StarPicker
+                value={s.stars || 3}
+                onChange={(stars) => {
+                  const next = skills.slice();
+                  next[idx] = { ...next[idx], stars };
+                  setSkills(next);
+                }}
+              />
+              <button
+                onClick={() => setSkills(skills.length > 1 ? skills.filter((_, i) => i !== idx) : [emptySkill()])}
+                className="text-muted-foreground hover:text-red-600"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+              </button>
+            </div>
+          ))}
+        </div>
+      </section>
 
       <RepeatingSection
         title="Projects"
@@ -169,7 +267,7 @@ export default function StudentPortfolio() {
         fields={[
           { key: 'title', label: 'Title' },
           { key: 'description', label: 'Description', textarea: true },
-          { key: 'link', label: 'Link (GitHub/demo URL)' },
+          { key: 'link', label: 'Link (e.g. https://github.com/you/project)' },
           { key: 'techStack', label: 'Tech Stack' },
         ]}
       />
@@ -196,6 +294,18 @@ export default function StudentPortfolio() {
           {saving ? 'Submitting...' : portfolio ? 'Resubmit for Review' : 'Submit Portfolio'}
         </button>
       </div>
+    </div>
+  );
+}
+
+function StarPicker({ value, onChange }: { value: number; onChange: (stars: number) => void }) {
+  return (
+    <div className="flex items-center gap-0.5 shrink-0">
+      {[1, 2, 3, 4, 5].map((n) => (
+        <button key={n} type="button" onClick={() => onChange(n)} className="p-0.5">
+          <Star className={`w-4 h-4 ${n <= value ? 'fill-amber-400 text-amber-400' : 'text-slate-300'}`} />
+        </button>
+      ))}
     </div>
   );
 }

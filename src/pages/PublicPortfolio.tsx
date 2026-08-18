@@ -3,16 +3,20 @@ import { useParams } from 'react-router-dom';
 import api, { BASE_URL } from '@/lib/api';
 import {
   Loader2, GraduationCap, Briefcase, FolderGit2, ExternalLink,
-  Mail, Phone, BadgeCheck, Sparkles, Code2,
+  Mail, Phone, Sparkles, Code2, Star,
 } from 'lucide-react';
 
 interface Education { degree: string; institution: string; fieldOfStudy: string; year: string; grade: string }
-interface Skill { name: string; level: string }
+// `stars` (1-5) is the current shape; `level` is legacy free-text from before
+// the star rating existed — still rendered (converted to a star count) for
+// portfolios that were approved before this change.
+interface Skill { name: string; stars?: number; level?: string }
 interface ProjectItem { title: string; description: string; link: string; techStack: string }
 interface Experience { company: string; role: string; duration: string; description: string }
 
 export interface PublicPortfolioData {
   summary: string | null;
+  targetRole: string | null;
   education: Education[] | null;
   skills: Skill[] | null;
   projects: ProjectItem[] | null;
@@ -23,14 +27,16 @@ export interface PublicPortfolioData {
 
 const photoUrl = (path: string) => (/^https?:\/\//i.test(path) ? path : `${BASE_URL}${path}`);
 
-const LEVEL_PCT: Record<string, number> = {
-  beginner: 35, basic: 35, intermediate: 60, advanced: 85, expert: 100, proficient: 85,
-};
+// A student typing "github.com/me" (no scheme) into the Link field would
+// otherwise resolve as a path relative to the portfolio page itself — send
+// the browser to vinsource.../portfolio/github.com/me instead of the actual
+// site. Force a scheme so external links always go where they're meant to.
+const externalUrl = (raw: string) => (/^https?:\/\//i.test(raw) ? raw : `https://${raw}`);
 
-const TRACK_LABEL: Record<string, string> = {
-  JRP: 'Job Ready Program', IOP: 'Industry Oriented Program', PAP: 'Placement Assurance Program',
-  PT: 'Placement Training',
+const LEVEL_TO_STARS: Record<string, number> = {
+  beginner: 2, basic: 2, intermediate: 3, advanced: 4, expert: 5, proficient: 4,
 };
+const skillStars = (s: Skill) => s.stars || LEVEL_TO_STARS[(s.level || '').toLowerCase()] || 3;
 
 /** The polished portfolio rendering — used by the public QR/link page. */
 export function PortfolioView({ data }: { data: PublicPortfolioData }) {
@@ -60,14 +66,13 @@ export function PortfolioView({ data }: { data: PublicPortfolioData }) {
 
           <h1 className="mt-6 text-4xl sm:text-5xl font-extrabold tracking-tight">{fullName}</h1>
 
-          <div className="mt-4 flex items-center justify-center gap-2 flex-wrap">
-            <span className="inline-flex items-center gap-1.5 text-xs font-semibold bg-white/10 border border-white/20 rounded-full px-3.5 py-1.5 backdrop-blur">
-              <Sparkles className="w-3.5 h-3.5 text-cyan-300" /> {TRACK_LABEL[student.track] || student.track}
-            </span>
-            <span className="inline-flex items-center gap-1.5 text-xs font-semibold bg-white/10 border border-white/20 rounded-full px-3.5 py-1.5 backdrop-blur">
-              <BadgeCheck className="w-3.5 h-3.5 text-emerald-300" /> Vinsup Skill Academy · {student.studentCode}
-            </span>
-          </div>
+          {data.targetRole && (
+            <div className="mt-4 flex items-center justify-center gap-2 flex-wrap">
+              <span className="inline-flex items-center gap-1.5 text-xs font-semibold bg-white/10 border border-white/20 rounded-full px-3.5 py-1.5 backdrop-blur">
+                <Sparkles className="w-3.5 h-3.5 text-cyan-300" /> Aspiring {data.targetRole}
+              </span>
+            </div>
+          )}
 
           {!!data.badges?.length && (
             <div className="mt-5 flex items-center justify-center gap-2 flex-wrap">
@@ -98,7 +103,10 @@ export function PortfolioView({ data }: { data: PublicPortfolioData }) {
       </div>
 
       {/* ── Body (overlapping the hero) ── */}
-      <div className="max-w-4xl mx-auto px-4 sm:px-6 -mt-12 pb-16 space-y-6">
+      {/* relative z-10 guarantees this paints over the hero's bottom padding
+          rather than getting visually swallowed by it — without it, the top
+          of the summary card can render underneath the hero and look cut off. */}
+      <div className="relative z-10 max-w-4xl mx-auto px-4 sm:px-6 -mt-12 pb-16 space-y-6">
         {/* About */}
         {data.summary && (
           <div className="bg-white rounded-2xl shadow-lg shadow-slate-200/60 border border-slate-100 p-6 sm:p-8">
@@ -113,12 +121,17 @@ export function PortfolioView({ data }: { data: PublicPortfolioData }) {
               <Card title="Skills" icon={Code2}>
                 <div className="space-y-3.5">
                   {data.skills.map((s, i) => {
-                    const pct = LEVEL_PCT[(s.level || '').toLowerCase()] ?? 70;
+                    const stars = skillStars(s);
+                    const pct = (stars / 5) * 100;
                     return (
                       <div key={i}>
                         <div className="flex items-center justify-between mb-1">
                           <span className="text-[13px] font-medium text-slate-700">{s.name}</span>
-                          {s.level && <span className="text-[11px] text-slate-400 capitalize">{s.level}</span>}
+                          <span className="flex items-center gap-0.5">
+                            {[1, 2, 3, 4, 5].map((n) => (
+                              <Star key={n} className={`w-3 h-3 ${n <= stars ? 'fill-amber-400 text-amber-400' : 'text-slate-200'}`} />
+                            ))}
+                          </span>
                         </div>
                         <div className="h-1.5 bg-slate-100 rounded-full overflow-hidden">
                           <div className="h-full rounded-full bg-gradient-to-r from-blue-600 to-cyan-400" style={{ width: `${pct}%` }} />
@@ -157,7 +170,7 @@ export function PortfolioView({ data }: { data: PublicPortfolioData }) {
                         <h3 className="text-[15px] font-semibold text-slate-800">{p.title}</h3>
                         {p.link && (
                           <a
-                            href={p.link} target="_blank" rel="noreferrer"
+                            href={externalUrl(p.link)} target="_blank" rel="noreferrer"
                             className="shrink-0 inline-flex items-center gap-1 text-xs font-medium text-blue-600 bg-blue-50 hover:bg-blue-100 rounded-full px-3 py-1 transition-colors"
                           >
                             View <ExternalLink className="w-3 h-3" />
@@ -196,14 +209,6 @@ export function PortfolioView({ data }: { data: PublicPortfolioData }) {
               </Card>
             )}
           </div>
-        </div>
-
-        {/* ── Footer ── */}
-        <div className="text-center pt-6">
-          <p className="inline-flex items-center gap-2 text-xs text-slate-400">
-            <BadgeCheck className="w-4 h-4 text-emerald-500" />
-            Verified portfolio · Built &amp; hosted by <span className="font-semibold text-slate-500">Vinsup Skill Academy</span>
-          </p>
         </div>
       </div>
     </div>

@@ -2431,28 +2431,38 @@ interface PortfolioRow {
   id: string;
   summary: string | null;
   education: { degree: string; institution: string; fieldOfStudy: string; year: string; grade: string }[] | null;
-  skills: { name: string; level: string }[] | null;
+  skills: { name: string; level?: string; stars?: number }[] | null;
   projects: { title: string; description: string; link: string; techStack: string }[] | null;
   experience: { company: string; role: string; duration: string; description: string }[] | null;
   status: 'PENDING' | 'APPROVED' | 'REJECTED';
   publicSlug: string | null;
   reviewNote: string | null;
   submittedAt?: string;
-  student: { id: string; firstName: string; lastName: string; studentCode: string; track: StudentTrack };
+  reviewedAt?: string | null;
+  student: {
+    id: string; firstName: string; lastName: string; studentCode: string; track: StudentTrack;
+    enrollments: { schedule: { course: { id: string; name: string } } }[];
+  };
 }
+
+const PT_PORTFOLIO_GROUP = 'PT — Direct Placement';
+const portfolioCourseName = (row: PortfolioRow) => row.student.enrollments?.[0]?.schedule.course.name || PT_PORTFOLIO_GROUP;
 
 function PortfoliosTab({ canEdit, setError }: { canEdit: boolean; setError: (s: string) => void }) {
   const [rows, setRows] = useState<PortfolioRow[]>([]);
   const [loading, setLoading] = useState(true);
+  const [selectedGroup, setSelectedGroup] = useState<string | null>(null);
   const [expanded, setExpanded] = useState<string | null>(null);
   const [rejecting, setRejecting] = useState<PortfolioRow | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
 
   const load = useCallback(() => {
     setLoading(true);
-    api.get('/api/production/portfolios/pending')
+    // No status filter — pulls PENDING/APPROVED/REJECTED so the tab can show
+    // pending and approved side by side, grouped by course.
+    api.get('/api/production/portfolios')
       .then((r) => setRows(r.data.data || []))
-      .catch((err) => setError(errMsg(err, 'Failed to load portfolio approvals')))
+      .catch((err) => setError(errMsg(err, 'Failed to load portfolios')))
       .finally(() => setLoading(false));
   }, [setError]);
 
@@ -2484,91 +2494,241 @@ function PortfoliosTab({ canEdit, setError }: { canEdit: boolean; setError: (s: 
     }
   };
 
+  const remove = async (row: PortfolioRow) => {
+    if (!window.confirm(`Delete ${row.student.firstName} ${row.student.lastName}'s portfolio? ${row.status === 'APPROVED' ? 'Their public link will stop working. ' : ''}This cannot be undone.`)) return;
+    setBusyId(row.id);
+    try {
+      await api.delete(`/api/production/portfolios/${row.id}`);
+      load();
+    } catch (err) {
+      setError(errMsg(err, 'Failed to delete portfolio'));
+    } finally {
+      setBusyId(null);
+    }
+  };
+
   if (loading) {
     return <div className="flex items-center justify-center h-40"><Loader2 className="w-6 h-6 animate-spin text-primary" /></div>;
   }
 
+  // Group by course (PT / direct-placement students, who have no
+  // enrollment, land in their own bucket). Courses with zero submissions
+  // don't get a card — nothing to see there yet.
+  const groups = new Map<string, PortfolioRow[]>();
+  for (const row of rows) {
+    const key = portfolioCourseName(row);
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key)!.push(row);
+  }
+  const groupList = Array.from(groups.entries()).sort(([a], [b]) => a.localeCompare(b));
+
+  if (!selectedGroup) {
+    return (
+      <div className="space-y-4">
+        <div>
+          <h2 className="text-lg font-semibold">Portfolio Approvals</h2>
+          <p className="text-sm text-muted-foreground">Pick a course to review its students' portfolio submissions. Approving generates a public link and QR code for the student.</p>
+        </div>
+        {groupList.length === 0 ? (
+          <div className="text-sm text-muted-foreground border rounded-xl p-6 text-center">No portfolio submissions yet.</div>
+        ) : (
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+            {groupList.map(([name, groupRows]) => {
+              const pending = groupRows.filter((r) => r.status === 'PENDING').length;
+              const approved = groupRows.filter((r) => r.status === 'APPROVED').length;
+              return (
+                <button
+                  key={name}
+                  onClick={() => setSelectedGroup(name)}
+                  className="text-left border rounded-xl p-4 bg-card hover:border-blue-400 hover:shadow-sm transition relative"
+                >
+                  <div className="flex items-center gap-2">
+                    <BookOpen className="w-4 h-4 text-blue-600 shrink-0" />
+                    <p className="font-semibold text-sm">{name}</p>
+                  </div>
+                  <p className="text-xs text-muted-foreground mt-1.5">{approved} approved · {groupRows.length} total</p>
+                  {pending > 0 && (
+                    <span className="absolute top-3 right-3 text-[11px] font-bold bg-amber-500 text-white rounded-full min-w-[20px] h-5 px-1.5 flex items-center justify-center">
+                      {pending}
+                    </span>
+                  )}
+                </button>
+              );
+            })}
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  const groupRows = groups.get(selectedGroup) || [];
+  const pendingRows = groupRows.filter((r) => r.status === 'PENDING');
+  const approvedRows = groupRows.filter((r) => r.status === 'APPROVED');
+  const rejectedRows = groupRows.filter((r) => r.status === 'REJECTED');
+
   return (
-    <div className="space-y-4">
+    <div className="space-y-6">
       <div>
-        <h2 className="text-lg font-semibold">Pending Portfolio Approvals</h2>
-        <p className="text-sm text-muted-foreground">Students who have submitted their portfolio and are waiting for review. Approving generates a public link and QR code for the student.</p>
+        <button onClick={() => setSelectedGroup(null)} className="text-xs text-blue-600 hover:underline flex items-center gap-1">
+          <ChevronLeft className="w-3.5 h-3.5" /> All courses
+        </button>
+        <h3 className="font-semibold text-lg mt-1">{selectedGroup}</h3>
       </div>
 
-      {rows.length === 0 ? (
-        <div className="text-sm text-muted-foreground border rounded-xl p-6 text-center">No pending portfolio submissions.</div>
-      ) : (
-        <div className="space-y-3">
-          {rows.map((row) => {
-            const isExpanded = expanded === row.id;
-            const isBusy = busyId === row.id;
-            return (
-              <div key={row.id} className="border rounded-xl bg-white">
-                <div className="flex items-center justify-between px-4 py-3">
-                  <button onClick={() => setExpanded(isExpanded ? null : row.id)} className="flex items-center gap-2 text-left">
-                    {isExpanded ? <ChevronDown className="w-4 h-4 text-muted-foreground" /> : <ChevronRight className="w-4 h-4 text-muted-foreground" />}
-                    <div>
-                      <div className="text-sm font-medium">{row.student.firstName} {row.student.lastName} <span className="text-xs text-muted-foreground">({row.student.studentCode})</span></div>
-                      <div className="text-xs text-muted-foreground">{TRACK_LABEL[row.student.track]}</div>
-                    </div>
-                  </button>
-                  {canEdit && (
-                    <div className="flex items-center gap-2">
-                      <button
-                        onClick={() => setRejecting(row)}
-                        disabled={isBusy}
-                        className="flex items-center gap-1 text-xs font-medium px-3 py-1.5 rounded-lg border text-red-600 hover:bg-red-50 disabled:opacity-50"
-                      >
-                        <XCircle className="w-3.5 h-3.5" /> Reject
-                      </button>
-                      <button
-                        onClick={() => approve(row)}
-                        disabled={isBusy}
-                        className="flex items-center gap-1 text-xs font-medium px-3 py-1.5 rounded-lg bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-50"
-                      >
-                        <CheckCircle2 className="w-3.5 h-3.5" /> {isBusy ? 'Working...' : 'Approve'}
-                      </button>
+      <div className="space-y-3">
+        <h4 className="text-sm font-semibold flex items-center gap-2">
+          Pending Approval
+          {pendingRows.length > 0 && <span className="text-[11px] font-bold bg-amber-100 text-amber-700 rounded-full px-2 py-0.5">{pendingRows.length}</span>}
+        </h4>
+        {pendingRows.length === 0 ? (
+          <div className="text-sm text-muted-foreground border rounded-xl p-4 text-center">No pending portfolio submissions.</div>
+        ) : (
+          <div className="space-y-3">
+            {pendingRows.map((row) => {
+              const isExpanded = expanded === row.id;
+              const isBusy = busyId === row.id;
+              return (
+                <div key={row.id} className="border rounded-xl bg-white">
+                  <div className="flex items-center justify-between px-4 py-3">
+                    <button onClick={() => setExpanded(isExpanded ? null : row.id)} className="flex items-center gap-2 text-left">
+                      {isExpanded ? <ChevronDown className="w-4 h-4 text-muted-foreground" /> : <ChevronRight className="w-4 h-4 text-muted-foreground" />}
+                      <div>
+                        <div className="text-sm font-medium">{row.student.firstName} {row.student.lastName} <span className="text-xs text-muted-foreground">({row.student.studentCode})</span></div>
+                        <div className="text-xs text-muted-foreground">{TRACK_LABEL[row.student.track]}</div>
+                      </div>
+                    </button>
+                    {canEdit && (
+                      <div className="flex items-center gap-2">
+                        <button
+                          onClick={() => setRejecting(row)}
+                          disabled={isBusy}
+                          className="flex items-center gap-1 text-xs font-medium px-3 py-1.5 rounded-lg border text-red-600 hover:bg-red-50 disabled:opacity-50"
+                        >
+                          <XCircle className="w-3.5 h-3.5" /> Reject
+                        </button>
+                        <button
+                          onClick={() => approve(row)}
+                          disabled={isBusy}
+                          className="flex items-center gap-1 text-xs font-medium px-3 py-1.5 rounded-lg bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-50"
+                        >
+                          <CheckCircle2 className="w-3.5 h-3.5" /> {isBusy ? 'Working...' : 'Approve'}
+                        </button>
+                        <button
+                          onClick={() => remove(row)}
+                          disabled={isBusy}
+                          title="Delete portfolio"
+                          className="p-1.5 rounded-lg border text-muted-foreground hover:text-red-600 hover:bg-red-50 disabled:opacity-50"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                  {isExpanded && (
+                    <div className="border-t px-4 py-3 space-y-3 bg-muted/20">
+                      {row.summary && <p className="text-sm">{row.summary}</p>}
+                      {!!row.skills?.length && (
+                        <PortfolioPreviewSection title="Skills">
+                          <div className="flex flex-wrap gap-2">
+                            {row.skills.map((s, i) => (
+                              <span key={i} className="text-xs bg-blue-50 text-blue-700 rounded-full px-2 py-1">{s.name}{s.stars ? ` · ${s.stars}★` : s.level ? ` · ${s.level}` : ''}</span>
+                            ))}
+                          </div>
+                        </PortfolioPreviewSection>
+                      )}
+                      {!!row.projects?.length && (
+                        <PortfolioPreviewSection title="Projects">
+                          <ul className="text-sm space-y-1 list-disc pl-4">
+                            {row.projects.map((p, i) => <li key={i}>{p.title}{p.techStack ? ` — ${p.techStack}` : ''}</li>)}
+                          </ul>
+                        </PortfolioPreviewSection>
+                      )}
+                      {!!row.experience?.length && (
+                        <PortfolioPreviewSection title="Experience">
+                          <ul className="text-sm space-y-1 list-disc pl-4">
+                            {row.experience.map((e, i) => <li key={i}>{e.role} {e.company && `· ${e.company}`}</li>)}
+                          </ul>
+                        </PortfolioPreviewSection>
+                      )}
+                      {!!row.education?.length && (
+                        <PortfolioPreviewSection title="Education">
+                          <ul className="text-sm space-y-1 list-disc pl-4">
+                            {row.education.map((ed, i) => <li key={i}>{ed.degree} — {ed.institution}</li>)}
+                          </ul>
+                        </PortfolioPreviewSection>
+                      )}
                     </div>
                   )}
                 </div>
-                {isExpanded && (
-                  <div className="border-t px-4 py-3 space-y-3 bg-muted/20">
-                    {row.summary && <p className="text-sm">{row.summary}</p>}
-                    {!!row.skills?.length && (
-                      <PortfolioPreviewSection title="Skills">
-                        <div className="flex flex-wrap gap-2">
-                          {row.skills.map((s, i) => (
-                            <span key={i} className="text-xs bg-blue-50 text-blue-700 rounded-full px-2 py-1">{s.name}{s.level ? ` · ${s.level}` : ''}</span>
-                          ))}
-                        </div>
-                      </PortfolioPreviewSection>
-                    )}
-                    {!!row.projects?.length && (
-                      <PortfolioPreviewSection title="Projects">
-                        <ul className="text-sm space-y-1 list-disc pl-4">
-                          {row.projects.map((p, i) => <li key={i}>{p.title}{p.techStack ? ` — ${p.techStack}` : ''}</li>)}
-                        </ul>
-                      </PortfolioPreviewSection>
-                    )}
-                    {!!row.experience?.length && (
-                      <PortfolioPreviewSection title="Experience">
-                        <ul className="text-sm space-y-1 list-disc pl-4">
-                          {row.experience.map((e, i) => <li key={i}>{e.role} {e.company && `· ${e.company}`}</li>)}
-                        </ul>
-                      </PortfolioPreviewSection>
-                    )}
-                    {!!row.education?.length && (
-                      <PortfolioPreviewSection title="Education">
-                        <ul className="text-sm space-y-1 list-disc pl-4">
-                          {row.education.map((ed, i) => <li key={i}>{ed.degree} — {ed.institution}</li>)}
-                        </ul>
-                      </PortfolioPreviewSection>
-                    )}
+              );
+            })}
+          </div>
+        )}
+      </div>
+
+      <div className="space-y-3">
+        <h4 className="text-sm font-semibold">Approved Portfolios</h4>
+        {approvedRows.length === 0 ? (
+          <div className="text-sm text-muted-foreground border rounded-xl p-4 text-center">No approved portfolios yet.</div>
+        ) : (
+          <div className="space-y-2">
+            {approvedRows.map((row) => (
+              <div key={row.id} className="border rounded-xl bg-white flex items-center justify-between px-4 py-3">
+                <div>
+                  <div className="text-sm font-medium">{row.student.firstName} {row.student.lastName} <span className="text-xs text-muted-foreground">({row.student.studentCode})</span></div>
+                  <div className="text-xs text-muted-foreground">
+                    {row.reviewedAt ? `Approved ${new Date(row.reviewedAt).toLocaleDateString()}` : 'Approved'}
                   </div>
+                </div>
+                <div className="flex items-center gap-2">
+                  {row.publicSlug && (
+                    <a
+                      href={`/portfolio/${row.publicSlug}`} target="_blank" rel="noreferrer"
+                      className="flex items-center gap-1 text-xs font-medium px-3 py-1.5 rounded-lg border hover:bg-muted/50"
+                    >
+                      <ExternalLink className="w-3.5 h-3.5" /> View
+                    </a>
+                  )}
+                  {canEdit && (
+                    <button
+                      onClick={() => remove(row)}
+                      disabled={busyId === row.id}
+                      title="Delete portfolio"
+                      className="p-1.5 rounded-lg border text-muted-foreground hover:text-red-600 hover:bg-red-50 disabled:opacity-50"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {rejectedRows.length > 0 && (
+        <div className="space-y-3">
+          <h4 className="text-sm font-semibold text-muted-foreground">Sent Back for Changes</h4>
+          <div className="space-y-2">
+            {rejectedRows.map((row) => (
+              <div key={row.id} className="border rounded-xl bg-white flex items-center justify-between px-4 py-3">
+                <div>
+                  <div className="text-sm font-medium">{row.student.firstName} {row.student.lastName} <span className="text-xs text-muted-foreground">({row.student.studentCode})</span></div>
+                  {row.reviewNote && <div className="text-xs text-muted-foreground mt-0.5">Note: {row.reviewNote}</div>}
+                </div>
+                {canEdit && (
+                  <button
+                    onClick={() => remove(row)}
+                    disabled={busyId === row.id}
+                    title="Delete portfolio"
+                    className="p-1.5 rounded-lg border text-muted-foreground hover:text-red-600 hover:bg-red-50 disabled:opacity-50"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                  </button>
                 )}
               </div>
-            );
-          })}
+            ))}
+          </div>
         </div>
       )}
 
