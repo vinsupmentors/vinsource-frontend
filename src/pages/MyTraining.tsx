@@ -1663,7 +1663,7 @@ function SoftskillAttendancePanel({ session, onBack }: { session: MySoftskillSes
   const [roster, setRoster] = useState<{ student: { id: string; firstName: string; lastName: string; studentCode: string }; status: string | null; score: string }[]>([]);
   const [loaded, setLoaded] = useState(false);
   const [saving, setSaving] = useState(false);
-  const [subView, setSubView] = useState<'attendance' | 'content'>('attendance');
+  const [subView, setSubView] = useState<'attendance' | 'content' | 'feedback'>('attendance');
   const { toast } = useToast();
 
   useEffect(() => {
@@ -1721,7 +1721,7 @@ function SoftskillAttendancePanel({ session, onBack }: { session: MySoftskillSes
       </div>
 
       <div className="flex items-center gap-1 border-b">
-        {([['attendance', 'Attendance'], ['content', 'Placement Content']] as const).map(([key, label]) => (
+        {([['attendance', 'Attendance'], ['content', 'Placement Content'], ['feedback', 'Internal Feedback']] as const).map(([key, label]) => (
           <button
             key={key}
             onClick={() => setSubView(key)}
@@ -1734,6 +1734,8 @@ function SoftskillAttendancePanel({ session, onBack }: { session: MySoftskillSes
 
       {subView === 'content' ? (
         <PlacementContentReviewPanel session={session} />
+      ) : subView === 'feedback' ? (
+        <SoftskillInternalFeedbackPanel session={session} />
       ) : (
         <div className="space-y-4">
           <div className="flex items-center justify-between flex-wrap gap-3">
@@ -1786,6 +1788,100 @@ function SoftskillAttendancePanel({ session, onBack }: { session: MySoftskillSes
             </div>
           )}
         </div>
+      )}
+    </div>
+  );
+}
+
+// ─── Internal Feedback — trainer-private notes on a student's performance in
+// this Softskill/Aptitude session. Same idea as course InternalFeedbackPanel,
+// scoped to a single session instead of a course. ───────────────────────────
+
+interface SSFeedbackRow {
+  student: { id: string; firstName: string; lastName: string; studentCode: string };
+  feedback: { performanceRating: number | null; note: string | null; updatedAt: string } | null;
+}
+
+function SoftskillInternalFeedbackPanel({ session }: { session: MySoftskillSession }) {
+  const [roster, setRoster] = useState<SSFeedbackRow[]>([]);
+  const [drafts, setDrafts] = useState<Record<string, { performanceRating: string; note: string }>>({});
+  const [loaded, setLoaded] = useState(false);
+  const [savingId, setSavingId] = useState<string | null>(null);
+  const { toast } = useToast();
+
+  const load = () => {
+    setLoaded(false);
+    api.get(`/api/trainer-portal/softskill-sessions/${session.id}/feedback`).then(({ data }) => {
+      const rows: SSFeedbackRow[] = data.data || [];
+      setRoster(rows);
+      const init: Record<string, { performanceRating: string; note: string }> = {};
+      for (const r of rows) {
+        init[r.student.id] = {
+          performanceRating: r.feedback?.performanceRating?.toString() || '',
+          note: r.feedback?.note || '',
+        };
+      }
+      setDrafts(init);
+      setLoaded(true);
+    });
+  };
+
+  useEffect(load, [session.id]);
+
+  const update = (sid: string, field: 'performanceRating' | 'note', value: string) => {
+    setDrafts((d) => ({ ...d, [sid]: { ...d[sid], [field]: value } }));
+  };
+
+  const save = async (sid: string) => {
+    setSavingId(sid);
+    try {
+      const draft = drafts[sid] || { performanceRating: '', note: '' };
+      await api.post(`/api/trainer-portal/softskill-sessions/${session.id}/feedback`, {
+        studentId: sid,
+        performanceRating: draft.performanceRating ? Number(draft.performanceRating) : undefined,
+        note: draft.note || undefined,
+      });
+      toast({ title: 'Feedback saved', variant: 'success' });
+      load();
+    } catch (e: unknown) {
+      const err = e as { response?: { data?: { message?: string } } };
+      toast({ title: 'Could not save feedback', description: err.response?.data?.message || 'Please try again.', variant: 'error' });
+    } finally {
+      setSavingId(null);
+    }
+  };
+
+  if (!loaded) return <div className="flex justify-center py-8"><Loader2 className="w-5 h-5 animate-spin text-primary" /></div>;
+
+  return (
+    <div className="space-y-4">
+      <p className="text-xs text-muted-foreground bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+        This feedback is internal only — students never see ratings or notes entered here.
+      </p>
+      {roster.length === 0 ? (
+        <p className="text-sm text-muted-foreground">No students have been added to this session yet — ask the Placements team to add them.</p>
+      ) : (
+        roster.map((r) => {
+          const draft = drafts[r.student.id] || { performanceRating: '', note: '' };
+          return (
+            <div key={r.student.id} className="bg-card rounded-xl border p-4 space-y-3">
+              <p className="text-sm font-semibold">{r.student.firstName} {r.student.lastName} <span className="text-xs text-muted-foreground font-normal">({r.student.studentCode})</span></p>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 items-start">
+                <div>
+                  <label className="block text-xs font-medium mb-1 text-muted-foreground">Performance rating (1–5)</label>
+                  <input type="number" min={1} max={5} value={draft.performanceRating} onChange={(e) => update(r.student.id, 'performanceRating', e.target.value)} className="w-24 px-2 py-1.5 rounded-md border bg-background text-sm" />
+                </div>
+              </div>
+              <div>
+                <label className="block text-xs font-medium mb-1 text-muted-foreground">Note</label>
+                <textarea rows={2} value={draft.note} onChange={(e) => update(r.student.id, 'note', e.target.value)} className="w-full px-3 py-2 rounded-lg border bg-background text-sm" />
+              </div>
+              <button onClick={() => save(r.student.id)} disabled={savingId === r.student.id} className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-blue-600 text-white text-xs font-medium hover:bg-blue-700 disabled:opacity-60">
+                {savingId === r.student.id ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Save className="w-3.5 h-3.5" />} Save feedback
+              </button>
+            </div>
+          );
+        })
       )}
     </div>
   );
@@ -1993,7 +2089,8 @@ function PlacementResultsModal({ sessionId, releaseId, title, onClose }: {
 }) {
   const [roster, setRoster] = useState<PCResultRow[]>([]);
   const [loaded, setLoaded] = useState(false);
-  const [busyId, setBusyId] = useState<string | null>(null);
+  const [busyKey, setBusyKey] = useState<string | null>(null);
+  const [reviewStudent, setReviewStudent] = useState<{ id: string; label: string } | null>(null);
   const { toast } = useToast();
 
   const load = () => {
@@ -2005,17 +2102,22 @@ function PlacementResultsModal({ sessionId, releaseId, title, onClose }: {
 
   useEffect(load, [sessionId, releaseId]);
 
-  const reassign = async (studentId: string) => {
-    setBusyId(studentId);
+  const reassign = async (studentId: string | null, label: string) => {
+    const confirmMsg = studentId
+      ? `Reassign this test to ${label}? Their previous attempt (if finished) will be cleared and they can take it again.`
+      : `Reassign this test to the whole class? Every finished attempt will be cleared and every student can take it again.`;
+    if (!window.confirm(confirmMsg)) return;
+    const key = studentId || '__all__';
+    setBusyKey(key);
     try {
-      await api.post(`/api/trainer-portal/softskill-sessions/${sessionId}/placement-test-releases/${releaseId}/reassign`, { studentId });
-      toast({ title: 'Reassigned — student can retake the test', variant: 'success' });
+      await api.post(`/api/trainer-portal/softskill-sessions/${sessionId}/placement-test-releases/${releaseId}/reassign`, studentId ? { studentId } : {});
+      toast({ title: studentId ? 'Reassigned — student can retake the test' : 'Reassigned to the whole class', variant: 'success' });
       load();
     } catch (e: unknown) {
       const err = e as { response?: { data?: { message?: string } } };
       toast({ title: 'Could not reassign', description: err.response?.data?.message, variant: 'error' });
     } finally {
-      setBusyId(null);
+      setBusyKey(null);
     }
   };
 
@@ -2035,28 +2137,166 @@ function PlacementResultsModal({ sessionId, releaseId, title, onClose }: {
         ) : roster.length === 0 ? (
           <p className="text-sm text-muted-foreground">No students on this session's roster.</p>
         ) : (
-          <div className="border rounded-lg divide-y">
-            {roster.map((r) => (
-              <div key={r.student.id} className="flex items-center justify-between px-4 py-2.5">
-                <p className="text-sm">{r.student.firstName} {r.student.lastName} <span className="text-xs text-muted-foreground">({r.student.studentCode})</span></p>
-                {r.attempt ? (
-                  <div className="flex items-center gap-3 text-xs">
-                    <span className={`px-2 py-0.5 rounded-full font-medium ${r.attempt.status === 'SUBMITTED' ? 'bg-green-100 text-green-700' : r.attempt.status === 'IN_PROGRESS' ? 'bg-amber-100 text-amber-700' : 'bg-red-100 text-red-700'}`}>
-                      {ATTEMPT_LABEL[r.attempt.status]}
-                    </span>
-                    {r.attempt.score !== null && r.attempt.score !== undefined && (
-                      <span className="text-muted-foreground">{r.attempt.score}/{r.attempt.totalMarks}</span>
-                    )}
-                    {r.attempt.violationCount > 0 && <span className="text-red-600">{r.attempt.violationCount} violation{r.attempt.violationCount === 1 ? '' : 's'}</span>}
-                    {r.attempt.status !== 'IN_PROGRESS' && (
-                      <button onClick={() => reassign(r.student.id)} disabled={busyId === r.student.id} className="px-2 py-1 rounded border hover:bg-muted disabled:opacity-60">
-                        {busyId === r.student.id ? 'Reassigning...' : 'Reassign'}
-                      </button>
+          <>
+            <div className="flex justify-end">
+              <button
+                onClick={() => reassign(null, 'the whole class')}
+                disabled={busyKey !== null}
+                title="Clear every finished attempt so the whole class can retake this test"
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-xs font-medium text-amber-700 hover:bg-amber-50 disabled:opacity-60"
+              >
+                {busyKey === '__all__' ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RefreshCw className="w-3.5 h-3.5" />} Reassign all
+              </button>
+            </div>
+            <div className="border rounded-lg divide-y">
+              {roster.map((r) => {
+                const studentLabel = `${r.student.firstName} ${r.student.lastName}`;
+                const canReassign = r.attempt && r.attempt.status !== 'IN_PROGRESS';
+                return (
+                  <div key={r.student.id} className="flex items-center justify-between px-4 py-2.5 flex-wrap gap-2">
+                    <p className="text-sm">{studentLabel} <span className="text-xs text-muted-foreground">({r.student.studentCode})</span></p>
+                    {r.attempt ? (
+                      <div className="flex items-center gap-2 text-xs flex-wrap">
+                        <span className={`px-2 py-0.5 rounded-full font-medium ${r.attempt.status === 'SUBMITTED' ? 'bg-green-100 text-green-700' : r.attempt.status === 'IN_PROGRESS' ? 'bg-amber-100 text-amber-700' : 'bg-red-100 text-red-700'}`}>
+                          {ATTEMPT_LABEL[r.attempt.status]}
+                        </span>
+                        {r.attempt.score !== null && r.attempt.score !== undefined && (
+                          <span className="text-muted-foreground">{r.attempt.score}/{r.attempt.totalMarks}</span>
+                        )}
+                        {r.attempt.violationCount > 0 && <span className="text-red-600">{r.attempt.violationCount} violation{r.attempt.violationCount === 1 ? '' : 's'}</span>}
+                        {canReassign && (
+                          <button
+                            onClick={() => setReviewStudent({ id: r.student.id, label: studentLabel })}
+                            title="See what this student picked for each question, vs. the correct answer"
+                            className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg border font-medium hover:bg-muted"
+                          >
+                            <ListChecks className="w-3.5 h-3.5" /> View answers
+                          </button>
+                        )}
+                        {canReassign && (
+                          <button onClick={() => reassign(r.student.id, studentLabel)} disabled={busyKey !== null} className="px-2 py-1 rounded border hover:bg-muted disabled:opacity-60">
+                            {busyKey === r.student.id ? 'Reassigning...' : 'Reassign'}
+                          </button>
+                        )}
+                      </div>
+                    ) : (
+                      <span className="text-xs text-muted-foreground">Not attempted</span>
                     )}
                   </div>
-                ) : (
-                  <span className="text-xs text-muted-foreground">Not attempted</span>
-                )}
+                );
+              })}
+            </div>
+          </>
+        )}
+      </div>
+      {reviewStudent && (
+        <PlacementStudentAnswerReviewModal
+          sessionId={sessionId}
+          releaseId={releaseId}
+          studentId={reviewStudent.id}
+          studentLabel={reviewStudent.label}
+          onClose={() => setReviewStudent(null)}
+        />
+      )}
+    </div>
+  );
+}
+
+function PlacementStudentAnswerReviewModal({ sessionId, releaseId, studentId, studentLabel, onClose }: {
+  sessionId: string; releaseId: string; studentId: string; studentLabel: string; onClose: () => void;
+}) {
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+  const [data, setData] = useState<{
+    attempt: { score: number | null; totalMarks: number | null; startedAt: string; submittedAt: string | null; violationCount: number };
+    testTitle: string;
+    questions: { id: string; order: number; prompt: string; options: string[]; marks: number; correctIndex: number; selectedIndex: number | null; isCorrect: boolean }[];
+    violations: { id: string; type: 'TAB_SWITCH' | 'NO_FACE' | 'MULTIPLE_FACES' | 'LOOKING_AWAY'; snapshotUrl: string | null; createdAt: string }[];
+  } | null>(null);
+
+  useEffect(() => {
+    setLoading(true);
+    setError('');
+    api.get(`/api/trainer-portal/softskill-sessions/${sessionId}/placement-test-releases/${releaseId}/students/${studentId}/review`)
+      .then((r) => setData(r.data.data))
+      .catch((e) => setError(e?.response?.data?.message || 'Could not load this student\'s answers.'))
+      .finally(() => setLoading(false));
+  }, [sessionId, releaseId, studentId]);
+
+  return (
+    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[70] p-4">
+      <div className="bg-white rounded-xl w-full max-w-3xl p-6 space-y-4 max-h-[90vh] overflow-y-auto">
+        <div className="flex items-center justify-between">
+          <div>
+            <h3 className="text-base font-semibold">{studentLabel}{data ? ` — ${data.testTitle}` : ''}</h3>
+            {data && (
+              <p className="text-xs text-muted-foreground mt-0.5">
+                Score: {data.attempt.score ?? 0} / {data.attempt.totalMarks ?? 0}
+                {data.attempt.submittedAt ? ` · Submitted ${formatDateTime(data.attempt.submittedAt)}` : ''}
+              </p>
+            )}
+          </div>
+          <button onClick={onClose} className="text-muted-foreground hover:text-foreground"><X className="w-4 h-4" /></button>
+        </div>
+
+        {loading ? (
+          <div className="flex justify-center py-8"><Loader2 className="w-5 h-5 animate-spin text-primary" /></div>
+        ) : error ? (
+          <p className="text-sm text-red-600">{error}</p>
+        ) : (
+          <div className="space-y-4">
+            {data!.violations.length > 0 && (
+              <div className="rounded-xl border border-amber-200 bg-amber-50 p-4">
+                <p className="text-sm font-semibold text-amber-800 flex items-center gap-1.5">
+                  Proctoring: {data!.attempt.violationCount} violation{data!.attempt.violationCount === 1 ? '' : 's'} recorded
+                </p>
+                <div className="mt-3 flex flex-wrap gap-3">
+                  {data!.violations.map((v) => (
+                    <div key={v.id} className="w-32 rounded-lg border bg-white overflow-hidden">
+                      {v.snapshotUrl ? (
+                        <a href={fileUrl(v.snapshotUrl)} target="_blank" rel="noopener noreferrer">
+                          <img src={fileUrl(v.snapshotUrl)} alt={violationTypeLabel(v.type)} className="w-full h-24 object-cover" />
+                        </a>
+                      ) : (
+                        <div className="w-full h-24 flex items-center justify-center bg-muted text-muted-foreground text-[10px] text-center px-1">No snapshot</div>
+                      )}
+                      <div className="p-1.5">
+                        <p className="text-[10px] font-medium leading-tight">{violationTypeLabel(v.type)}</p>
+                        <p className="text-[10px] text-muted-foreground mt-0.5">{formatDateTime(v.createdAt)}</p>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+            {data!.questions.map((q, idx) => (
+              <div key={q.id} className="rounded-xl border p-4">
+                <p className="text-sm font-medium">
+                  {idx + 1}. {q.prompt}{' '}
+                  <span className="text-xs text-muted-foreground font-normal">({q.marks} mark{q.marks === 1 ? '' : 's'})</span>
+                </p>
+                <div className="mt-2 flex flex-col gap-1.5">
+                  {q.options.map((opt, i) => {
+                    const isCorrectOption = i === q.correctIndex;
+                    const isTheirPick = i === q.selectedIndex;
+                    const cls = isCorrectOption
+                      ? 'bg-green-50 border-green-300 text-green-800'
+                      : isTheirPick
+                        ? 'bg-red-50 border-red-300 text-red-700'
+                        : 'border-transparent';
+                    return (
+                      <div key={i} className={`flex items-center gap-2 text-sm px-2 py-1.5 rounded-lg border ${cls}`}>
+                        {isCorrectOption ? <CheckCircle2 className="w-3.5 h-3.5 shrink-0" /> : isTheirPick ? <XCircle className="w-3.5 h-3.5 shrink-0" /> : <span className="w-3.5 shrink-0" />}
+                        <span>{opt}</span>
+                        {isTheirPick && !isCorrectOption && <span className="text-xs ml-auto shrink-0">(their answer)</span>}
+                        {isCorrectOption && <span className="text-xs ml-auto shrink-0">(correct answer)</span>}
+                      </div>
+                    );
+                  })}
+                  {q.selectedIndex === null && (
+                    <p className="text-xs text-muted-foreground">This student did not answer this question.</p>
+                  )}
+                </div>
               </div>
             ))}
           </div>
