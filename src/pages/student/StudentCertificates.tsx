@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
-import api, { BASE_URL } from '@/lib/api';
+import api from '@/lib/api';
+import { useCertificateCapture, CertRenderData } from '@/hooks/useCertificateCapture';
 import { Loader2, Award, Lock, CheckCircle2, Circle, Download } from 'lucide-react';
 
 type CertType = 'COURSE_COMPLETION' | 'INTERNSHIP';
@@ -29,24 +30,23 @@ export default function StudentCertificates() {
   const [rows, setRows] = useState<CertRequest[]>([]);
   const [loading, setLoading] = useState(true);
   const [downloadingId, setDownloadingId] = useState<string | null>(null);
+  const { capture, CaptureNode } = useCertificateCapture();
 
   useEffect(() => {
     api.get('/api/student-portal/certificates').then((r) => setRows(r.data.data || [])).finally(() => setLoading(false));
   }, []);
 
-  async function download(id: string, filename: string) {
+  async function download(id: string) {
     setDownloadingId(id);
     try {
-      const token = localStorage.getItem('hrms_token');
-      const res = await fetch(`${BASE_URL}/api/student-portal/certificates/${id}/download`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      if (!res.ok) throw new Error('Download failed');
-      const blob = await res.blob();
+      const { data } = await api.get(`/api/student-portal/certificates/${id}/render-data`);
+      const renderData = data.data as CertRenderData;
+      const blob = await capture(renderData);
+      if (!blob) throw new Error('capture failed');
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = filename;
+      a.download = `${(renderData.certificateNo || 'Certificate').replace(/[^a-z0-9]+/gi, '_')}.pdf`;
       a.click();
       URL.revokeObjectURL(url);
     } catch {
@@ -80,7 +80,7 @@ export default function StudentCertificates() {
                 <>
                   <p className="text-xs text-muted-foreground mt-2">Certificate No: {c.certificateNo}</p>
                   <button
-                    onClick={() => download(c.id, `${TYPE_LABEL[c.type].replace(/\s+/g, '_')}.pdf`)}
+                    onClick={() => download(c.id)}
                     disabled={downloadingId === c.id}
                     className="mt-3 w-full flex items-center justify-center gap-2 text-xs font-medium bg-primary text-primary-foreground px-3 py-2 rounded-lg disabled:opacity-50"
                   >
@@ -99,6 +99,8 @@ export default function StudentCertificates() {
           ))}
         </div>
       )}
+
+      {CaptureNode}
     </div>
   );
 }

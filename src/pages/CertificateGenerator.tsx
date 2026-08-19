@@ -318,7 +318,7 @@ function ODJoiningTemplate({ f }: { f: Record<string, string> }) {
   );
 }
 
-function InternshipCompletionTemplate({ f, short }: { f: Record<string, string>; short?: boolean }) {
+export function InternshipCompletionTemplate({ f, short }: { f: Record<string, string>; short?: boolean }) {
   const P: React.CSSProperties = {
     fontSize: 15, lineHeight: 2.05, textAlign: 'justify', margin: '0 0 22px',
     fontFamily: 'Georgia, "Times New Roman", serif',

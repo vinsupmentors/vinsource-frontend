@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import api, { BASE_URL } from '@/lib/api';
 import { useModuleAccess } from '@/hooks/useModuleAccess';
+import { useCertificateCapture, CertRenderData } from '@/hooks/useCertificateCapture';
 import {
   Award, Loader2, X, CheckCircle2, Circle, Download, User, GraduationCap,
   Wallet, BarChart3, ClipboardList,
@@ -72,6 +73,7 @@ function ReviewModal({ id, canEdit, onClose, onChanged }: { id: string; canEdit:
   const [data, setData] = useState<DetailData | null>(null);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState<'fee' | 'ldm' | 'download' | null>(null);
+  const { capture, CaptureNode } = useCertificateCapture();
 
   const load = () => {
     setLoading(true);
@@ -95,16 +97,14 @@ function ReviewModal({ id, canEdit, onClose, onChanged }: { id: string; canEdit:
   async function download() {
     setBusy('download');
     try {
-      const token = localStorage.getItem('hrms_token');
-      const res = await fetch(`${BASE_URL}/api/certificate-requests/${id}/download`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      if (!res.ok) throw new Error('Download failed');
-      const blob = await res.blob();
+      const { data: rd } = await api.get(`/api/certificate-requests/${id}/render-data`);
+      const renderData = rd.data as CertRenderData;
+      const blob = await capture(renderData);
+      if (!blob) throw new Error('capture failed');
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = `Certificate_${data?.student.studentCode || id}.pdf`;
+      a.download = `${(renderData.certificateNo || `Certificate_${data?.student.studentCode || id}`).replace(/[^a-z0-9]+/gi, '_')}.pdf`;
       a.click();
       URL.revokeObjectURL(url);
     } catch {
@@ -235,6 +235,7 @@ function ReviewModal({ id, canEdit, onClose, onChanged }: { id: string; canEdit:
           </div>
         )}
       </div>
+      {CaptureNode}
     </div>
   );
 }
