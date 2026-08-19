@@ -83,6 +83,31 @@ export function PortfolioView({ data }: { data: PublicPortfolioData }) {
 
   return (
     <div className="min-h-screen bg-slate-50">
+      {/* ── Header nav — pinned to the very top of the page, not just once
+          you've scrolled past the hero ── */}
+      {sections.length > 1 && (
+        <div className="sticky top-0 z-30 bg-white/95 backdrop-blur-md border-b border-slate-200">
+          <div className="max-w-3xl mx-auto px-4 sm:px-6 flex items-center gap-3">
+            <span className="shrink-0 font-bold text-slate-800 text-sm py-2.5">{student.firstName}</span>
+            <div className="flex-1 min-w-0 overflow-x-auto no-scrollbar">
+              <div className="flex items-center justify-end gap-1 py-2 w-max ml-auto">
+                {sections.map((s) => (
+                  <button
+                    key={s.id}
+                    onClick={() => scrollToSection(s.id)}
+                    className={`shrink-0 text-xs font-semibold px-3.5 py-1.5 rounded-full transition-colors ${
+                      activeSection === s.id ? 'bg-blue-600 text-white shadow-sm' : 'text-slate-500 hover:text-blue-600 hover:bg-blue-50'
+                    }`}
+                  >
+                    {s.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* ── Hero ── */}
       <div className="relative overflow-hidden bg-gradient-to-br from-slate-900 via-blue-950 to-blue-900 text-white">
         <div className="absolute -top-24 -right-24 w-96 h-96 rounded-full bg-blue-500/20 blur-3xl" />
@@ -141,27 +166,6 @@ export function PortfolioView({ data }: { data: PublicPortfolioData }) {
           )}
         </div>
       </div>
-
-      {/* ── Sticky section nav ── */}
-      {sections.length > 1 && (
-        <div className="sticky top-0 z-30 bg-white/85 backdrop-blur-md border-b border-slate-200">
-          <div className="max-w-3xl mx-auto px-4 sm:px-6 overflow-x-auto no-scrollbar">
-            <div className="flex items-center gap-1 py-2 w-max sm:w-full">
-              {sections.map((s) => (
-                <button
-                  key={s.id}
-                  onClick={() => scrollToSection(s.id)}
-                  className={`shrink-0 text-xs font-semibold px-3.5 py-1.5 rounded-full transition-colors ${
-                    activeSection === s.id ? 'bg-blue-600 text-white shadow-sm' : 'text-slate-500 hover:text-blue-600 hover:bg-blue-50'
-                  }`}
-                >
-                  {s.label}
-                </button>
-              ))}
-            </div>
-          </div>
-        </div>
-      )}
 
       <div className="max-w-3xl mx-auto px-4 sm:px-6">
         {/* About */}
@@ -317,15 +321,15 @@ export function PortfolioView({ data }: { data: PublicPortfolioData }) {
 
 function SectionHeading({ eyebrow, title, icon: Icon }: { eyebrow: string; title: string; icon: IconType }) {
   return (
-    <div className="mb-6 flex items-end justify-between gap-4">
-      <div>
-        <p className="text-xs font-bold uppercase tracking-widest text-blue-600 flex items-center gap-1.5">
-          <span className="w-1.5 h-1.5 rounded-full bg-blue-600" /> {eyebrow}
-        </p>
-        <h2 className="text-2xl sm:text-3xl font-extrabold text-slate-900 mt-1">{title}</h2>
-        <span className="block w-10 h-1 rounded-full bg-gradient-to-r from-blue-600 to-cyan-400 mt-3" />
+    <div className="mb-8 text-center">
+      <div className="inline-flex items-center justify-center w-11 h-11 rounded-xl bg-blue-50 mb-3">
+        <Icon className="w-5 h-5 text-blue-600" />
       </div>
-      <Icon className="w-7 h-7 text-blue-100 hidden sm:block shrink-0" />
+      <p className="text-xs font-bold uppercase tracking-widest text-blue-600 flex items-center justify-center gap-1.5">
+        <span className="w-1.5 h-1.5 rounded-full bg-blue-600" /> {eyebrow}
+      </p>
+      <h2 className="text-2xl sm:text-3xl font-extrabold text-slate-900 mt-1">{title}</h2>
+      <span className="block w-10 h-1 rounded-full bg-gradient-to-r from-blue-600 to-cyan-400 mt-3 mx-auto" />
     </div>
   );
 }
