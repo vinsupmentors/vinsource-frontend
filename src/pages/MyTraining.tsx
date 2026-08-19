@@ -1899,36 +1899,107 @@ function PlacementContentReviewPanel({ session }: { session: MySoftskillSession 
   const [loaded, setLoaded] = useState(false);
   const [submissionsFor, setSubmissionsFor] = useState<{ release: PCRelease; title: string } | null>(null);
   const [resultsFor, setResultsFor] = useState<{ release: PCRelease; title: string } | null>(null);
+  const [deadlines, setDeadlines] = useState<Record<string, string>>({});
+  const [busyId, setBusyId] = useState<string | null>(null);
+  const { toast } = useToast();
 
-  useEffect(() => {
+  const load = () => {
     api.get(`/api/trainer-portal/softskill-sessions/${session.id}/placement-content`).then(({ data }) => {
       setProjects(data.data.projects || []);
       setTests(data.data.tests || []);
       setLoaded(true);
     });
-  }, [session.id]);
+  };
+  useEffect(load, [session.id]);
+
+  const errMsg = (e: unknown) => (e as { response?: { data?: { message?: string } } }).response?.data?.message || 'Something went wrong';
+
+  const releaseProject = async (projectId: string) => {
+    setBusyId(projectId);
+    try {
+      await api.post(`/api/trainer-portal/softskill-sessions/${session.id}/placement-content/release-project`, {
+        projectId, deadline: deadlines[projectId] || undefined,
+      });
+      load();
+    } catch (e) {
+      toast({ title: 'Could not release project', description: errMsg(e), variant: 'error' });
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  const activateTest = async (testId: string) => {
+    setBusyId(testId);
+    try {
+      await api.post(`/api/trainer-portal/softskill-sessions/${session.id}/placement-content/activate-test`, {
+        testId, deadline: deadlines[testId] || undefined,
+      });
+      load();
+    } catch (e) {
+      toast({ title: 'Could not activate test', description: errMsg(e), variant: 'error' });
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  const closeRelease = async (kind: 'project' | 'test', releaseId: string) => {
+    if (!window.confirm('Close this release? Students will no longer be able to access it.')) return;
+    setBusyId(releaseId);
+    try {
+      await api.post(`/api/trainer-portal/softskill-sessions/${session.id}/placement-content/close-release`, { kind, releaseId });
+      load();
+    } catch (e) {
+      toast({ title: 'Could not close release', description: errMsg(e), variant: 'error' });
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  const DeadlineInput = ({ id }: { id: string }) => (
+    <input
+      type="datetime-local"
+      value={deadlines[id] || ''}
+      onChange={(e) => setDeadlines((d) => ({ ...d, [id]: e.target.value }))}
+      title="Optional deadline"
+      className="px-2 py-1.5 rounded-lg border text-xs"
+    />
+  );
 
   if (!loaded) return <div className="flex justify-center py-8"><Loader2 className="w-5 h-5 animate-spin text-primary" /></div>;
-
-  const releasedProjects = projects.filter((p) => p.releases[0]);
-  const releasedTests = tests.filter((t) => t.releases[0]);
 
   return (
     <div className="space-y-6">
       <div className="space-y-2">
-        <h3 className="text-sm font-semibold">Project Submissions</h3>
-        {releasedProjects.length === 0 ? (
-          <p className="text-xs text-muted-foreground">No projects released to this session yet — released by the Placements team.</p>
+        <h3 className="text-sm font-semibold">Projects</h3>
+        {projects.length === 0 ? (
+          <p className="text-xs text-muted-foreground">No placement projects authored yet — authored in Production.</p>
         ) : (
-          releasedProjects.map((p) => {
+          projects.map((p) => {
             const rel = p.releases[0];
+            const active = rel?.status === 'ACTIVE';
             return (
-              <div key={p.id} className="border rounded-lg p-3 flex items-center justify-between">
+              <div key={p.id} className="border rounded-lg p-3 flex items-center justify-between gap-3">
                 <div>
                   <p className="text-sm font-medium">{p.title}</p>
-                  <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${rel.status === 'ACTIVE' ? 'bg-green-100 text-green-700' : 'bg-muted text-muted-foreground'}`}>{rel.status}</span>
+                  {rel && <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${active ? 'bg-green-100 text-green-700' : 'bg-muted text-muted-foreground'}`}>{rel.status}</span>}
                 </div>
-                <button onClick={() => setSubmissionsFor({ release: rel, title: p.title })} className="px-3 py-1.5 rounded-lg border text-xs font-medium hover:bg-muted">Submissions</button>
+                <div className="flex items-center gap-2">
+                  {rel ? (
+                    <>
+                      <button onClick={() => setSubmissionsFor({ release: rel, title: p.title })} className="px-3 py-1.5 rounded-lg border text-xs font-medium hover:bg-muted">Submissions</button>
+                      {active && (
+                        <button onClick={() => closeRelease('project', rel.id)} disabled={busyId === rel.id} className="px-3 py-1.5 rounded-lg border text-xs font-medium text-red-600 hover:bg-red-50 disabled:opacity-60">Close</button>
+                      )}
+                    </>
+                  ) : (
+                    <>
+                      <DeadlineInput id={p.id} />
+                      <button onClick={() => releaseProject(p.id)} disabled={busyId === p.id} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-blue-600 text-white text-xs font-medium hover:bg-blue-700 disabled:opacity-60">
+                        {busyId === p.id ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Rocket className="w-3.5 h-3.5" />} Release
+                      </button>
+                    </>
+                  )}
+                </div>
               </div>
             );
           })
@@ -1936,19 +2007,43 @@ function PlacementContentReviewPanel({ session }: { session: MySoftskillSession 
       </div>
 
       <div className="space-y-2">
-        <h3 className="text-sm font-semibold">Test Results</h3>
-        {releasedTests.length === 0 ? (
-          <p className="text-xs text-muted-foreground">No tests released to this session yet — released by the Placements team.</p>
+        <h3 className="text-sm font-semibold">Tests</h3>
+        {tests.length === 0 ? (
+          <p className="text-xs text-muted-foreground">No placement tests authored yet — authored in Production.</p>
         ) : (
-          releasedTests.map((t) => {
+          tests.map((t) => {
             const rel = t.releases[0];
+            const active = rel?.status === 'ACTIVE';
+            const noQuestions = t._count.questions === 0;
             return (
-              <div key={t.id} className="border rounded-lg p-3 flex items-center justify-between">
+              <div key={t.id} className="border rounded-lg p-3 flex items-center justify-between gap-3">
                 <div>
                   <p className="text-sm font-medium">{t.title}</p>
-                  <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${rel.status === 'ACTIVE' ? 'bg-green-100 text-green-700' : 'bg-muted text-muted-foreground'}`}>{rel.status}</span>
+                  <p className="text-xs text-muted-foreground">{t.durationMinutes} min · {t._count.questions} question{t._count.questions === 1 ? '' : 's'}</p>
+                  {rel && <span className={`text-xs px-2 py-0.5 rounded-full font-medium mt-1 inline-block ${active ? 'bg-green-100 text-green-700' : 'bg-muted text-muted-foreground'}`}>{rel.status}</span>}
                 </div>
-                <button onClick={() => setResultsFor({ release: rel, title: t.title })} className="px-3 py-1.5 rounded-lg border text-xs font-medium hover:bg-muted">Results</button>
+                <div className="flex items-center gap-2">
+                  {rel ? (
+                    <>
+                      <button onClick={() => setResultsFor({ release: rel, title: t.title })} className="px-3 py-1.5 rounded-lg border text-xs font-medium hover:bg-muted">Results</button>
+                      {active && (
+                        <button onClick={() => closeRelease('test', rel.id)} disabled={busyId === rel.id} className="px-3 py-1.5 rounded-lg border text-xs font-medium text-red-600 hover:bg-red-50 disabled:opacity-60">Close</button>
+                      )}
+                    </>
+                  ) : (
+                    <>
+                      <DeadlineInput id={t.id} />
+                      <button
+                        onClick={() => activateTest(t.id)}
+                        disabled={busyId === t.id || noQuestions}
+                        title={noQuestions ? 'This test has no questions yet' : ''}
+                        className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-blue-600 text-white text-xs font-medium hover:bg-blue-700 disabled:opacity-60"
+                      >
+                        {busyId === t.id ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Rocket className="w-3.5 h-3.5" />} Activate
+                      </button>
+                    </>
+                  )}
+                </div>
               </div>
             );
           })
