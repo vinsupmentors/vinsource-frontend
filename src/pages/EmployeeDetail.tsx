@@ -429,7 +429,7 @@ export default function EmployeeDetail() {
                     onChange={e => setEditForm(f => ({ ...f, status: e.target.value }))}
                     className="w-full px-3 py-2 text-sm border rounded-lg bg-background focus:outline-none focus:ring-2 focus:ring-primary/30"
                   >
-                    {['ACTIVE', 'ON_PROBATION', 'INACTIVE', 'TERMINATED'].map(s => (
+                    {['ACTIVE', 'ON_PROBATION', 'INACTIVE', 'ON_LEAVE', 'RESIGNED', 'TERMINATED'].map(s => (
                       <option key={s} value={s}>{s.replace(/_/g, ' ')}</option>
                     ))}
                   </select>
