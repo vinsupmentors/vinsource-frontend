@@ -92,6 +92,7 @@ type Student = {
   deletionRequestedAt?: string | null;
   deletionReason?: string | null;
   deletionRequestedBy?: { id: string; firstName: string; lastName: string; employeeCode?: string } | null;
+  skillAdvisor?: { id: string; firstName: string; lastName: string; employeeCode?: string } | null;
 };
 
 type Stats = { ongoingBatches: number; upcomingBatches: number; totalStudents: number; activeStudents: number };
@@ -1821,6 +1822,7 @@ function EditStudentModal({ student, batches, onClose, setError, onSaved }: {
     firstName: student.firstName, lastName: student.lastName, phone: student.phone,
     email: student.email || '', track: student.track, status: student.status,
   });
+  const [skillAdvisorCode, setSkillAdvisorCode] = useState(student.skillAdvisor?.employeeCode || '');
   const [saving, setSaving] = useState(false);
 
   // Current batch is whichever enrollment was created most recently — the
@@ -1834,7 +1836,9 @@ function EditStudentModal({ student, batches, onClose, setError, onSaved }: {
     setSaving(true);
     setError('');
     try {
-      await api.put(`/api/production/students/${student.id}`, { ...form, email: form.email || undefined });
+      await api.put(`/api/production/students/${student.id}`, {
+        ...form, email: form.email || undefined, skillAdvisorCode: skillAdvisorCode.trim().toUpperCase(),
+      });
       // Moving to a different batch/schedule is optional — only fires if the
       // admin actually picked something (and it's not just the current one).
       if (newScheduleId && newScheduleId !== currentEnrollment?.scheduleId) {
@@ -1870,6 +1874,12 @@ function EditStudentModal({ student, batches, onClose, setError, onSaved }: {
             {STUDENT_STATUSES.map((st) => <option key={st} value={st}>{STUDENT_STATUS_LABEL[st]}</option>)}
           </select>
         </div>
+        <input
+          className="w-full px-3 py-2 border rounded-lg text-sm font-mono"
+          placeholder="Skill Advisor Employee Code (optional)"
+          value={skillAdvisorCode}
+          onChange={(e) => setSkillAdvisorCode(e.target.value.toUpperCase())}
+        />
         <div className="pt-1 border-t">
           <p className="text-xs text-muted-foreground pt-2">
             Current batch: <span className="font-medium text-foreground">
@@ -2073,8 +2083,8 @@ function BulkUploadStudentsModal({ batches, courses, onClose, setError, onSaved 
   const downloadTemplate = () => {
     const exampleCode = batches.flatMap((b) => b.schedules).find((s) => s.code)?.code || 'B15-UUGD-MOR';
     const ws = XLSX.utils.json_to_sheet([
-      { studentCode: '', firstName: 'John', lastName: 'Doe', phone: '9876543210', email: 'john@example.com', track: 'JRP', subBatchCode: exampleCode, batch: '', course: '' },
-      { studentCode: '', firstName: 'Jane', lastName: 'S', phone: '9876543211', email: 'jane@example.com', track: 'PAP', subBatchCode: '', batch: batches[0]?.code || 'Batch 1', course: courses[0]?.name || '' },
+      { studentCode: '', firstName: 'John', lastName: 'Doe', phone: '9876543210', email: 'john@example.com', track: 'JRP', subBatchCode: exampleCode, batch: '', course: '', skillAdvisorCode: '' },
+      { studentCode: '', firstName: 'Jane', lastName: 'S', phone: '9876543211', email: 'jane@example.com', track: 'PAP', subBatchCode: '', batch: batches[0]?.code || 'Batch 1', course: courses[0]?.name || '', skillAdvisorCode: '' },
     ]);
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, 'Students');
@@ -2117,10 +2127,11 @@ function BulkUploadStudentsModal({ batches, courses, onClose, setError, onSaved 
     <Modal title="Bulk Upload Students" onClose={onClose}>
       <div className="space-y-3 max-h-[65vh] overflow-y-auto pr-1">
         <p className="text-xs text-muted-foreground">
-          Upload an Excel/CSV file with columns: <code>studentCode, firstName, lastName, phone, email, track, subBatchCode, batch, course</code>.
+          Upload an Excel/CSV file with columns: <code>studentCode, firstName, lastName, phone, email, track, subBatchCode, batch, course, skillAdvisorCode</code>.
           <b>Easiest mapping:</b> fill <code>subBatchCode</code> with the sub-batch's code (the purple chip on Batches &amp; Schedules,
           e.g. <code>B15-UUGD-MOR</code>) — then <code>batch</code>/<code>course</code> can stay empty. Leave <code>studentCode</code> blank
-          to auto-generate. <code>track</code> is JRP, IOP, or PAP. Students with a real <code>email</code> receive their login credentials automatically.
+          to auto-generate. <code>track</code> is JRP, IOP, or PAP. <code>skillAdvisorCode</code> is optional — the Sales employee code
+          that gives visibility into this student under "My Students". Students with a real <code>email</code> receive their login credentials automatically.
         </p>
         <button onClick={downloadTemplate} className="text-xs px-3 py-2 border rounded-lg hover:bg-muted/50 flex items-center gap-1">
           <Download className="w-3 h-3" /> Download template
@@ -2202,6 +2213,7 @@ function AddStudentModal({ onClose, setError, onSaved }: { onClose: () => void; 
   const [batchId, setBatchId] = useState('');
   const [scheduleId, setScheduleId] = useState('');
   const [subBatchCode, setSubBatchCode] = useState('');
+  const [skillAdvisorCode, setSkillAdvisorCode] = useState('');
   const [saving, setSaving] = useState(false);
 
   useEffect(() => { api.get('/api/production/batches').then((res) => setBatches(res.data.data)).catch(() => setBatches([])); }, []);
@@ -2226,7 +2238,7 @@ function AddStudentModal({ onClose, setError, onSaved }: { onClose: () => void; 
     setSaving(true);
     setError('');
     try {
-      await api.post('/api/production/students', { studentCode, email, track, scheduleId });
+      await api.post('/api/production/students', { studentCode, email, track, scheduleId, skillAdvisorCode: skillAdvisorCode.trim() || undefined });
       onSaved();
     } catch (err) { setError(errMsg(err, 'Failed to add student')); } finally { setSaving(false); }
   };
@@ -2236,6 +2248,15 @@ function AddStudentModal({ onClose, setError, onSaved }: { onClose: () => void; 
       <div className="space-y-3">
         <input className="w-full px-3 py-2 border rounded-lg text-sm" placeholder="Student ID *" value={studentCode} onChange={(e) => setStudentCode(e.target.value)} />
         <input className="w-full px-3 py-2 border rounded-lg text-sm" placeholder="Email *" type="email" value={email} onChange={(e) => setEmail(e.target.value)} />
+        <div>
+          <input
+            className="w-full px-3 py-2 border rounded-lg text-sm font-mono"
+            placeholder="Skill Advisor Employee Code (optional)"
+            value={skillAdvisorCode}
+            onChange={(e) => setSkillAdvisorCode(e.target.value.toUpperCase())}
+          />
+          <p className="text-[11px] text-muted-foreground mt-1">Sales employee who enrolled this student — gives them visibility in "My Students".</p>
+        </div>
         <select className="w-full px-3 py-2 border rounded-lg text-sm" value={track} onChange={(e) => setTrack(e.target.value)}>
           <option value="JRP">JRP — Job Ready Program</option>
           <option value="IOP">IOP — Industry Oriented Program</option>

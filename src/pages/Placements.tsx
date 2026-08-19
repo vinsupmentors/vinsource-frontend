@@ -1398,6 +1398,7 @@ function AddPtStudentModal({ onClose, setError, onSaved }: {
   const [lastName, setLastName] = useState('');
   const [email, setEmail] = useState('');
   const [phone, setPhone] = useState('');
+  const [skillAdvisorCode, setSkillAdvisorCode] = useState('');
   const [saving, setSaving] = useState(false);
 
   const submit = async () => {
@@ -1410,7 +1411,7 @@ function AddPtStudentModal({ onClose, setError, onSaved }: {
     try {
       await api.post('/api/placements/pool/add-pt-student', {
         studentCode: studentCode.trim(), firstName: firstName.trim(), lastName: lastName.trim(),
-        email: email.trim(), phone: phone.trim(),
+        email: email.trim(), phone: phone.trim(), skillAdvisorCode: skillAdvisorCode.trim().toUpperCase() || undefined,
       });
       onSaved();
       onClose();
@@ -1441,6 +1442,12 @@ function AddPtStudentModal({ onClose, setError, onSaved }: {
           </div>
           <input className="w-full px-3 py-2 border rounded-lg text-sm" placeholder="Email *" type="email" value={email} onChange={(e) => setEmail(e.target.value)} />
           <input className="w-full px-3 py-2 border rounded-lg text-sm" placeholder="Phone" value={phone} onChange={(e) => setPhone(e.target.value)} />
+          <input
+            className="w-full px-3 py-2 border rounded-lg text-sm font-mono"
+            placeholder="Skill Advisor Employee Code (optional)"
+            value={skillAdvisorCode}
+            onChange={(e) => setSkillAdvisorCode(e.target.value.toUpperCase())}
+          />
         </div>
         <div className="flex justify-end gap-2">
           <button onClick={onClose} className="px-4 py-2 text-sm rounded-lg border">Cancel</button>
