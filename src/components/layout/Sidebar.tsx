@@ -119,6 +119,11 @@ const moduleNavItems: ModuleNavItem[] = [
       { label: 'Demo Conducted',    to: '/sales?tab=demoConducted',    icon: CheckCircle2, module: 'SALES', belowLevel: 'ADMIN' },
     ],
   },
+  // Self-scoped (or, for SALES=ADMIN, cross-rep) roster of students linked to
+  // a Sales employee as their Skill Advisor — pulled out of the Sales tabs
+  // into its own top-level item since it's a distinct browsing experience
+  // (batch/course drill-down + report filters), not another Leads/Demos tab.
+  { label: 'My Students',        to: '/my-students',       icon: GraduationCap, module: 'SALES' },
   { label: 'Finance (Sales)',    to: '/finance/sales',     icon: Wallet,        module: 'FINANCE_SALES' },
   {
     label: 'Finance (Admin)',
