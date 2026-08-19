@@ -12,6 +12,7 @@ import DashboardPage from './pages/Dashboard';
 import MyProfilePage from './pages/MyProfile';
 import CertificateGeneratorPage from './pages/CertificateGenerator';
 import BatchCertificatesPage from './pages/BatchCertificates';
+import CertificateApprovalsPage from './pages/CertificateApprovals';
 import EmployeesPage from './pages/Employees';
 import EmployeeDetailPage from './pages/EmployeeDetail';
 import EmployeeReportPage from './pages/EmployeeReport';
@@ -177,6 +178,7 @@ export default function App() {
             <Route path="profile" element={<MyProfilePage />} />
             <Route path="certificates" element={<CertificateGeneratorPage />} />
             <Route path="certificates/batch" element={<BatchCertificatesPage />} />
+            <Route path="certificates/approvals" element={<CertificateApprovalsPage />} />
             <Route path="settings" element={<Navigate to="/profile" replace />} />
             <Route path="employees" element={<EmployeesPage />} />
             <Route path="employees/report" element={<EmployeeReportPage />} />
