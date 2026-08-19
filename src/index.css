@@ -64,3 +64,8 @@
 ::-webkit-scrollbar-track { @apply bg-transparent; }
 ::-webkit-scrollbar-thumb { @apply bg-border rounded-full; }
 ::-webkit-scrollbar-thumb:hover { @apply bg-muted-foreground/30; }
+
+/* Hides the scrollbar on horizontally-scrolling strips (e.g. the public
+   portfolio's sticky section nav on mobile) while keeping them scrollable. */
+.no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+.no-scrollbar::-webkit-scrollbar { display: none; }
