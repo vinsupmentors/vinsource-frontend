@@ -76,6 +76,7 @@ interface BatchSummary {
   totalStudents: number;
   profileCompleted: number;
   documentsCompleted: number;
+  approved: number;
 }
 
 interface BatchStudent {
@@ -89,6 +90,7 @@ interface BatchStudent {
   courses: string[];
   profileCompletedAt: string | null;
   documentsCompletedAt: string | null;
+  onboardingApprovedAt: string | null;
   dateOfBirth: string | null;
   gender: string | null;
   address: string | null;
@@ -969,7 +971,7 @@ function ReportsTab({ setError }: { setError: (s: string) => void }) {
               <div className="flex items-center gap-1.5 text-sm">
                 <Users className="w-3.5 h-3.5 text-muted-foreground" /> {b.totalStudents} student{b.totalStudents === 1 ? '' : 's'}
               </div>
-              <div className="grid grid-cols-2 gap-2 pt-1">
+              <div className="grid grid-cols-3 gap-2 pt-1">
                 <div className="text-xs">
                   <p className="text-muted-foreground">Profile done</p>
                   <p className="font-semibold">{b.profileCompleted}/{b.totalStudents}</p>
@@ -977,6 +979,10 @@ function ReportsTab({ setError }: { setError: (s: string) => void }) {
                 <div className="text-xs">
                   <p className="text-muted-foreground">Docs signed</p>
                   <p className="font-semibold">{b.documentsCompleted}/{b.totalStudents}</p>
+                </div>
+                <div className="text-xs">
+                  <p className="text-muted-foreground">Approved</p>
+                  <p className="font-semibold">{b.approved}/{b.totalStudents}</p>
                 </div>
               </div>
             </button>
@@ -994,6 +1000,7 @@ function BatchDrillDownModal({ batchId, onClose, setError }: { batchId: string; 
   const [students, setStudents] = useState<BatchStudent[]>([]);
   const [loading, setLoading] = useState(true);
   const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [unapprovingId, setUnapprovingId] = useState<string | null>(null);
 
   useEffect(() => {
     api.get(`/api/student-onboarding/batches/${batchId}/students`)
@@ -1002,6 +1009,19 @@ function BatchDrillDownModal({ batchId, onClose, setError }: { batchId: string; 
       .finally(() => setLoading(false));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [batchId]);
+
+  const unapprove = async (studentId: string) => {
+    if (!confirm('Clear this student\'s onboarding approval? They\'ll show as "Awaiting approval" again until re-approved.')) return;
+    setUnapprovingId(studentId);
+    try {
+      await api.post(`/api/student-onboarding/approvals/${studentId}/unapprove`);
+      setStudents((prev) => prev.map((s) => (s.id === studentId ? { ...s, onboardingApprovedAt: null } : s)));
+    } catch (err) {
+      setError(errMsg(err, 'Failed to unapprove student'));
+    } finally {
+      setUnapprovingId(null);
+    }
+  };
 
   return (
     <Modal title={`Batch ${batchCode || ''}`} onClose={onClose} wide>
@@ -1031,11 +1051,25 @@ function BatchDrillDownModal({ batchId, onClose, setError }: { batchId: string; 
                 <div className="flex items-center gap-2 text-xs">
                   <StatusPill ok={!!s.profileCompletedAt} label="Profile" />
                   <StatusPill ok={!!s.documentsCompletedAt} label="Documents" />
+                  <StatusPill ok={!!s.onboardingApprovedAt} label="Approved" />
                 </div>
               </button>
 
               {expandedId === s.id && (
                 <div className="border-t p-3 space-y-3 bg-muted/20 text-sm">
+                  {s.onboardingApprovedAt && (
+                    <div className="flex items-center justify-between text-xs bg-green-50 border border-green-200 rounded-lg px-3 py-2">
+                      <span className="text-green-700 font-medium">Approved — dashboard unlocked for this student.</span>
+                      <button
+                        onClick={() => unapprove(s.id)}
+                        disabled={unapprovingId === s.id}
+                        className="flex items-center gap-1 px-2.5 py-1 text-xs border border-red-200 text-red-600 rounded-md hover:bg-red-50 transition-colors disabled:opacity-60"
+                      >
+                        {unapprovingId === s.id ? <Loader2 className="w-3 h-3 animate-spin" /> : <XCircle className="w-3 h-3" />}
+                        Unapprove
+                      </button>
+                    </div>
+                  )}
                   <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 text-xs">
                     <Field label="Phone" value={s.phone} />
                     <Field label="Email" value={s.email} />
