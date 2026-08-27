@@ -44,10 +44,38 @@ interface AdvisedStudentRow {
   id: string; firstName: string; lastName: string; studentCode: string; photo?: string | null;
   track: string; status: string; email?: string | null; phone: string;
   joiningDate: string; movedToPlacementAt?: string | null;
+  profileCompletedAt?: string | null; documentsCompletedAt?: string | null; onboardingApprovedAt?: string | null;
   enrollments: EnrollmentLite[];
   portfolio?: { status: string; targetRole?: string | null } | null;
   certificateRequests: { type: string; feeApprovedAt?: string | null; ldmApprovedAt?: string | null; certificateNo?: string | null }[];
   skillAdvisor?: EmployeeLite | null;
+}
+
+// A student's onboarding is a fixed 3-step ladder — profile filled in, every
+// required document signed, then an admin sign-off unlocks their dashboard.
+// Same 3 timestamps the Student Onboarding admin screen uses, just collapsed
+// to a single stage label so a Skill Advisor can see it at a glance without
+// leaving My Students.
+type OnboardingStage = 'profile' | 'documents' | 'approval' | 'done';
+interface OnboardingFlags {
+  profileCompletedAt?: string | null; documentsCompletedAt?: string | null; onboardingApprovedAt?: string | null;
+}
+function onboardingStage(s: OnboardingFlags): OnboardingStage {
+  if (!s.profileCompletedAt) return 'profile';
+  if (!s.documentsCompletedAt) return 'documents';
+  if (!s.onboardingApprovedAt) return 'approval';
+  return 'done';
+}
+const ONBOARDING_STAGE_LABEL: Record<OnboardingStage, string> = {
+  profile: 'Profile pending', documents: 'Documents pending', approval: 'Awaiting approval', done: 'Onboarded',
+};
+const ONBOARDING_STAGE_COLOR: Record<OnboardingStage, string> = {
+  profile: 'bg-red-100 text-red-700', documents: 'bg-amber-100 text-amber-700',
+  approval: 'bg-blue-100 text-blue-700', done: 'bg-green-100 text-green-700',
+};
+function OnboardingStageBadge({ student }: { student: OnboardingFlags }) {
+  const stage = onboardingStage(student);
+  return <span className={`text-[11px] font-medium rounded-full px-2 py-1 whitespace-nowrap ${ONBOARDING_STAGE_COLOR[stage]}`}>{ONBOARDING_STAGE_LABEL[stage]}</span>;
 }
 
 const STUDENT_STATUS_COLOR: Record<string, string> = {
@@ -80,7 +108,7 @@ function StudentRosterTable({ students, loading, emptyLabel, showAdvisor, onOpen
   students: AdvisedStudentRow[]; loading: boolean; emptyLabel: string; showAdvisor?: boolean;
   onOpen: (id: string) => void;
 }) {
-  const colCount = showAdvisor ? 6 : 5;
+  const colCount = showAdvisor ? 7 : 6;
   return (
     <div className="bg-card border rounded-xl overflow-x-auto">
       <table className="w-full text-sm">
@@ -89,6 +117,7 @@ function StudentRosterTable({ students, loading, emptyLabel, showAdvisor, onOpen
             <th className="px-3 py-3">Student</th>
             <th className="px-3 py-3">Course / Batch</th>
             <th className="px-3 py-3">Status</th>
+            <th className="px-3 py-3">Onboarding</th>
             <th className="px-3 py-3">Portfolio</th>
             <th className="px-3 py-3">Certificates</th>
             {showAdvisor && <th className="px-3 py-3">Advisor</th>}
@@ -113,6 +142,7 @@ function StudentRosterTable({ students, loading, emptyLabel, showAdvisor, onOpen
                   {s.status.replace(/_/g, ' ')}
                 </span>
               </td>
+              <td className="px-3 py-3 whitespace-nowrap"><OnboardingStageBadge student={s} /></td>
               <td className="px-3 py-3 whitespace-nowrap text-xs">
                 {s.portfolio ? (
                   <span className={s.portfolio.status === 'APPROVED' ? 'text-green-700 font-medium' : 'text-muted-foreground'}>
@@ -326,6 +356,7 @@ function FilterReportSection({ students, isAdmin, onOpenStudent }: {
 }) {
   const [batchFilter, setBatchFilter] = useState<Set<string>>(new Set());
   const [courseFilter, setCourseFilter] = useState<Set<string>>(new Set());
+  const [stageFilter, setStageFilter] = useState<Set<OnboardingStage>>(new Set());
   const [search, setSearch] = useState('');
 
   const batchOptions = useMemo(() => {
@@ -340,7 +371,7 @@ function FilterReportSection({ students, isAdmin, onOpenStudent }: {
     return Array.from(map.entries()).map(([id, name]) => ({ id, name })).sort((a, b) => a.name.localeCompare(b.name));
   }, [students]);
 
-  const toggle = (set: Set<string>, setSet: (s: Set<string>) => void, id: string) => {
+  const toggle = <T,>(set: Set<T>, setSet: (s: Set<T>) => void, id: T) => {
     const next = new Set(set);
     if (next.has(id)) next.delete(id); else next.add(id);
     setSet(next);
@@ -350,10 +381,11 @@ function FilterReportSection({ students, isAdmin, onOpenStudent }: {
     let list = students;
     if (batchFilter.size > 0) list = list.filter((s) => s.enrollments.some((en) => batchFilter.has(en.schedule.batch.id)));
     if (courseFilter.size > 0) list = list.filter((s) => s.enrollments.some((en) => courseFilter.has(en.schedule.course.id)));
+    if (stageFilter.size > 0) list = list.filter((s) => stageFilter.has(onboardingStage(s)));
     const q = search.trim().toLowerCase();
     if (q) list = list.filter((s) => `${s.firstName} ${s.lastName} ${s.studentCode} ${s.phone}`.toLowerCase().includes(q));
     return list;
-  }, [students, batchFilter, courseFilter, search]);
+  }, [students, batchFilter, courseFilter, stageFilter, search]);
 
   const exportExcel = () => {
     const rows = results.map((s) => ({
@@ -361,6 +393,7 @@ function FilterReportSection({ students, isAdmin, onOpenStudent }: {
       'Roll Number': s.studentCode,
       Track: s.track,
       Status: s.status,
+      Onboarding: ONBOARDING_STAGE_LABEL[onboardingStage(s)],
       'Course / Batch': studentCourseLine(s),
       Phone: s.phone,
       Email: s.email || '',
@@ -405,8 +438,21 @@ function FilterReportSection({ students, isAdmin, onOpenStudent }: {
             ))}
           </div>
         </div>
-        {(batchFilter.size > 0 || courseFilter.size > 0) && (
-          <button onClick={() => { setBatchFilter(new Set()); setCourseFilter(new Set()); }} className="text-xs text-blue-600 hover:underline">
+        <div className="border rounded-xl p-4 space-y-3">
+          <p className="text-xs font-semibold uppercase text-muted-foreground tracking-wide flex items-center gap-1.5">
+            <Filter className="w-3.5 h-3.5" /> Onboarding Stage
+          </p>
+          <div className="space-y-1.5">
+            {(['profile', 'documents', 'approval', 'done'] as OnboardingStage[]).map((stage) => (
+              <label key={stage} className="flex items-center gap-2 text-sm cursor-pointer">
+                <input type="checkbox" checked={stageFilter.has(stage)} onChange={() => toggle(stageFilter, setStageFilter, stage)} className="rounded" />
+                {ONBOARDING_STAGE_LABEL[stage]}
+              </label>
+            ))}
+          </div>
+        </div>
+        {(batchFilter.size > 0 || courseFilter.size > 0 || stageFilter.size > 0) && (
+          <button onClick={() => { setBatchFilter(new Set()); setCourseFilter(new Set()); setStageFilter(new Set()); }} className="text-xs text-blue-600 hover:underline">
             Clear filters
           </button>
         )}
@@ -440,6 +486,7 @@ interface DossierData {
     id: string; firstName: string; lastName: string; studentCode: string; phone: string;
     track: string; status: string; photo?: string | null; email?: string | null;
     joiningDate: string; movedToPlacementAt?: string | null;
+    profileCompletedAt?: string | null; documentsCompletedAt?: string | null; onboardingApprovedAt?: string | null;
     totalProgramFee?: number | null; amountPaid?: number | null; balanceAmount?: number | null; paymentMode?: string | null;
     user?: { email: string; lastLoginAt?: string | null } | null;
     portfolio?: { status: string; targetRole?: string | null; summary?: string | null; publicSlug?: string | null } | null;
@@ -485,6 +532,10 @@ interface DossierData {
     id: string; type: string; feeApprovedAt?: string | null; ldmApprovedAt?: string | null;
     certificateNo?: string | null; generatedAt?: string | null; course?: { name: string } | null;
   }[];
+  onboarding: {
+    allSigned: boolean;
+    items: { id: string; title: string; signed: boolean; signedAt?: string | null }[];
+  };
 }
 
 function StarRow({ rating }: { rating?: number | null }) {
@@ -565,6 +616,34 @@ function StudentDossierModal({ studentId, onClose }: { studentId: string; onClos
           ) : loadErr ? (
             <div className="text-red-600 text-sm py-8 text-center">{loadErr}</div>
           ) : !data || !s ? null : profileTab === 'overview' ? (
+            <div className="space-y-6">
+              <div>
+                <h3 className="font-semibold text-sm uppercase text-muted-foreground tracking-wide mb-2">Onboarding</h3>
+                <div className="border rounded-xl p-4 space-y-3">
+                  <div className="flex items-center justify-between flex-wrap gap-2">
+                    <div className="flex items-center gap-3 text-xs">
+                      <span className="flex items-center gap-1"><span className={s.profileCompletedAt ? 'text-green-600' : 'text-muted-foreground'}>●</span> Profile {s.profileCompletedAt ? `done ${formatDate(s.profileCompletedAt)}` : 'pending'}</span>
+                      <span className="flex items-center gap-1"><span className={s.documentsCompletedAt ? 'text-green-600' : 'text-muted-foreground'}>●</span> Documents {s.documentsCompletedAt ? `signed ${formatDate(s.documentsCompletedAt)}` : 'pending'}</span>
+                      <span className="flex items-center gap-1"><span className={s.onboardingApprovedAt ? 'text-green-600' : 'text-muted-foreground'}>●</span> {s.onboardingApprovedAt ? `Approved ${formatDate(s.onboardingApprovedAt)}` : 'Awaiting approval'}</span>
+                    </div>
+                    <OnboardingStageBadge student={s} />
+                  </div>
+                  {data.onboarding.items.length > 0 && (
+                    <div className="space-y-1 pt-1 border-t">
+                      {data.onboarding.items.map((it) => (
+                        <div key={it.id} className="flex items-center justify-between text-xs py-1">
+                          <span>{it.title}</span>
+                          {it.signed ? (
+                            <span className="text-green-700 font-medium">Signed{it.signedAt ? ` · ${formatDate(it.signedAt)}` : ''}</span>
+                          ) : (
+                            <span className="text-amber-600 font-medium">Pending</span>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
               <div className="space-y-4">
                 <h3 className="font-semibold text-sm uppercase text-muted-foreground tracking-wide">Student Information</h3>
@@ -632,6 +711,7 @@ function StudentDossierModal({ studentId, onClose }: { studentId: string; onClos
                   </>
                 )}
               </div>
+            </div>
             </div>
           ) : profileTab === 'rank' ? (
             <div className="space-y-6">
