@@ -4,7 +4,7 @@ import api, { BASE_URL } from '@/lib/api';
 import { useModuleAccess } from '@/hooks/useModuleAccess';
 import {
   UserPlus, FileText, BarChart2, X, Loader2, Upload, CheckCircle2, XCircle,
-  Users, GraduationCap, MapPin, ShieldCheck, Search, Receipt,
+  Users, GraduationCap, MapPin, ShieldCheck, Search, Receipt, Mail,
 } from 'lucide-react';
 
 function errMsg(err: unknown, fallback: string) {
@@ -1001,6 +1001,8 @@ function BatchDrillDownModal({ batchId, onClose, setError }: { batchId: string; 
   const [loading, setLoading] = useState(true);
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [unapprovingId, setUnapprovingId] = useState<string | null>(null);
+  const [resendingId, setResendingId] = useState<string | null>(null);
+  const [resentId, setResentId] = useState<string | null>(null);
 
   useEffect(() => {
     api.get(`/api/student-onboarding/batches/${batchId}/students`)
@@ -1020,6 +1022,19 @@ function BatchDrillDownModal({ batchId, onClose, setError }: { batchId: string; 
       setError(errMsg(err, 'Failed to unapprove student'));
     } finally {
       setUnapprovingId(null);
+    }
+  };
+
+  const resendEmail = async (studentId: string) => {
+    setResendingId(studentId);
+    setResentId(null);
+    try {
+      await api.post(`/api/student-onboarding/students/${studentId}/resend-welcome-email`);
+      setResentId(studentId);
+    } catch (err) {
+      setError(errMsg(err, 'Failed to resend onboarding email'));
+    } finally {
+      setResendingId(null);
     }
   };
 
@@ -1057,6 +1072,19 @@ function BatchDrillDownModal({ batchId, onClose, setError }: { batchId: string; 
 
               {expandedId === s.id && (
                 <div className="border-t p-3 space-y-3 bg-muted/20 text-sm">
+                  <div className="flex items-center justify-between text-xs">
+                    <span className="text-muted-foreground">
+                      {resentId === s.id ? <span className="text-green-700 font-medium">Email sent.</span> : 'Missed the welcome email, or they have a new document to sign?'}
+                    </span>
+                    <button
+                      onClick={() => resendEmail(s.id)}
+                      disabled={resendingId === s.id}
+                      className="flex items-center gap-1 px-2.5 py-1 text-xs border rounded-md hover:bg-muted transition-colors disabled:opacity-60"
+                    >
+                      {resendingId === s.id ? <Loader2 className="w-3 h-3 animate-spin" /> : <Mail className="w-3 h-3" />}
+                      Resend Onboarding Email
+                    </button>
+                  </div>
                   {s.onboardingApprovedAt && (
                     <div className="flex items-center justify-between text-xs bg-green-50 border border-green-200 rounded-lg px-3 py-2">
                       <span className="text-green-700 font-medium">Approved — dashboard unlocked for this student.</span>
