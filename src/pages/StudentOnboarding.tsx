@@ -28,12 +28,14 @@ function formatDateTime(iso?: string | null) {
 function Modal({ title, onClose, children, wide }: { title: string; onClose: () => void; children: React.ReactNode; wide?: boolean }) {
   return (
     <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
-      <div className={`bg-white rounded-xl w-full ${wide ? 'max-w-3xl' : 'max-w-md'} p-6 space-y-4 max-h-[90vh] overflow-y-auto`}>
-        <div className="flex items-center justify-between">
+      <div className={`bg-white rounded-xl w-full ${wide ? 'max-w-3xl' : 'max-w-md'} max-h-[90vh] flex flex-col overflow-hidden`}>
+        <div className="flex items-center justify-between px-6 py-4 border-b flex-shrink-0">
           <h2 className="font-semibold text-lg">{title}</h2>
           <button onClick={onClose}><X className="w-4 h-4" /></button>
         </div>
-        {children}
+        <div className="p-6 space-y-4 overflow-y-auto">
+          {children}
+        </div>
       </div>
     </div>
   );

@@ -933,12 +933,14 @@ function KraTab({ schedule }: { schedule: ScheduleAssignment['schedule'] }) {
 function MiniModal({ title, onClose, wide, children }: { title: string; onClose: () => void; wide?: boolean; children: React.ReactNode }) {
   return (
     <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
-      <div className={`bg-white rounded-xl w-full ${wide ? 'max-w-3xl' : 'max-w-md'} p-6 space-y-4 max-h-[90vh] overflow-y-auto`}>
-        <div className="flex items-center justify-between">
+      <div className={`bg-white rounded-xl w-full ${wide ? 'max-w-3xl' : 'max-w-md'} max-h-[90vh] flex flex-col overflow-hidden`}>
+        <div className="flex items-center justify-between px-6 py-4 border-b flex-shrink-0">
           <h3 className="text-base font-semibold">{title}</h3>
           <button onClick={onClose} className="text-muted-foreground hover:text-foreground"><X className="w-4 h-4" /></button>
         </div>
-        {children}
+        <div className="p-6 space-y-4 overflow-y-auto">
+          {children}
+        </div>
       </div>
     </div>
   );
@@ -985,7 +987,8 @@ function ContentReleaseTab({ schedule }: { schedule: ScheduleAssignment['schedul
     return ax?.response?.data?.message || 'Something went wrong';
   };
 
-  const releaseProject = async (projectId: string) => {
+  const releaseProject = async (projectId: string, projectTitle: string) => {
+    if (!window.confirm(`Release "${projectTitle}" to this batch? Every enrolled student is notified and emailed immediately.`)) return;
     setBusyId(projectId);
     setError('');
     try {
@@ -1089,14 +1092,21 @@ function ContentReleaseTab({ schedule }: { schedule: ScheduleAssignment['schedul
                       <>
                         <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${active ? 'bg-green-100 text-green-700' : 'bg-muted text-muted-foreground'}`}>{release.status}</span>
                         <button onClick={() => setDrillProject({ releaseId: release.id, title: p.title })} className="px-3 py-1.5 rounded-lg border text-xs font-medium hover:bg-muted">Submissions</button>
-                        {active && (
+                        {active ? (
                           <button onClick={() => closeRelease('project', release.id)} disabled={busyId === release.id} className="px-3 py-1.5 rounded-lg border text-xs font-medium text-red-600 hover:bg-red-50 disabled:opacity-60">Close</button>
+                        ) : (
+                          <>
+                            <DeadlineInput id={p.id} />
+                            <button onClick={() => releaseProject(p.id, p.title)} disabled={busyId === p.id} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-blue-600 text-white text-xs font-medium hover:bg-blue-700 disabled:opacity-60">
+                              {busyId === p.id ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Rocket className="w-3.5 h-3.5" />} Reopen
+                            </button>
+                          </>
                         )}
                       </>
                     ) : (
                       <>
                         <DeadlineInput id={p.id} />
-                        <button onClick={() => releaseProject(p.id)} disabled={busyId === p.id} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-blue-600 text-white text-xs font-medium hover:bg-blue-700 disabled:opacity-60">
+                        <button onClick={() => releaseProject(p.id, p.title)} disabled={busyId === p.id} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-blue-600 text-white text-xs font-medium hover:bg-blue-700 disabled:opacity-60">
                           {busyId === p.id ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Rocket className="w-3.5 h-3.5" />} Release
                         </button>
                       </>
@@ -1524,7 +1534,7 @@ function StudentAnswerReviewModal({
   return (
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[60] p-4">
       <div className="bg-white rounded-xl w-full max-w-3xl p-6 space-y-4 max-h-[90vh] overflow-y-auto">
-        <div className="flex items-center justify-between">
+        <div className="flex items-center justify-between sticky -top-6 -mx-6 -mt-6 px-6 pt-6 pb-3 mb-1 bg-white z-10 border-b">
           <div>
             <h3 className="text-base font-semibold">{studentLabel}{data ? ` — ${data.testTitle}` : ''}</h3>
             {data && (
@@ -2126,7 +2136,7 @@ function PlacementSubmissionsModal({ sessionId, releaseId, title, onClose }: {
   return (
     <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-[60] p-4">
       <div className="bg-white rounded-xl w-full max-w-2xl p-6 space-y-4 max-h-[85vh] overflow-y-auto">
-        <div className="flex items-center justify-between">
+        <div className="flex items-center justify-between sticky -top-6 -mx-6 -mt-6 px-6 pt-6 pb-3 mb-1 bg-white z-10 border-b">
           <h2 className="font-semibold text-lg">Submissions — {title}</h2>
           <button onClick={onClose}><X className="w-4 h-4" /></button>
         </div>
@@ -2223,7 +2233,7 @@ function PlacementResultsModal({ sessionId, releaseId, title, onClose }: {
   return (
     <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-[60] p-4">
       <div className="bg-white rounded-xl w-full max-w-2xl p-6 space-y-4 max-h-[85vh] overflow-y-auto">
-        <div className="flex items-center justify-between">
+        <div className="flex items-center justify-between sticky -top-6 -mx-6 -mt-6 px-6 pt-6 pb-3 mb-1 bg-white z-10 border-b">
           <h2 className="font-semibold text-lg">Results — {title}</h2>
           <button onClick={onClose}><X className="w-4 h-4" /></button>
         </div>
@@ -2321,7 +2331,7 @@ function PlacementStudentAnswerReviewModal({ sessionId, releaseId, studentId, st
   return (
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[70] p-4">
       <div className="bg-white rounded-xl w-full max-w-3xl p-6 space-y-4 max-h-[90vh] overflow-y-auto">
-        <div className="flex items-center justify-between">
+        <div className="flex items-center justify-between sticky -top-6 -mx-6 -mt-6 px-6 pt-6 pb-3 mb-1 bg-white z-10 border-b">
           <div>
             <h3 className="text-base font-semibold">{studentLabel}{data ? ` — ${data.testTitle}` : ''}</h3>
             {data && (
