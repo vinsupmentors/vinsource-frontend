@@ -65,6 +65,19 @@ function nextDueOf(plan: FeePlan): Installment | null {
   if (pending.length === 0) return null;
   return pending.reduce((a, b) => (new Date(a.dueDate) < new Date(b.dueDate) ? a : b));
 }
+/** True once a student's advance has been registered but nobody has said
+ * yet how the remaining balance will be paid (Full/Part/EMI + schedule) —
+ * i.e. the plan has a balance outstanding and every installment on file so
+ * far is the one already-collected advance. This drives the "Declare
+ * Payment" action on each student, separate from just registering them. */
+function needsDeclaration(plan: FeePlan): boolean {
+  return (
+    plan.status === 'ACTIVE' &&
+    plan.installments.length > 0 &&
+    plan.installments.every((i) => i.status === 'PAID') &&
+    totalPaidOf(plan) < plan.totalFee
+  );
+}
 
 export default function FinanceSalesPage() {
   const { modules, loaded, hasModule } = useModuleAccess();
@@ -160,7 +173,7 @@ export default function FinanceSalesPage() {
             onClick={() => setShowNewPlan(true)}
             className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 transition-colors"
           >
-            <Plus className="w-4 h-4" /> New Declaration
+            <Plus className="w-4 h-4" /> Add Student
           </button>
         )}
         {canEdit && tab === 'ledger' && (
@@ -274,16 +287,18 @@ export default function FinanceSalesPage() {
                   <th className="px-4 py-3">Paid / Total</th>
                   <th className="px-4 py-3">Next Due</th>
                   <th className="px-4 py-3">Status</th>
+                  <th className="px-4 py-3">Actions</th>
                 </tr>
               </thead>
               <tbody className="divide-y">
                 {plansLoading ? (
-                  <tr><td colSpan={6} className="px-4 py-8 text-center text-muted-foreground">Loading...</td></tr>
+                  <tr><td colSpan={7} className="px-4 py-8 text-center text-muted-foreground">Loading...</td></tr>
                 ) : plans.length === 0 ? (
-                  <tr><td colSpan={6} className="px-4 py-8 text-center text-muted-foreground">No fee declarations yet</td></tr>
+                  <tr><td colSpan={7} className="px-4 py-8 text-center text-muted-foreground">No students registered yet</td></tr>
                 ) : plans.map((p) => {
                   const paid = totalPaidOf(p);
                   const next = nextDueOf(p);
+                  const declare = needsDeclaration(p);
                   return (
                     <tr key={p.id} className="hover:bg-muted/30 cursor-pointer" onClick={() => setOpenPlanId(p.id)}>
                       <td className="px-4 py-3 font-medium">
@@ -291,7 +306,9 @@ export default function FinanceSalesPage() {
                         <p className="text-xs text-muted-foreground font-normal">{p.lead.phone}</p>
                       </td>
                       <td className="px-4 py-3 text-muted-foreground">{p.courseName}</td>
-                      <td className="px-4 py-3 text-xs">{PLAN_TYPE_LABEL[p.planType]}</td>
+                      <td className="px-4 py-3 text-xs">
+                        {declare ? <span className="text-amber-600 font-medium">Not declared</span> : PLAN_TYPE_LABEL[p.planType]}
+                      </td>
                       <td className="px-4 py-3">
                         <span className="font-semibold">{fmt(paid)}</span>
                         <span className="text-muted-foreground"> / {fmt(p.totalFee)}</span>
@@ -305,6 +322,16 @@ export default function FinanceSalesPage() {
                       </td>
                       <td className="px-4 py-3">
                         <span className={`text-[11px] font-medium rounded-full px-2 py-1 ${PLAN_STATUS_COLOR[p.status]}`}>{p.status}</span>
+                      </td>
+                      <td className="px-4 py-3" onClick={(e) => e.stopPropagation()}>
+                        {declare && canEdit ? (
+                          <button
+                            onClick={() => setOpenPlanId(p.id)}
+                            className="text-xs font-medium text-blue-600 hover:underline whitespace-nowrap"
+                          >
+                            Declare Payment
+                          </button>
+                        ) : <span className="text-muted-foreground text-xs">—</span>}
                       </td>
                     </tr>
                   );
@@ -327,7 +354,7 @@ export default function FinanceSalesPage() {
       )}
 
       {showNewPlan && (
-        <NewDeclarationModal
+        <AddStudentModal
           employees={employees}
           canEdit={canEdit}
           onClose={() => setShowNewPlan(false)}
@@ -418,10 +445,14 @@ function AddCollectionModal({ employees, saving, setSaving, onClose, onSaved, se
   );
 }
 
-// ── New Declaration wizard ─────────────────────────────────────────────────
+// ── Add Student: register the student + the advance collected today.
+// Deliberately does NOT ask for Full/Part/EMI here — that's declared
+// separately afterward (per-student "Declare Payment" once the balance is
+// known), since at intake all Sales has is who's joining and what they've
+// paid so far. ──────────────────────────────────────────────────────────
 interface DraftInstallment { dueDate: string; amount: string; }
 
-function NewDeclarationModal({ employees, canEdit, onClose, onSaved }: {
+function AddStudentModal({ employees, canEdit, onClose, onSaved }: {
   employees: EmployeeLite[]; canEdit: boolean; onClose: () => void; onSaved: (planId: string) => void;
 }) {
   const [studentMode, setStudentMode] = useState<'existing' | 'new'>('new');
@@ -432,14 +463,11 @@ function NewDeclarationModal({ employees, canEdit, onClose, onSaved }: {
 
   const [courseName, setCourseName] = useState('');
   const [totalFee, setTotalFee] = useState('');
-  const [planType, setPlanType] = useState<FeePlanType>('FULL');
 
   const [firstAmount, setFirstAmount] = useState('');
   const [firstMode, setFirstMode] = useState<PaymentMode>('UPI');
   const [firstReceivedById, setFirstReceivedById] = useState('');
   const [firstDate, setFirstDate] = useState(new Date().toISOString().slice(0, 10));
-
-  const [installments, setInstallments] = useState<DraftInstallment[]>([{ dueDate: '', amount: '' }]);
 
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
@@ -454,16 +482,9 @@ function NewDeclarationModal({ employees, canEdit, onClose, onSaved }: {
     return () => clearTimeout(t);
   }, [studentMode, leadQuery]);
 
-  const addInstallmentRow = () => setInstallments([...installments, { dueDate: '', amount: '' }]);
-  const removeInstallmentRow = (idx: number) => setInstallments(installments.filter((_, i) => i !== idx));
-  const updateInstallmentRow = (idx: number, field: keyof DraftInstallment, value: string) => {
-    setInstallments(installments.map((row, i) => (i === idx ? { ...row, [field]: value } : row)));
-  };
-
   const total = Number(totalFee) || 0;
-  const scheduledSum = installments.reduce((s, r) => s + (Number(r.amount) || 0), 0);
   const firstAmt = Number(firstAmount) || 0;
-  const grandTotal = firstAmt + (planType === 'FULL' ? 0 : scheduledSum);
+  const balance = Math.max(0, total - firstAmt);
 
   const submit = async () => {
     setError('');
@@ -471,24 +492,20 @@ function NewDeclarationModal({ employees, canEdit, onClose, onSaved }: {
     if (studentMode === 'new' && (!newLead.name || !newLead.phone || !newLead.email)) { setError('Name, phone, and email are required for a new student'); return; }
     if (!courseName || !totalFee) { setError('Course and total fee are required'); return; }
     if (!firstAmount) { setError('The amount collected today is required'); return; }
-    if (planType !== 'FULL' && installments.every((r) => !r.dueDate || !r.amount)) { setError('Add at least one scheduled installment for Part-payment/EMI'); return; }
 
     setSaving(true);
     try {
       const payload: Record<string, unknown> = {
-        courseName, totalFee: total, planType,
+        courseName, totalFee: total, planType: 'FULL' as FeePlanType,
         firstPayment: { amount: firstAmt, mode: firstMode, receivedById: firstReceivedById || undefined, collectedAt: firstDate },
       };
       if (studentMode === 'existing' && selectedLead) payload.leadId = selectedLead.id;
       else payload.newLead = newLead;
-      if (planType !== 'FULL') {
-        payload.installments = installments.filter((r) => r.dueDate && r.amount).map((r) => ({ dueDate: r.dueDate, amount: Number(r.amount) }));
-      }
       const res = await api.post('/api/finance-sales/plans', payload);
       onSaved(res.data.data.id);
     } catch (err: unknown) {
       const e = err as { response?: { data?: { message?: string } } };
-      setError(e.response?.data?.message || 'Failed to create the fee declaration');
+      setError(e.response?.data?.message || 'Failed to register the student');
     } finally {
       setSaving(false);
     }
@@ -498,7 +515,7 @@ function NewDeclarationModal({ employees, canEdit, onClose, onSaved }: {
     <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
       <div className="bg-white rounded-xl w-full max-w-2xl max-h-[90vh] flex flex-col overflow-hidden">
         <div className="flex items-center justify-between px-6 py-4 border-b flex-shrink-0">
-          <h2 className="font-semibold text-lg">New Fee Declaration</h2>
+          <h2 className="font-semibold text-lg">Add Student</h2>
           <button onClick={onClose}><X className="w-4 h-4" /></button>
         </div>
         <div className="p-6 space-y-5 overflow-y-auto">
@@ -543,17 +560,10 @@ function NewDeclarationModal({ employees, canEdit, onClose, onSaved }: {
               <input className="px-3 py-2 border rounded-lg text-sm" placeholder="Course (e.g. Digital Marketing - IOP) *" value={courseName} onChange={(e) => setCourseName(e.target.value)} />
               <input type="number" className="px-3 py-2 border rounded-lg text-sm" placeholder="Total Fee *" value={totalFee} onChange={(e) => setTotalFee(e.target.value)} />
             </div>
-            <div className="flex gap-2">
-              {(['FULL', 'PART', 'EMI'] as FeePlanType[]).map((t) => (
-                <button key={t} onClick={() => setPlanType(t)} className={`px-3 py-1.5 text-sm rounded-lg border ${planType === t ? 'bg-blue-600 text-white border-blue-600' : ''}`}>
-                  {PLAN_TYPE_LABEL[t]}
-                </button>
-              ))}
-            </div>
           </div>
 
           <div className="space-y-2">
-            <p className="text-xs font-semibold uppercase text-muted-foreground tracking-wide">Amount Collected Today</p>
+            <p className="text-xs font-semibold uppercase text-muted-foreground tracking-wide">Advance Collected Today</p>
             <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
               <input type="number" className="px-3 py-2 border rounded-lg text-sm" placeholder="Amount *" value={firstAmount} onChange={(e) => setFirstAmount(e.target.value)} />
               <select className="px-3 py-2 border rounded-lg text-sm" value={firstMode} onChange={(e) => setFirstMode(e.target.value as PaymentMode)}>
@@ -565,36 +575,18 @@ function NewDeclarationModal({ employees, canEdit, onClose, onSaved }: {
               </select>
               <input type="date" className="px-3 py-2 border rounded-lg text-sm" value={firstDate} onChange={(e) => setFirstDate(e.target.value)} />
             </div>
-          </div>
-
-          {planType !== 'FULL' && (
-            <div className="space-y-2">
-              <div className="flex items-center justify-between">
-                <p className="text-xs font-semibold uppercase text-muted-foreground tracking-wide">
-                  {planType === 'EMI' ? 'EMI Schedule' : 'Remaining Installments'}
-                </p>
-                <button onClick={addInstallmentRow} className="text-xs text-blue-600 hover:underline flex items-center gap-1"><Plus className="w-3 h-3" /> Add row</button>
-              </div>
-              <div className="space-y-2">
-                {installments.map((row, idx) => (
-                  <div key={idx} className="flex items-center gap-2">
-                    <input type="date" className="flex-1 px-3 py-2 border rounded-lg text-sm" value={row.dueDate} onChange={(e) => updateInstallmentRow(idx, 'dueDate', e.target.value)} />
-                    <input type="number" className="flex-1 px-3 py-2 border rounded-lg text-sm" placeholder="Amount" value={row.amount} onChange={(e) => updateInstallmentRow(idx, 'amount', e.target.value)} />
-                    <button onClick={() => removeInstallmentRow(idx)} className="p-2 text-muted-foreground hover:text-red-600"><Trash2 className="w-4 h-4" /></button>
-                  </div>
-                ))}
-              </div>
-              {planType === 'EMI' && <p className="text-xs text-muted-foreground">Interest can be added afterward, once the EMI case is reviewed — leave it out for now.</p>}
-              <p className={`text-xs ${grandTotal !== total ? 'text-amber-600' : 'text-green-700'}`}>
-                Scheduled so far: {fmt(grandTotal)} of {fmt(total)} total{grandTotal !== total ? ` (${fmt(total - grandTotal)} unscheduled)` : ' ✓'}
+            {total > 0 && firstAmt > 0 && (
+              <p className="text-xs text-muted-foreground">
+                Balance after this: <span className={balance > 0 ? 'text-amber-600 font-medium' : 'text-green-700 font-medium'}>{fmt(balance)}</span>
+                {balance > 0 ? ' — you\'ll declare how it\'s paid (Full / Part / EMI) from the student\'s row afterward.' : ' — fully paid.'}
               </p>
-            </div>
-          )}
+            )}
+          </div>
         </div>
         <div className="flex justify-end gap-2 px-6 py-4 border-t flex-shrink-0">
           <button onClick={onClose} className="px-4 py-2 text-sm rounded-lg border">Cancel</button>
           <button onClick={submit} disabled={saving || !canEdit} className="px-4 py-2 text-sm rounded-lg bg-blue-600 text-white disabled:opacity-50">
-            {saving ? 'Saving...' : 'Create Declaration'}
+            {saving ? 'Saving...' : 'Register Student'}
           </button>
         </div>
       </div>
@@ -614,6 +606,10 @@ function PlanDetailModal({ planId, employees, canEdit, onClose, onChanged }: {
   const [interestDraft, setInterestDraft] = useState('');
   const [savingInterest, setSavingInterest] = useState(false);
   const [busy, setBusy] = useState(false);
+
+  const [declarePlanType, setDeclarePlanType] = useState<'PART' | 'EMI'>('PART');
+  const [declareRows, setDeclareRows] = useState<DraftInstallment[]>([{ dueDate: '', amount: '' }]);
+  const [declaring, setDeclaring] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -670,6 +666,35 @@ function PlanDetailModal({ planId, employees, canEdit, onClose, onChanged }: {
     }
   };
 
+  const addDeclareRow = () => setDeclareRows([...declareRows, { dueDate: '', amount: '' }]);
+  const removeDeclareRow = (idx: number) => setDeclareRows(declareRows.filter((_, i) => i !== idx));
+  const updateDeclareRow = (idx: number, field: keyof DraftInstallment, value: string) => {
+    setDeclareRows(declareRows.map((row, i) => (i === idx ? { ...row, [field]: value } : row)));
+  };
+
+  const submitDeclare = async () => {
+    if (!plan) return;
+    const rows = declareRows.filter((r) => r.dueDate && r.amount);
+    if (rows.length === 0) { setError('Add at least one installment for the balance'); return; }
+    setDeclaring(true);
+    setError('');
+    try {
+      await api.put(`/api/finance-sales/plans/${plan.id}`, { planType: declarePlanType });
+      for (const row of rows) {
+        // eslint-disable-next-line no-await-in-loop
+        await api.post(`/api/finance-sales/plans/${plan.id}/installments`, { dueDate: row.dueDate, amount: Number(row.amount) });
+      }
+      setDeclareRows([{ dueDate: '', amount: '' }]);
+      await load();
+      onChanged();
+    } catch (err: unknown) {
+      const e = err as { response?: { data?: { message?: string } } };
+      setError(e.response?.data?.message || 'Failed to declare the payment plan');
+    } finally {
+      setDeclaring(false);
+    }
+  };
+
   const cancelPlan = async () => {
     if (!window.confirm('Cancel this fee plan? Every pending installment will be waived and reminders will stop. This does not affect enrollment.')) return;
     setBusy(true);
@@ -719,13 +744,67 @@ function PlanDetailModal({ planId, employees, canEdit, onClose, onChanged }: {
 
               <div className="flex items-center gap-2 flex-wrap">
                 <span className={`text-[11px] font-medium rounded-full px-2 py-1 ${PLAN_STATUS_COLOR[plan.status]}`}>{plan.status}</span>
-                <span className="text-[11px] font-medium rounded-full px-2 py-1 bg-gray-100 text-gray-600">{PLAN_TYPE_LABEL[plan.planType]}</span>
+                <span className="text-[11px] font-medium rounded-full px-2 py-1 bg-gray-100 text-gray-600">
+                  {needsDeclaration(plan) ? 'Not declared' : PLAN_TYPE_LABEL[plan.planType]}
+                </span>
                 {canEdit && plan.status === 'ACTIVE' && (
                   <button onClick={cancelPlan} disabled={busy} className="ml-auto flex items-center gap-1 text-xs text-red-600 hover:underline disabled:opacity-50">
                     <Ban className="w-3.5 h-3.5" /> Cancel plan
                   </button>
                 )}
               </div>
+
+              {needsDeclaration(plan) && (
+                <div className="border-2 border-amber-300 bg-amber-50 rounded-xl p-4 space-y-3">
+                  <div>
+                    <p className="text-sm font-semibold text-amber-800">Declare Payment Plan</p>
+                    <p className="text-xs text-amber-700">
+                      Balance of {fmt(Math.max(0, plan.totalFee - totalPaidOf(plan)))} hasn't been scheduled yet — pick how it'll be paid.
+                    </p>
+                  </div>
+                  <div className="flex gap-2">
+                    {(['PART', 'EMI'] as const).map((t) => (
+                      <button
+                        key={t}
+                        onClick={() => setDeclarePlanType(t)}
+                        className={`px-3 py-1.5 text-sm rounded-lg border bg-white ${declarePlanType === t ? 'bg-blue-600 text-white border-blue-600' : ''}`}
+                        disabled={!canEdit}
+                      >
+                        {PLAN_TYPE_LABEL[t]}
+                      </button>
+                    ))}
+                  </div>
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between">
+                      <p className="text-xs font-semibold uppercase text-amber-800 tracking-wide">
+                        {declarePlanType === 'EMI' ? 'EMI Schedule' : 'Installments'}
+                      </p>
+                      {canEdit && (
+                        <button onClick={addDeclareRow} className="text-xs text-blue-600 hover:underline flex items-center gap-1">
+                          <Plus className="w-3 h-3" /> Add row
+                        </button>
+                      )}
+                    </div>
+                    {declareRows.map((row, idx) => (
+                      <div key={idx} className="flex items-center gap-2">
+                        <input type="date" className="flex-1 px-3 py-2 border rounded-lg text-sm bg-white" value={row.dueDate} onChange={(e) => updateDeclareRow(idx, 'dueDate', e.target.value)} disabled={!canEdit} />
+                        <input type="number" className="flex-1 px-3 py-2 border rounded-lg text-sm bg-white" placeholder="Amount" value={row.amount} onChange={(e) => updateDeclareRow(idx, 'amount', e.target.value)} disabled={!canEdit} />
+                        {canEdit && (
+                          <button onClick={() => removeDeclareRow(idx)} className="p-2 text-muted-foreground hover:text-red-600"><Trash2 className="w-4 h-4" /></button>
+                        )}
+                      </div>
+                    ))}
+                    {declarePlanType === 'EMI' && <p className="text-xs text-amber-700">Interest can be filled in below once this is saved.</p>}
+                  </div>
+                  {canEdit && (
+                    <div className="flex justify-end">
+                      <button onClick={submitDeclare} disabled={declaring} className="px-4 py-2 text-sm rounded-lg bg-blue-600 text-white disabled:opacity-50">
+                        {declaring ? 'Saving…' : 'Save Declaration'}
+                      </button>
+                    </div>
+                  )}
+                </div>
+              )}
 
               {plan.planType === 'EMI' && (
                 <div className="border rounded-xl p-3 space-y-2">
