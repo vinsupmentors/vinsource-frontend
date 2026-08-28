@@ -6,7 +6,7 @@ import { Lock, Plus, X, Wallet, TrendingUp, Receipt, Search, Trash2, CheckCircle
 type PaymentMode = 'CASH' | 'UPI' | 'CARD' | 'NET_BANKING' | 'CHEQUE' | 'OTHER';
 type FeePlanType = 'FULL' | 'PART' | 'EMI';
 type FeePlanStatus = 'ACTIVE' | 'CANCELLED' | 'COMPLETED';
-type FeeInstallmentStatus = 'PENDING' | 'PAID' | 'OVERDUE' | 'WAIVED';
+type FeeInstallmentStatus = 'PENDING' | 'PENDING_APPROVAL' | 'PAID' | 'OVERDUE' | 'WAIVED';
 
 interface EmployeeLite { id: string; firstName: string; lastName: string; }
 
@@ -47,18 +47,34 @@ interface FeePlan {
   interestAmount?: number | null; status: FeePlanStatus; createdAt: string;
   lead: LeadLite; createdBy?: EmployeeLite | null; installments: Installment[];
 }
+// A collected-but-unconfirmed installment, as returned by the approval queue.
+interface ApprovalItem {
+  id: string; amount: number; mode?: PaymentMode | null; paidAt?: string | null; status: FeeInstallmentStatus;
+  receivedBy?: EmployeeLite | null;
+  plan: { id: string; courseName: string; totalFee: number; planType: FeePlanType; lead: LeadLite };
+}
 
 const PLAN_TYPE_LABEL: Record<FeePlanType, string> = { FULL: 'Full Payment', PART: 'Part Payment', EMI: 'EMI' };
 const PLAN_STATUS_COLOR: Record<FeePlanStatus, string> = {
   ACTIVE: 'bg-blue-100 text-blue-700', COMPLETED: 'bg-green-100 text-green-700', CANCELLED: 'bg-red-100 text-red-700',
 };
 const INSTALLMENT_STATUS_COLOR: Record<FeeInstallmentStatus, string> = {
-  PENDING: 'bg-gray-100 text-gray-600', PAID: 'bg-green-100 text-green-700',
+  PENDING: 'bg-gray-100 text-gray-600', PENDING_APPROVAL: 'bg-purple-100 text-purple-700',
+  PAID: 'bg-green-100 text-green-700',
   OVERDUE: 'bg-red-100 text-red-700', WAIVED: 'bg-amber-100 text-amber-700',
 };
 
 function totalPaidOf(plan: FeePlan): number {
   return plan.installments.filter((i) => i.status === 'PAID').reduce((s, i) => s + i.amount, 0);
+}
+/** Money physically collected by Sales, whether or not Admin has approved
+ * it yet — used for balance math so a not-yet-approved advance still counts
+ * against what's left to schedule. */
+function totalCollectedOf(plan: FeePlan): number {
+  return plan.installments.filter((i) => i.status === 'PAID' || i.status === 'PENDING_APPROVAL').reduce((s, i) => s + i.amount, 0);
+}
+function totalAwaitingApprovalOf(plan: FeePlan): number {
+  return plan.installments.filter((i) => i.status === 'PENDING_APPROVAL').reduce((s, i) => s + i.amount, 0);
 }
 function nextDueOf(plan: FeePlan): Installment | null {
   const pending = plan.installments.filter((i) => i.status === 'PENDING' || i.status === 'OVERDUE');
@@ -68,14 +84,15 @@ function nextDueOf(plan: FeePlan): Installment | null {
 /** True once a student's advance has been registered but nobody has said
  * yet how the remaining balance will be paid (Full/Part/EMI + schedule) —
  * i.e. the plan has a balance outstanding and every installment on file so
- * far is the one already-collected advance. This drives the "Declare
- * Payment" action on each student, separate from just registering them. */
+ * far is the one already-collected advance (approved or still awaiting
+ * approval). This drives the "Declare Payment" action on each student,
+ * separate from just registering them. */
 function needsDeclaration(plan: FeePlan): boolean {
   return (
     plan.status === 'ACTIVE' &&
     plan.installments.length > 0 &&
-    plan.installments.every((i) => i.status === 'PAID') &&
-    totalPaidOf(plan) < plan.totalFee
+    plan.installments.every((i) => i.status === 'PAID' || i.status === 'PENDING_APPROVAL') &&
+    totalCollectedOf(plan) < plan.totalFee
   );
 }
 
@@ -83,8 +100,13 @@ export default function FinanceSalesPage() {
   const { modules, loaded, hasModule } = useModuleAccess();
   const level = modules.FINANCE_SALES;
   const canEdit = hasModule('FINANCE_SALES', 'EDIT');
+  const canApprove = hasModule('FINANCE_SALES', 'ADMIN');
 
-  const [tab, setTab] = useState<'ledger' | 'plans'>('plans');
+  const [tab, setTab] = useState<'ledger' | 'plans' | 'approvals'>('plans');
+
+  const [approvals, setApprovals] = useState<ApprovalItem[]>([]);
+  const [approvalsLoading, setApprovalsLoading] = useState(true);
+  const [approvingId, setApprovingId] = useState<string | null>(null);
 
   const [collections, setCollections] = useState<Collection[]>([]);
   const [stats, setStats] = useState<Stats | null>(null);
@@ -139,8 +161,36 @@ export default function FinanceSalesPage() {
     }
   }, [planSearch, planStatusFilter]);
 
+  const fetchApprovals = useCallback(async () => {
+    setApprovalsLoading(true);
+    setError('');
+    try {
+      const res = await api.get('/api/finance-sales/approvals');
+      setApprovals(res.data.data);
+    } catch (err: unknown) {
+      const e = err as { response?: { data?: { message?: string } } };
+      setError(e.response?.data?.message || 'Failed to load the approval queue');
+    } finally {
+      setApprovalsLoading(false);
+    }
+  }, []);
+
+  const approveFromQueue = async (id: string) => {
+    setApprovingId(id);
+    try {
+      await api.post(`/api/finance-sales/installments/${id}/approve`);
+      await fetchApprovals();
+    } catch (err: unknown) {
+      const e = err as { response?: { data?: { message?: string } } };
+      setError(e.response?.data?.message || 'Failed to approve the payment');
+    } finally {
+      setApprovingId(null);
+    }
+  };
+
   useEffect(() => { if (level && tab === 'ledger') fetchAll(); }, [level, tab, fetchAll]);
   useEffect(() => { if (level && tab === 'plans') fetchPlans(); }, [level, tab, fetchPlans]);
+  useEffect(() => { if (level && tab === 'approvals' && canApprove) fetchApprovals(); }, [level, tab, canApprove, fetchApprovals]);
 
   useEffect(() => {
     if (!level) return;
@@ -189,7 +239,11 @@ export default function FinanceSalesPage() {
       {error && <div className="bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg px-4 py-3">{error}</div>}
 
       <div className="flex items-center gap-1 border-b">
-        {([{ id: 'plans' as const, label: 'Fee Declarations' }, { id: 'ledger' as const, label: 'Collections Ledger' }]).map((t) => (
+        {([
+          { id: 'plans' as const, label: 'Fee Declarations' },
+          { id: 'ledger' as const, label: 'Collections Ledger' },
+          ...(canApprove ? [{ id: 'approvals' as const, label: `Approvals${approvals.length ? ` (${approvals.length})` : ''}` }] : []),
+        ]).map((t) => (
           <button
             key={t.id}
             onClick={() => setTab(t.id)}
@@ -202,7 +256,53 @@ export default function FinanceSalesPage() {
         ))}
       </div>
 
-      {tab === 'ledger' ? (
+      {tab === 'approvals' ? (
+        <div className="bg-card border rounded-xl overflow-hidden">
+          <table className="w-full text-sm">
+            <thead className="bg-muted/50 text-left text-xs uppercase text-muted-foreground">
+              <tr>
+                <th className="px-4 py-3">Student</th>
+                <th className="px-4 py-3">Course</th>
+                <th className="px-4 py-3">Amount</th>
+                <th className="px-4 py-3">Mode</th>
+                <th className="px-4 py-3">Collected By</th>
+                <th className="px-4 py-3">Date</th>
+                <th className="px-4 py-3">Action</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y">
+              {approvalsLoading ? (
+                <tr><td colSpan={7} className="px-4 py-8 text-center text-muted-foreground">Loading...</td></tr>
+              ) : approvals.length === 0 ? (
+                <tr><td colSpan={7} className="px-4 py-8 text-center text-muted-foreground">Nothing awaiting approval</td></tr>
+              ) : approvals.map((a) => (
+                <tr key={a.id} className="hover:bg-muted/30">
+                  <td className="px-4 py-3 font-medium">
+                    {a.plan.lead.name}
+                    <p className="text-xs text-muted-foreground font-normal">{a.plan.lead.phone}</p>
+                  </td>
+                  <td className="px-4 py-3 text-muted-foreground">{a.plan.courseName}</td>
+                  <td className="px-4 py-3 font-semibold">{fmt(a.amount)}</td>
+                  <td className="px-4 py-3">
+                    <span className="text-xs font-medium px-2 py-1 rounded-full bg-purple-100 text-purple-700">{(a.mode || 'UPI').replace('_', ' ')}</span>
+                  </td>
+                  <td className="px-4 py-3">{a.receivedBy ? `${a.receivedBy.firstName} ${a.receivedBy.lastName}` : '—'}</td>
+                  <td className="px-4 py-3 text-muted-foreground">{a.paidAt ? new Date(a.paidAt).toLocaleDateString() : '—'}</td>
+                  <td className="px-4 py-3">
+                    <button
+                      onClick={() => approveFromQueue(a.id)}
+                      disabled={approvingId === a.id}
+                      className="flex items-center gap-1 text-xs font-medium text-purple-700 hover:underline disabled:opacity-50"
+                    >
+                      <CheckCircle2 className="w-3.5 h-3.5" /> {approvingId === a.id ? 'Approving…' : 'Approve'}
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      ) : tab === 'ledger' ? (
         <>
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
             <StatCard icon={Wallet} label="Total Collected" value={fmt(stats?.totalCollected ?? 0)} />
@@ -312,6 +412,9 @@ export default function FinanceSalesPage() {
                       <td className="px-4 py-3">
                         <span className="font-semibold">{fmt(paid)}</span>
                         <span className="text-muted-foreground"> / {fmt(p.totalFee)}</span>
+                        {totalAwaitingApprovalOf(p) > 0 && (
+                          <p className="text-[11px] text-purple-700">+{fmt(totalAwaitingApprovalOf(p))} awaiting approval</p>
+                        )}
                       </td>
                       <td className="px-4 py-3 text-xs">
                         {next ? (
@@ -355,7 +458,6 @@ export default function FinanceSalesPage() {
 
       {showNewPlan && (
         <AddStudentModal
-          employees={employees}
           canEdit={canEdit}
           onClose={() => setShowNewPlan(false)}
           onSaved={(id) => { setShowNewPlan(false); fetchPlans(); setOpenPlanId(id); }}
@@ -365,10 +467,10 @@ export default function FinanceSalesPage() {
       {openPlanId && (
         <PlanDetailModal
           planId={openPlanId}
-          employees={employees}
           canEdit={canEdit}
+          canApprove={canApprove}
           onClose={() => setOpenPlanId(null)}
-          onChanged={() => fetchPlans()}
+          onChanged={() => { fetchPlans(); if (canApprove) fetchApprovals(); }}
         />
       )}
     </div>
@@ -452,8 +554,8 @@ function AddCollectionModal({ employees, saving, setSaving, onClose, onSaved, se
 // paid so far. ──────────────────────────────────────────────────────────
 interface DraftInstallment { dueDate: string; amount: string; }
 
-function AddStudentModal({ employees, canEdit, onClose, onSaved }: {
-  employees: EmployeeLite[]; canEdit: boolean; onClose: () => void; onSaved: (planId: string) => void;
+function AddStudentModal({ canEdit, onClose, onSaved }: {
+  canEdit: boolean; onClose: () => void; onSaved: (planId: string) => void;
 }) {
   const [studentMode, setStudentMode] = useState<'existing' | 'new'>('new');
   const [leadQuery, setLeadQuery] = useState('');
@@ -466,7 +568,6 @@ function AddStudentModal({ employees, canEdit, onClose, onSaved }: {
 
   const [firstAmount, setFirstAmount] = useState('');
   const [firstMode, setFirstMode] = useState<PaymentMode>('UPI');
-  const [firstReceivedById, setFirstReceivedById] = useState('');
   const [firstDate, setFirstDate] = useState(new Date().toISOString().slice(0, 10));
 
   const [saving, setSaving] = useState(false);
@@ -497,7 +598,7 @@ function AddStudentModal({ employees, canEdit, onClose, onSaved }: {
     try {
       const payload: Record<string, unknown> = {
         courseName, totalFee: total, planType: 'FULL' as FeePlanType,
-        firstPayment: { amount: firstAmt, mode: firstMode, receivedById: firstReceivedById || undefined, collectedAt: firstDate },
+        firstPayment: { amount: firstAmt, mode: firstMode, collectedAt: firstDate },
       };
       if (studentMode === 'existing' && selectedLead) payload.leadId = selectedLead.id;
       else payload.newLead = newLead;
@@ -564,14 +665,10 @@ function AddStudentModal({ employees, canEdit, onClose, onSaved }: {
 
           <div className="space-y-2">
             <p className="text-xs font-semibold uppercase text-muted-foreground tracking-wide">Advance Collected Today</p>
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+            <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
               <input type="number" className="px-3 py-2 border rounded-lg text-sm" placeholder="Amount *" value={firstAmount} onChange={(e) => setFirstAmount(e.target.value)} />
               <select className="px-3 py-2 border rounded-lg text-sm" value={firstMode} onChange={(e) => setFirstMode(e.target.value as PaymentMode)}>
                 {MODES.map((m) => <option key={m} value={m}>{m.replace('_', ' ')}</option>)}
-              </select>
-              <select className="px-3 py-2 border rounded-lg text-sm" value={firstReceivedById} onChange={(e) => setFirstReceivedById(e.target.value)}>
-                <option value="">Received by...</option>
-                {employees.map((e) => <option key={e.id} value={e.id}>{e.firstName} {e.lastName}</option>)}
               </select>
               <input type="date" className="px-3 py-2 border rounded-lg text-sm" value={firstDate} onChange={(e) => setFirstDate(e.target.value)} />
             </div>
@@ -581,6 +678,7 @@ function AddStudentModal({ employees, canEdit, onClose, onSaved }: {
                 {balance > 0 ? ' — you\'ll declare how it\'s paid (Full / Part / EMI) from the student\'s row afterward.' : ' — fully paid.'}
               </p>
             )}
+            <p className="text-xs text-muted-foreground">This amount sits as awaiting approval until Admin confirms it's received.</p>
           </div>
         </div>
         <div className="flex justify-end gap-2 px-6 py-4 border-t flex-shrink-0">
@@ -595,17 +693,18 @@ function AddStudentModal({ employees, canEdit, onClose, onSaved }: {
 }
 
 // ── Plan detail: installments, collect payment, edit, cancel ──────────────
-function PlanDetailModal({ planId, employees, canEdit, onClose, onChanged }: {
-  planId: string; employees: EmployeeLite[]; canEdit: boolean; onClose: () => void; onChanged: () => void;
+function PlanDetailModal({ planId, canEdit, canApprove, onClose, onChanged }: {
+  planId: string; canEdit: boolean; canApprove: boolean; onClose: () => void; onChanged: () => void;
 }) {
   const [plan, setPlan] = useState<FeePlan | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [collectingId, setCollectingId] = useState<string | null>(null);
-  const [collectForm, setCollectForm] = useState({ amount: '', mode: 'UPI' as PaymentMode, receivedById: '', collectedAt: new Date().toISOString().slice(0, 10) });
+  const [collectForm, setCollectForm] = useState({ amount: '', mode: 'UPI' as PaymentMode, collectedAt: new Date().toISOString().slice(0, 10) });
   const [interestDraft, setInterestDraft] = useState('');
   const [savingInterest, setSavingInterest] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [approvingId, setApprovingId] = useState<string | null>(null);
 
   const [declarePlanType, setDeclarePlanType] = useState<'PART' | 'EMI'>('PART');
   const [declareRows, setDeclareRows] = useState<DraftInstallment[]>([{ dueDate: '', amount: '' }]);
@@ -629,7 +728,7 @@ function PlanDetailModal({ planId, employees, canEdit, onClose, onChanged }: {
 
   const startCollect = (inst: Installment) => {
     setCollectingId(inst.id);
-    setCollectForm({ amount: String(inst.amount), mode: 'UPI', receivedById: '', collectedAt: new Date().toISOString().slice(0, 10) });
+    setCollectForm({ amount: String(inst.amount), mode: 'UPI', collectedAt: new Date().toISOString().slice(0, 10) });
   };
 
   const submitCollect = async () => {
@@ -638,8 +737,7 @@ function PlanDetailModal({ planId, employees, canEdit, onClose, onChanged }: {
     setError('');
     try {
       await api.post(`/api/finance-sales/installments/${collectingId}/collect`, {
-        amount: collectForm.amount, mode: collectForm.mode,
-        receivedById: collectForm.receivedById || undefined, collectedAt: collectForm.collectedAt,
+        amount: collectForm.amount, mode: collectForm.mode, collectedAt: collectForm.collectedAt,
       });
       setCollectingId(null);
       await load();
@@ -649,6 +747,21 @@ function PlanDetailModal({ planId, employees, canEdit, onClose, onChanged }: {
       setError(e.response?.data?.message || 'Failed to record the payment');
     } finally {
       setBusy(false);
+    }
+  };
+
+  const approveInstallment = async (id: string) => {
+    setApprovingId(id);
+    setError('');
+    try {
+      await api.post(`/api/finance-sales/installments/${id}/approve`);
+      await load();
+      onChanged();
+    } catch (err: unknown) {
+      const e = err as { response?: { data?: { message?: string } } };
+      setError(e.response?.data?.message || 'Failed to approve the payment');
+    } finally {
+      setApprovingId(null);
     }
   };
 
@@ -738,9 +851,15 @@ function PlanDetailModal({ planId, employees, canEdit, onClose, onChanged }: {
                 </div>
                 <div className="border rounded-xl p-3 text-center">
                   <p className="text-xs text-muted-foreground">Due</p>
-                  <p className="font-bold text-amber-600">{fmt(Math.max(0, plan.totalFee - totalPaidOf(plan)))}</p>
+                  <p className="font-bold text-amber-600">{fmt(Math.max(0, plan.totalFee - totalCollectedOf(plan)))}</p>
                 </div>
               </div>
+
+              {totalAwaitingApprovalOf(plan) > 0 && (
+                <p className="text-xs text-purple-700 bg-purple-50 border border-purple-200 rounded-lg px-3 py-2">
+                  {fmt(totalAwaitingApprovalOf(plan))} collected but awaiting Admin approval before it's confirmed and the receipt is emailed.
+                </p>
+              )}
 
               <div className="flex items-center gap-2 flex-wrap">
                 <span className={`text-[11px] font-medium rounded-full px-2 py-1 ${PLAN_STATUS_COLOR[plan.status]}`}>{plan.status}</span>
@@ -759,7 +878,7 @@ function PlanDetailModal({ planId, employees, canEdit, onClose, onChanged }: {
                   <div>
                     <p className="text-sm font-semibold text-amber-800">Declare Payment Plan</p>
                     <p className="text-xs text-amber-700">
-                      Balance of {fmt(Math.max(0, plan.totalFee - totalPaidOf(plan)))} hasn't been scheduled yet — pick how it'll be paid.
+                      Balance of {fmt(Math.max(0, plan.totalFee - totalCollectedOf(plan)))} hasn't been scheduled yet — pick how it'll be paid.
                     </p>
                   </div>
                   <div className="flex gap-2">
@@ -767,7 +886,7 @@ function PlanDetailModal({ planId, employees, canEdit, onClose, onChanged }: {
                       <button
                         key={t}
                         onClick={() => setDeclarePlanType(t)}
-                        className={`px-3 py-1.5 text-sm rounded-lg border bg-white ${declarePlanType === t ? 'bg-blue-600 text-white border-blue-600' : ''}`}
+                        className={`px-3 py-1.5 text-sm rounded-lg border ${declarePlanType === t ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-gray-700'}`}
                         disabled={!canEdit}
                       >
                         {PLAN_TYPE_LABEL[t]}
@@ -829,31 +948,38 @@ function PlanDetailModal({ planId, employees, canEdit, onClose, onChanged }: {
                         <div>
                           <p className="text-sm font-medium">{fmt(inst.amount)}</p>
                           <p className="text-xs text-muted-foreground">
-                            {inst.status === 'PAID' && inst.paidAt ? `Paid ${new Date(inst.paidAt).toLocaleDateString()}${inst.mode ? ` · ${inst.mode.replace('_', ' ')}` : ''}` : `Due ${new Date(inst.dueDate).toLocaleDateString()}`}
+                            {(inst.status === 'PAID' || inst.status === 'PENDING_APPROVAL') && inst.paidAt
+                              ? `${inst.status === 'PAID' ? 'Paid' : 'Collected'} ${new Date(inst.paidAt).toLocaleDateString()}${inst.mode ? ` · ${inst.mode.replace('_', ' ')}` : ''}`
+                              : `Due ${new Date(inst.dueDate).toLocaleDateString()}`}
                             {inst.receivedBy ? ` · ${inst.receivedBy.firstName} ${inst.receivedBy.lastName}` : ''}
                           </p>
                         </div>
                         <div className="flex items-center gap-2">
-                          <span className={`text-[11px] font-medium rounded-full px-2 py-1 ${INSTALLMENT_STATUS_COLOR[inst.status]}`}>{inst.status}</span>
+                          <span className={`text-[11px] font-medium rounded-full px-2 py-1 ${INSTALLMENT_STATUS_COLOR[inst.status]}`}>{inst.status.replace('_', ' ')}</span>
                           {canEdit && (inst.status === 'PENDING' || inst.status === 'OVERDUE') && plan.status === 'ACTIVE' && (
                             <button onClick={() => startCollect(inst)} className="flex items-center gap-1 text-xs text-green-700 hover:underline">
                               <CheckCircle2 className="w-3.5 h-3.5" /> Collect
                             </button>
                           )}
+                          {canApprove && inst.status === 'PENDING_APPROVAL' && (
+                            <button
+                              onClick={() => approveInstallment(inst.id)}
+                              disabled={approvingId === inst.id}
+                              className="flex items-center gap-1 text-xs text-purple-700 hover:underline disabled:opacity-50"
+                            >
+                              <CheckCircle2 className="w-3.5 h-3.5" /> {approvingId === inst.id ? 'Approving…' : 'Approve'}
+                            </button>
+                          )}
                         </div>
                       </div>
                       {collectingId === inst.id && (
-                        <div className="mt-3 grid grid-cols-2 md:grid-cols-4 gap-2 bg-muted/20 rounded-lg p-3">
+                        <div className="mt-3 grid grid-cols-2 md:grid-cols-3 gap-2 bg-muted/20 rounded-lg p-3">
                           <input type="number" className="px-2 py-1.5 border rounded-lg text-sm" placeholder="Amount" value={collectForm.amount} onChange={(e) => setCollectForm({ ...collectForm, amount: e.target.value })} />
                           <select className="px-2 py-1.5 border rounded-lg text-sm" value={collectForm.mode} onChange={(e) => setCollectForm({ ...collectForm, mode: e.target.value as PaymentMode })}>
                             {MODES.map((m) => <option key={m} value={m}>{m.replace('_', ' ')}</option>)}
                           </select>
-                          <select className="px-2 py-1.5 border rounded-lg text-sm" value={collectForm.receivedById} onChange={(e) => setCollectForm({ ...collectForm, receivedById: e.target.value })}>
-                            <option value="">Received by...</option>
-                            {employees.map((e) => <option key={e.id} value={e.id}>{e.firstName} {e.lastName}</option>)}
-                          </select>
                           <input type="date" className="px-2 py-1.5 border rounded-lg text-sm" value={collectForm.collectedAt} onChange={(e) => setCollectForm({ ...collectForm, collectedAt: e.target.value })} />
-                          <div className="col-span-2 md:col-span-4 flex justify-end gap-2">
+                          <div className="col-span-2 md:col-span-3 flex justify-end gap-2">
                             <button onClick={() => setCollectingId(null)} className="px-3 py-1.5 text-xs rounded-lg border">Cancel</button>
                             <button onClick={submitCollect} disabled={busy} className="px-3 py-1.5 text-xs rounded-lg bg-green-600 text-white disabled:opacity-50">
                               {busy ? 'Saving…' : 'Confirm Collected'}
