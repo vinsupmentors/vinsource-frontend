@@ -1,7 +1,7 @@
 import { useEffect, useState, useCallback } from 'react';
 import api from '@/lib/api';
 import { useModuleAccess } from '@/hooks/useModuleAccess';
-import { Lock, Plus, X, Wallet, TrendingUp, Receipt, Search, Trash2, CheckCircle2, Ban } from 'lucide-react';
+import { Lock, Plus, X, Wallet, TrendingUp, Receipt, Search, Trash2, CheckCircle2, Ban, Users, AlertTriangle, Percent } from 'lucide-react';
 
 type PaymentMode = 'CASH' | 'UPI' | 'CARD' | 'NET_BANKING' | 'CHEQUE' | 'OTHER';
 type FeePlanType = 'FULL' | 'PART' | 'EMI';
@@ -76,6 +76,26 @@ interface DeletionLogItem {
   approvedAt: string; approvedBy?: EmployeeLite | null;
 }
 
+// ── Dashboard KPI aggregation ──────────────────────────────────────────────
+interface DashboardBucket {
+  key: string; label: string; sub?: string | null;
+  studentCount: number; totalFeeValue: number; collected: number; awaitingApproval: number; outstanding: number;
+}
+interface OverdueEmiItem {
+  id: string; studentName: string; studentPhone: string; courseName: string; amount: number;
+  dueDate: string; assignedTo?: { firstName: string; lastName: string } | null;
+}
+interface DashboardData {
+  overview: {
+    totalStudents: number; activeCount: number; completedCount: number; cancelledCount: number; refundedCount: number;
+    totalFeeValue: number; totalCollected: number; totalAwaitingApproval: number; totalOutstanding: number; totalRefunded: number;
+    pendingApprovalsCount: number; pendingRefundRequests: number; pendingDeletionRequests: number;
+  };
+  bySalesPerson: DashboardBucket[];
+  byCourse: DashboardBucket[];
+  emi: { emiPlansCount: number; totalDueSoFar: number; overdueCount: number; defaultRatePct: number; overdueInstallments: OverdueEmiItem[] };
+}
+
 const PLAN_TYPE_LABEL: Record<FeePlanType, string> = { FULL: 'Full Payment', PART: 'Part Payment', EMI: 'EMI' };
 const PLAN_STATUS_COLOR: Record<FeePlanStatus, string> = {
   ACTIVE: 'bg-blue-100 text-blue-700', COMPLETED: 'bg-green-100 text-green-700',
@@ -131,7 +151,7 @@ export default function FinanceSalesPage() {
   const canEdit = hasModule('FINANCE_SALES', 'EDIT');
   const canApprove = hasModule('FINANCE_SALES', 'ADMIN');
 
-  const [tab, setTab] = useState<'ledger' | 'plans' | 'approvals'>('plans');
+  const [tab, setTab] = useState<'ledger' | 'plans' | 'approvals' | 'dashboard'>('plans');
 
   const [collections, setCollections] = useState<Collection[]>([]);
   const [stats, setStats] = useState<Stats | null>(null);
@@ -146,8 +166,24 @@ export default function FinanceSalesPage() {
   const [plansLoading, setPlansLoading] = useState(true);
   const [planSearch, setPlanSearch] = useState('');
   const [planStatusFilter, setPlanStatusFilter] = useState<FeePlanStatus | ''>('');
+  const [planSalesPersonFilter, setPlanSalesPersonFilter] = useState('');
+  const [planCourseFilter, setPlanCourseFilter] = useState('');
+  const [planTypeFilter, setPlanTypeFilter] = useState<FeePlanType | ''>('');
+  const [planFromFilter, setPlanFromFilter] = useState('');
+  const [planToFilter, setPlanToFilter] = useState('');
   const [showNewPlan, setShowNewPlan] = useState(false);
   const [openPlanId, setOpenPlanId] = useState<string | null>(null);
+
+  const hasPlanFilters = !!(planSearch || planStatusFilter || planSalesPersonFilter || planCourseFilter || planTypeFilter || planFromFilter || planToFilter);
+  const clearPlanFilters = () => {
+    setPlanSearch(''); setPlanStatusFilter(''); setPlanSalesPersonFilter('');
+    setPlanCourseFilter(''); setPlanTypeFilter(''); setPlanFromFilter(''); setPlanToFilter('');
+  };
+  // Distinct course names ever seen — the closest thing to a "batch" list,
+  // since courseName is free text captured at intake rather than a real FK
+  // to the Batch/enrollment tables. Accumulated (never shrinks) so picking a
+  // course filter doesn't collapse the dropdown down to just that option.
+  const [courseOptions, setCourseOptions] = useState<string[]>([]);
 
   const fetchAll = useCallback(async () => {
     setLoading(true);
@@ -176,15 +212,21 @@ export default function FinanceSalesPage() {
       const params: Record<string, string> = {};
       if (planSearch) params.search = planSearch;
       if (planStatusFilter) params.status = planStatusFilter;
+      if (planSalesPersonFilter) params.salesPersonId = planSalesPersonFilter;
+      if (planCourseFilter) params.courseName = planCourseFilter;
+      if (planTypeFilter) params.planType = planTypeFilter;
+      if (planFromFilter) params.from = planFromFilter;
+      if (planToFilter) params.to = planToFilter;
       const res = await api.get('/api/finance-sales/plans', { params });
       setPlans(res.data.data);
+      setCourseOptions((prev) => Array.from(new Set([...prev, ...res.data.data.map((p: FeePlan) => p.courseName)])).sort());
     } catch (err: unknown) {
       const e = err as { response?: { data?: { message?: string } } };
       setError(e.response?.data?.message || 'Failed to load fee plans');
     } finally {
       setPlansLoading(false);
     }
-  }, [planSearch, planStatusFilter]);
+  }, [planSearch, planStatusFilter, planSalesPersonFilter, planCourseFilter, planTypeFilter, planFromFilter, planToFilter]);
 
   const deleteCollection = async (id: string) => {
     if (!window.confirm('Delete this collections ledger entry? This cannot be undone.')) return;
@@ -262,6 +304,7 @@ export default function FinanceSalesPage() {
           { id: 'plans' as const, label: 'Fee Declarations' },
           { id: 'ledger' as const, label: 'Collections Ledger' },
           ...(canApprove ? [{ id: 'approvals' as const, label: 'Approvals' }] : []),
+          ...(canApprove ? [{ id: 'dashboard' as const, label: 'Dashboard' }] : []),
         ]).map((t) => (
           <button
             key={t.id}
@@ -275,7 +318,9 @@ export default function FinanceSalesPage() {
         ))}
       </div>
 
-      {tab === 'approvals' ? (
+      {tab === 'dashboard' ? (
+        <DashboardPanel employees={employees} />
+      ) : tab === 'approvals' ? (
         <ApprovalsPanel onChanged={fetchPlans} />
       ) : tab === 'ledger' ? (
         <>
@@ -362,7 +407,33 @@ export default function FinanceSalesPage() {
               <option value="CANCELLED">Cancelled</option>
               <option value="REFUNDED">Refunded</option>
             </select>
-            <p className="text-sm text-muted-foreground">{plans.length} plan{plans.length === 1 ? '' : 's'}</p>
+            {canApprove && employees.length > 0 && (
+              <select className="px-3 py-2 border rounded-lg text-sm" value={planSalesPersonFilter} onChange={(e) => setPlanSalesPersonFilter(e.target.value)}>
+                <option value="">All sales people</option>
+                {employees.map((e) => <option key={e.id} value={e.id}>{e.firstName} {e.lastName}</option>)}
+              </select>
+            )}
+            {courseOptions.length > 0 && (
+              <select className="px-3 py-2 border rounded-lg text-sm max-w-[200px]" value={planCourseFilter} onChange={(e) => setPlanCourseFilter(e.target.value)}>
+                <option value="">All courses / batches</option>
+                {courseOptions.map((c) => <option key={c} value={c}>{c}</option>)}
+              </select>
+            )}
+            <select className="px-3 py-2 border rounded-lg text-sm" value={planTypeFilter} onChange={(e) => setPlanTypeFilter(e.target.value as FeePlanType | '')}>
+              <option value="">All plan types</option>
+              <option value="FULL">Full Payment</option>
+              <option value="PART">Part Payment</option>
+              <option value="EMI">EMI</option>
+            </select>
+            <div className="flex items-center gap-1 text-sm">
+              <input type="date" className="px-2 py-2 border rounded-lg text-sm" value={planFromFilter} onChange={(e) => setPlanFromFilter(e.target.value)} title="From" />
+              <span className="text-muted-foreground">–</span>
+              <input type="date" className="px-2 py-2 border rounded-lg text-sm" value={planToFilter} onChange={(e) => setPlanToFilter(e.target.value)} title="To" />
+            </div>
+            {hasPlanFilters && (
+              <button onClick={clearPlanFilters} className="text-xs text-blue-600 hover:underline whitespace-nowrap">Clear filters</button>
+            )}
+            <p className="text-sm text-muted-foreground ml-auto">{plans.length} plan{plans.length === 1 ? '' : 's'}</p>
           </div>
 
           <div className="bg-card border rounded-xl overflow-hidden">
@@ -1419,6 +1490,177 @@ function ApprovalsPanel({ onChanged }: { onChanged: () => void }) {
           </table>
         </div>
       )}
+    </div>
+  );
+}
+
+// ── Dashboard: cross-cutting KPIs — revenue collected/outstanding overall,
+// by sales person (who still has revenue "yet to complete"), by course/
+// batch, and EMI default tracking. ─────────────────────────────────────────
+function DashboardPanel({ employees: _employees }: { employees: EmployeeLite[] }) {
+  const [data, setData] = useState<DashboardData | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+  const [from, setFrom] = useState('');
+  const [to, setTo] = useState('');
+  const [breakdownView, setBreakdownView] = useState<'salesperson' | 'course'>('salesperson');
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    setError('');
+    try {
+      const params: Record<string, string> = {};
+      if (from) params.from = from;
+      if (to) params.to = to;
+      const res = await api.get('/api/finance-sales/dashboard', { params });
+      setData(res.data.data);
+    } catch (err: unknown) {
+      const e = err as { response?: { data?: { message?: string } } };
+      setError(e.response?.data?.message || 'Failed to load the dashboard');
+    } finally {
+      setLoading(false);
+    }
+  }, [from, to]);
+
+  useEffect(() => { load(); }, [load]);
+
+  if (loading && !data) {
+    return <p className="text-sm text-muted-foreground text-center py-12">Loading dashboard…</p>;
+  }
+  if (error && !data) {
+    return <div className="bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg px-4 py-3">{error}</div>;
+  }
+  if (!data) return null;
+
+  const buckets = breakdownView === 'salesperson' ? data.bySalesPerson : data.byCourse;
+
+  return (
+    <div className="space-y-5">
+      <div className="flex flex-wrap items-center gap-3">
+        <p className="text-xs font-semibold uppercase text-muted-foreground tracking-wide">Filter by registration date</p>
+        <div className="flex items-center gap-1 text-sm">
+          <input type="date" className="px-2 py-2 border rounded-lg text-sm" value={from} onChange={(e) => setFrom(e.target.value)} title="From" />
+          <span className="text-muted-foreground">–</span>
+          <input type="date" className="px-2 py-2 border rounded-lg text-sm" value={to} onChange={(e) => setTo(e.target.value)} title="To" />
+        </div>
+        {(from || to) && (
+          <button onClick={() => { setFrom(''); setTo(''); }} className="text-xs text-blue-600 hover:underline">Clear</button>
+        )}
+      </div>
+
+      {error && <div className="bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg px-4 py-3">{error}</div>}
+
+      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
+        <StatCard icon={Users} label="Students" value={data.overview.totalStudents} />
+        <StatCard icon={Wallet} label="Total Fee Value" value={fmt(data.overview.totalFeeValue)} />
+        <StatCard icon={TrendingUp} label="Collected" value={fmt(data.overview.totalCollected)} />
+        <StatCard icon={Receipt} label="Awaiting Approval" value={fmt(data.overview.totalAwaitingApproval)} />
+        <StatCard icon={AlertTriangle} label="Yet to Complete" value={fmt(data.overview.totalOutstanding)} />
+        <StatCard icon={Ban} label="Refunded" value={fmt(data.overview.totalRefunded)} />
+      </div>
+
+      <div className="flex flex-wrap items-center gap-2 text-xs">
+        <span className="px-2.5 py-1 rounded-full bg-blue-100 text-blue-700 font-medium">{data.overview.activeCount} Active</span>
+        <span className="px-2.5 py-1 rounded-full bg-green-100 text-green-700 font-medium">{data.overview.completedCount} Completed</span>
+        <span className="px-2.5 py-1 rounded-full bg-red-100 text-red-700 font-medium">{data.overview.cancelledCount} Cancelled</span>
+        <span className="px-2.5 py-1 rounded-full bg-orange-100 text-orange-700 font-medium">{data.overview.refundedCount} Refunded</span>
+        <span className="px-2.5 py-1 rounded-full bg-purple-100 text-purple-700 font-medium">{data.overview.pendingApprovalsCount} payments awaiting approval</span>
+        {data.overview.pendingRefundRequests > 0 && (
+          <span className="px-2.5 py-1 rounded-full bg-amber-100 text-amber-700 font-medium">{data.overview.pendingRefundRequests} refund requests pending</span>
+        )}
+        {data.overview.pendingDeletionRequests > 0 && (
+          <span className="px-2.5 py-1 rounded-full bg-gray-200 text-gray-700 font-medium">{data.overview.pendingDeletionRequests} deletion requests pending</span>
+        )}
+      </div>
+
+      <div className="bg-card border rounded-xl overflow-hidden">
+        <div className="flex items-center justify-between px-4 py-3 border-b">
+          <p className="text-sm font-semibold">Revenue Yet to Complete</p>
+          <div className="flex items-center gap-1 border rounded-lg p-0.5">
+            <button
+              onClick={() => setBreakdownView('salesperson')}
+              className={`px-3 py-1 text-xs rounded-md ${breakdownView === 'salesperson' ? 'bg-gray-900 text-white' : 'text-muted-foreground'}`}
+            >
+              By Sales Person
+            </button>
+            <button
+              onClick={() => setBreakdownView('course')}
+              className={`px-3 py-1 text-xs rounded-md ${breakdownView === 'course' ? 'bg-gray-900 text-white' : 'text-muted-foreground'}`}
+            >
+              By Course / Batch
+            </button>
+          </div>
+        </div>
+        <table className="w-full text-sm">
+          <thead className="bg-muted/50 text-left text-xs uppercase text-muted-foreground">
+            <tr>
+              <th className="px-4 py-3">{breakdownView === 'salesperson' ? 'Sales Person' : 'Course / Batch'}</th>
+              <th className="px-4 py-3">Students</th>
+              <th className="px-4 py-3">Total Fee</th>
+              <th className="px-4 py-3">Collected</th>
+              <th className="px-4 py-3">Awaiting Approval</th>
+              <th className="px-4 py-3">Yet to Complete</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y">
+            {buckets.length === 0 ? (
+              <tr><td colSpan={6} className="px-4 py-8 text-center text-muted-foreground">No data for this range</td></tr>
+            ) : buckets.map((b) => (
+              <tr key={b.key} className="hover:bg-muted/30">
+                <td className="px-4 py-3 font-medium">
+                  {b.label}
+                  {b.sub && <p className="text-xs text-muted-foreground font-normal">{b.sub}</p>}
+                </td>
+                <td className="px-4 py-3 text-muted-foreground">{b.studentCount}</td>
+                <td className="px-4 py-3">{fmt(b.totalFeeValue)}</td>
+                <td className="px-4 py-3 text-green-700">{fmt(b.collected)}</td>
+                <td className="px-4 py-3 text-purple-700">{b.awaitingApproval > 0 ? fmt(b.awaitingApproval) : '—'}</td>
+                <td className="px-4 py-3 font-semibold">
+                  {b.outstanding > 0 ? <span className="text-amber-600">{fmt(b.outstanding)}</span> : <span className="text-muted-foreground">{fmt(0)}</span>}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      <div className="bg-card border rounded-xl overflow-hidden">
+        <div className="flex items-center justify-between px-4 py-3 border-b">
+          <p className="text-sm font-semibold">EMI Default Tracking</p>
+          <div className="flex items-center gap-2 text-xs">
+            <Percent className="w-3.5 h-3.5 text-muted-foreground" />
+            <span className="font-semibold">{data.emi.defaultRatePct}%</span>
+            <span className="text-muted-foreground">default rate · {data.emi.overdueCount} of {data.emi.totalDueSoFar} due EMI installments overdue · {data.emi.emiPlansCount} EMI plans</span>
+          </div>
+        </div>
+        <table className="w-full text-sm">
+          <thead className="bg-muted/50 text-left text-xs uppercase text-muted-foreground">
+            <tr>
+              <th className="px-4 py-3">Student</th>
+              <th className="px-4 py-3">Course</th>
+              <th className="px-4 py-3">Amount</th>
+              <th className="px-4 py-3">Due Date</th>
+              <th className="px-4 py-3">Sales Person</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y">
+            {data.emi.overdueInstallments.length === 0 ? (
+              <tr><td colSpan={5} className="px-4 py-8 text-center text-muted-foreground">No overdue EMI installments</td></tr>
+            ) : data.emi.overdueInstallments.map((o) => (
+              <tr key={o.id} className="hover:bg-muted/30">
+                <td className="px-4 py-3 font-medium">
+                  {o.studentName}
+                  <p className="text-xs text-muted-foreground font-normal">{o.studentPhone}</p>
+                </td>
+                <td className="px-4 py-3 text-muted-foreground">{o.courseName}</td>
+                <td className="px-4 py-3 font-semibold">{fmt(o.amount)}</td>
+                <td className="px-4 py-3 text-red-600 font-medium">{new Date(o.dueDate).toLocaleDateString()}</td>
+                <td className="px-4 py-3 text-muted-foreground">{o.assignedTo ? `${o.assignedTo.firstName} ${o.assignedTo.lastName}` : '—'}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
     </div>
   );
 }
