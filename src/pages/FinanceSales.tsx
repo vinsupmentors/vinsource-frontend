@@ -179,10 +179,11 @@ export default function FinanceSalesPage() {
     setPlanSearch(''); setPlanStatusFilter(''); setPlanSalesPersonFilter('');
     setPlanCourseFilter(''); setPlanTypeFilter(''); setPlanFromFilter(''); setPlanToFilter('');
   };
-  // Distinct course names ever seen — the closest thing to a "batch" list,
-  // since courseName is free text captured at intake rather than a real FK
-  // to the Batch/enrollment tables. Accumulated (never shrinks) so picking a
-  // course filter doesn't collapse the dropdown down to just that option.
+  // Distinct course names across every fee declaration — the closest thing
+  // to a "batch" list, since courseName is free text captured at intake
+  // rather than a real FK to the Batch/enrollment tables. Fetched once,
+  // independent of whatever filters are applied, so picking a batch never
+  // shrinks the list of batches to pick from.
   const [courseOptions, setCourseOptions] = useState<string[]>([]);
 
   const fetchAll = useCallback(async () => {
@@ -219,7 +220,6 @@ export default function FinanceSalesPage() {
       if (planToFilter) params.to = planToFilter;
       const res = await api.get('/api/finance-sales/plans', { params });
       setPlans(res.data.data);
-      setCourseOptions((prev) => Array.from(new Set([...prev, ...res.data.data.map((p: FeePlan) => p.courseName)])).sort());
     } catch (err: unknown) {
       const e = err as { response?: { data?: { message?: string } } };
       setError(e.response?.data?.message || 'Failed to load fee plans');
@@ -256,6 +256,7 @@ export default function FinanceSalesPage() {
   useEffect(() => {
     if (!level) return;
     api.get('/api/employees').then((res) => setEmployees(res.data.data)).catch(() => setEmployees([]));
+    api.get('/api/finance-sales/courses').then((res) => setCourseOptions(res.data.data)).catch(() => setCourseOptions([]));
   }, [level]);
 
   if (loaded && !level) {
@@ -319,7 +320,7 @@ export default function FinanceSalesPage() {
       </div>
 
       {tab === 'dashboard' ? (
-        <DashboardPanel employees={employees} />
+        <DashboardPanel employees={employees} courseOptions={courseOptions} />
       ) : tab === 'approvals' ? (
         <ApprovalsPanel onChanged={fetchPlans} />
       ) : tab === 'ledger' ? (
@@ -1497,13 +1498,18 @@ function ApprovalsPanel({ onChanged }: { onChanged: () => void }) {
 // ── Dashboard: cross-cutting KPIs — revenue collected/outstanding overall,
 // by sales person (who still has revenue "yet to complete"), by course/
 // batch, and EMI default tracking. ─────────────────────────────────────────
-function DashboardPanel({ employees: _employees }: { employees: EmployeeLite[] }) {
+function DashboardPanel({ employees, courseOptions }: { employees: EmployeeLite[]; courseOptions: string[] }) {
   const [data, setData] = useState<DashboardData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [from, setFrom] = useState('');
   const [to, setTo] = useState('');
+  const [courseFilter, setCourseFilter] = useState('');
+  const [salesPersonFilter, setSalesPersonFilter] = useState('');
   const [breakdownView, setBreakdownView] = useState<'salesperson' | 'course'>('salesperson');
+
+  const hasFilters = !!(from || to || courseFilter || salesPersonFilter);
+  const clearFilters = () => { setFrom(''); setTo(''); setCourseFilter(''); setSalesPersonFilter(''); };
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -1512,6 +1518,8 @@ function DashboardPanel({ employees: _employees }: { employees: EmployeeLite[] }
       const params: Record<string, string> = {};
       if (from) params.from = from;
       if (to) params.to = to;
+      if (courseFilter) params.courseName = courseFilter;
+      if (salesPersonFilter) params.salesPersonId = salesPersonFilter;
       const res = await api.get('/api/finance-sales/dashboard', { params });
       setData(res.data.data);
     } catch (err: unknown) {
@@ -1520,7 +1528,7 @@ function DashboardPanel({ employees: _employees }: { employees: EmployeeLite[] }
     } finally {
       setLoading(false);
     }
-  }, [from, to]);
+  }, [from, to, courseFilter, salesPersonFilter]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -1537,14 +1545,25 @@ function DashboardPanel({ employees: _employees }: { employees: EmployeeLite[] }
   return (
     <div className="space-y-5">
       <div className="flex flex-wrap items-center gap-3">
-        <p className="text-xs font-semibold uppercase text-muted-foreground tracking-wide">Filter by registration date</p>
+        {courseOptions.length > 0 && (
+          <select className="px-3 py-2 border rounded-lg text-sm max-w-[220px]" value={courseFilter} onChange={(e) => setCourseFilter(e.target.value)}>
+            <option value="">All courses / batches</option>
+            {courseOptions.map((c) => <option key={c} value={c}>{c}</option>)}
+          </select>
+        )}
+        {employees.length > 0 && (
+          <select className="px-3 py-2 border rounded-lg text-sm" value={salesPersonFilter} onChange={(e) => setSalesPersonFilter(e.target.value)}>
+            <option value="">All sales people</option>
+            {employees.map((e) => <option key={e.id} value={e.id}>{e.firstName} {e.lastName}</option>)}
+          </select>
+        )}
         <div className="flex items-center gap-1 text-sm">
-          <input type="date" className="px-2 py-2 border rounded-lg text-sm" value={from} onChange={(e) => setFrom(e.target.value)} title="From" />
+          <input type="date" className="px-2 py-2 border rounded-lg text-sm" value={from} onChange={(e) => setFrom(e.target.value)} title="Registered from" />
           <span className="text-muted-foreground">–</span>
-          <input type="date" className="px-2 py-2 border rounded-lg text-sm" value={to} onChange={(e) => setTo(e.target.value)} title="To" />
+          <input type="date" className="px-2 py-2 border rounded-lg text-sm" value={to} onChange={(e) => setTo(e.target.value)} title="Registered to" />
         </div>
-        {(from || to) && (
-          <button onClick={() => { setFrom(''); setTo(''); }} className="text-xs text-blue-600 hover:underline">Clear</button>
+        {hasFilters && (
+          <button onClick={clearFilters} className="text-xs text-blue-600 hover:underline">Clear filters</button>
         )}
       </div>
 
