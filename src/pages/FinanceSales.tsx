@@ -5,7 +5,7 @@ import { Lock, Plus, X, Wallet, TrendingUp, Receipt, Search, Trash2, CheckCircle
 
 type PaymentMode = 'CASH' | 'UPI' | 'CARD' | 'NET_BANKING' | 'CHEQUE' | 'OTHER';
 type FeePlanType = 'FULL' | 'PART' | 'EMI';
-type FeePlanStatus = 'ACTIVE' | 'CANCELLED' | 'COMPLETED';
+type FeePlanStatus = 'ACTIVE' | 'CANCELLED' | 'COMPLETED' | 'REFUNDED';
 type FeeInstallmentStatus = 'PENDING' | 'PENDING_APPROVAL' | 'PAID' | 'OVERDUE' | 'WAIVED';
 
 interface EmployeeLite { id: string; firstName: string; lastName: string; }
@@ -46,6 +46,8 @@ interface FeePlan {
   id: string; courseName: string; totalFee: number; planType: FeePlanType;
   interestAmount?: number | null; status: FeePlanStatus; createdAt: string;
   lead: LeadLite; createdBy?: EmployeeLite | null; installments: Installment[];
+  refundRequestedAt?: string | null; refundAmount?: number | null; refundReason?: string | null; refundCompletedAt?: string | null;
+  deletionRequestedAt?: string | null; deletionReason?: string | null;
 }
 // A collected-but-unconfirmed installment, as returned by the approval queue.
 interface ApprovalItem {
@@ -53,10 +55,16 @@ interface ApprovalItem {
   receivedBy?: EmployeeLite | null;
   plan: { id: string; courseName: string; totalFee: number; planType: FeePlanType; lead: LeadLite };
 }
+// A plan sitting with a pending refund or deletion request.
+interface RequestItem extends FeePlan {
+  refundRequestedBy?: EmployeeLite | null;
+  deletionRequestedBy?: EmployeeLite | null;
+}
 
 const PLAN_TYPE_LABEL: Record<FeePlanType, string> = { FULL: 'Full Payment', PART: 'Part Payment', EMI: 'EMI' };
 const PLAN_STATUS_COLOR: Record<FeePlanStatus, string> = {
-  ACTIVE: 'bg-blue-100 text-blue-700', COMPLETED: 'bg-green-100 text-green-700', CANCELLED: 'bg-red-100 text-red-700',
+  ACTIVE: 'bg-blue-100 text-blue-700', COMPLETED: 'bg-green-100 text-green-700',
+  CANCELLED: 'bg-red-100 text-red-700', REFUNDED: 'bg-orange-100 text-orange-700',
 };
 const INSTALLMENT_STATUS_COLOR: Record<FeeInstallmentStatus, string> = {
   PENDING: 'bg-gray-100 text-gray-600', PENDING_APPROVAL: 'bg-purple-100 text-purple-700',
@@ -95,6 +103,12 @@ function needsDeclaration(plan: FeePlan): boolean {
     totalCollectedOf(plan) < plan.totalFee
   );
 }
+function isRefundPending(plan: FeePlan): boolean {
+  return !!plan.refundRequestedAt && !plan.refundCompletedAt;
+}
+function isDeletionPending(plan: FeePlan): boolean {
+  return !!plan.deletionRequestedAt;
+}
 
 export default function FinanceSalesPage() {
   const { modules, loaded, hasModule } = useModuleAccess();
@@ -107,6 +121,11 @@ export default function FinanceSalesPage() {
   const [approvals, setApprovals] = useState<ApprovalItem[]>([]);
   const [approvalsLoading, setApprovalsLoading] = useState(true);
   const [approvingId, setApprovingId] = useState<string | null>(null);
+
+  const [refundRequests, setRefundRequests] = useState<RequestItem[]>([]);
+  const [deletionRequests, setDeletionRequests] = useState<RequestItem[]>([]);
+  const [requestsLoading, setRequestsLoading] = useState(true);
+  const [busyRequestId, setBusyRequestId] = useState<string | null>(null);
 
   const [collections, setCollections] = useState<Collection[]>([]);
   const [stats, setStats] = useState<Stats | null>(null);
@@ -188,9 +207,96 @@ export default function FinanceSalesPage() {
     }
   };
 
+  const fetchRequests = useCallback(async () => {
+    setRequestsLoading(true);
+    setError('');
+    try {
+      const [refundRes, deleteRes] = await Promise.all([
+        api.get('/api/finance-sales/refund-requests'),
+        api.get('/api/finance-sales/deletion-requests'),
+      ]);
+      setRefundRequests(refundRes.data.data);
+      setDeletionRequests(deleteRes.data.data);
+    } catch (err: unknown) {
+      const e = err as { response?: { data?: { message?: string } } };
+      setError(e.response?.data?.message || 'Failed to load refund/deletion requests');
+    } finally {
+      setRequestsLoading(false);
+    }
+  }, []);
+
+  const completeRefund = async (id: string) => {
+    setBusyRequestId(id);
+    try {
+      await api.post(`/api/finance-sales/plans/${id}/refund/complete`);
+      await fetchRequests();
+      fetchPlans();
+    } catch (err: unknown) {
+      const e = err as { response?: { data?: { message?: string } } };
+      setError(e.response?.data?.message || 'Failed to complete the refund');
+    } finally {
+      setBusyRequestId(null);
+    }
+  };
+
+  const rejectRefund = async (id: string) => {
+    setBusyRequestId(id);
+    try {
+      await api.post(`/api/finance-sales/plans/${id}/refund/reject`);
+      await fetchRequests();
+    } catch (err: unknown) {
+      const e = err as { response?: { data?: { message?: string } } };
+      setError(e.response?.data?.message || 'Failed to reject the refund request');
+    } finally {
+      setBusyRequestId(null);
+    }
+  };
+
+  const approveDelete = async (id: string) => {
+    if (!window.confirm('Permanently delete this fee declaration and its installments? The collections ledger keeps its history either way. This cannot be undone.')) return;
+    setBusyRequestId(id);
+    try {
+      await api.post(`/api/finance-sales/plans/${id}/delete-request/approve`);
+      await fetchRequests();
+      fetchPlans();
+    } catch (err: unknown) {
+      const e = err as { response?: { data?: { message?: string } } };
+      setError(e.response?.data?.message || 'Failed to delete the plan');
+    } finally {
+      setBusyRequestId(null);
+    }
+  };
+
+  const rejectDelete = async (id: string) => {
+    setBusyRequestId(id);
+    try {
+      await api.post(`/api/finance-sales/plans/${id}/delete-request/reject`);
+      await fetchRequests();
+      fetchPlans();
+    } catch (err: unknown) {
+      const e = err as { response?: { data?: { message?: string } } };
+      setError(e.response?.data?.message || 'Failed to reject the deletion request');
+    } finally {
+      setBusyRequestId(null);
+    }
+  };
+
+  const requestDelete = async (planId: string) => {
+    const reason = window.prompt('Reason for deleting this fee declaration (optional):') || undefined;
+    try {
+      await api.post(`/api/finance-sales/plans/${planId}/delete-request`, { reason });
+      fetchPlans();
+    } catch (err: unknown) {
+      const e = err as { response?: { data?: { message?: string } } };
+      setError(e.response?.data?.message || 'Failed to submit the deletion request');
+    }
+  };
+
   useEffect(() => { if (level && tab === 'ledger') fetchAll(); }, [level, tab, fetchAll]);
   useEffect(() => { if (level && tab === 'plans') fetchPlans(); }, [level, tab, fetchPlans]);
-  useEffect(() => { if (level && tab === 'approvals' && canApprove) fetchApprovals(); }, [level, tab, canApprove, fetchApprovals]);
+  useEffect(() => {
+    if (level && tab === 'approvals' && canApprove) { fetchApprovals(); fetchRequests(); }
+  }, [level, tab, canApprove, fetchApprovals, fetchRequests]);
 
   useEffect(() => {
     if (!level) return;
@@ -242,7 +348,16 @@ export default function FinanceSalesPage() {
         {([
           { id: 'plans' as const, label: 'Fee Declarations' },
           { id: 'ledger' as const, label: 'Collections Ledger' },
-          ...(canApprove ? [{ id: 'approvals' as const, label: `Approvals${approvals.length ? ` (${approvals.length})` : ''}` }] : []),
+          ...(canApprove
+            ? [{
+                id: 'approvals' as const,
+                label: `Approvals${
+                  approvals.length + refundRequests.length + deletionRequests.length
+                    ? ` (${approvals.length + refundRequests.length + deletionRequests.length})`
+                    : ''
+                }`,
+              }]
+            : []),
         ]).map((t) => (
           <button
             key={t.id}
@@ -257,50 +372,161 @@ export default function FinanceSalesPage() {
       </div>
 
       {tab === 'approvals' ? (
-        <div className="bg-card border rounded-xl overflow-hidden">
-          <table className="w-full text-sm">
-            <thead className="bg-muted/50 text-left text-xs uppercase text-muted-foreground">
-              <tr>
-                <th className="px-4 py-3">Student</th>
-                <th className="px-4 py-3">Course</th>
-                <th className="px-4 py-3">Amount</th>
-                <th className="px-4 py-3">Mode</th>
-                <th className="px-4 py-3">Collected By</th>
-                <th className="px-4 py-3">Date</th>
-                <th className="px-4 py-3">Action</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y">
-              {approvalsLoading ? (
-                <tr><td colSpan={7} className="px-4 py-8 text-center text-muted-foreground">Loading...</td></tr>
-              ) : approvals.length === 0 ? (
-                <tr><td colSpan={7} className="px-4 py-8 text-center text-muted-foreground">Nothing awaiting approval</td></tr>
-              ) : approvals.map((a) => (
-                <tr key={a.id} className="hover:bg-muted/30">
-                  <td className="px-4 py-3 font-medium">
-                    {a.plan.lead.name}
-                    <p className="text-xs text-muted-foreground font-normal">{a.plan.lead.phone}</p>
-                  </td>
-                  <td className="px-4 py-3 text-muted-foreground">{a.plan.courseName}</td>
-                  <td className="px-4 py-3 font-semibold">{fmt(a.amount)}</td>
-                  <td className="px-4 py-3">
-                    <span className="text-xs font-medium px-2 py-1 rounded-full bg-purple-100 text-purple-700">{(a.mode || 'UPI').replace('_', ' ')}</span>
-                  </td>
-                  <td className="px-4 py-3">{a.receivedBy ? `${a.receivedBy.firstName} ${a.receivedBy.lastName}` : '—'}</td>
-                  <td className="px-4 py-3 text-muted-foreground">{a.paidAt ? new Date(a.paidAt).toLocaleDateString() : '—'}</td>
-                  <td className="px-4 py-3">
-                    <button
-                      onClick={() => approveFromQueue(a.id)}
-                      disabled={approvingId === a.id}
-                      className="flex items-center gap-1 text-xs font-medium text-purple-700 hover:underline disabled:opacity-50"
-                    >
-                      <CheckCircle2 className="w-3.5 h-3.5" /> {approvingId === a.id ? 'Approving…' : 'Approve'}
-                    </button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+        <div className="space-y-6">
+          <div>
+            <p className="text-sm font-semibold mb-2">Payments Awaiting Approval</p>
+            <div className="bg-card border rounded-xl overflow-hidden">
+              <table className="w-full text-sm">
+                <thead className="bg-muted/50 text-left text-xs uppercase text-muted-foreground">
+                  <tr>
+                    <th className="px-4 py-3">Student</th>
+                    <th className="px-4 py-3">Course</th>
+                    <th className="px-4 py-3">Amount</th>
+                    <th className="px-4 py-3">Mode</th>
+                    <th className="px-4 py-3">Collected By</th>
+                    <th className="px-4 py-3">Date</th>
+                    <th className="px-4 py-3">Action</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y">
+                  {approvalsLoading ? (
+                    <tr><td colSpan={7} className="px-4 py-8 text-center text-muted-foreground">Loading...</td></tr>
+                  ) : approvals.length === 0 ? (
+                    <tr><td colSpan={7} className="px-4 py-8 text-center text-muted-foreground">Nothing awaiting approval</td></tr>
+                  ) : approvals.map((a) => (
+                    <tr key={a.id} className="hover:bg-muted/30">
+                      <td className="px-4 py-3 font-medium">
+                        {a.plan.lead.name}
+                        <p className="text-xs text-muted-foreground font-normal">{a.plan.lead.phone}</p>
+                      </td>
+                      <td className="px-4 py-3 text-muted-foreground">{a.plan.courseName}</td>
+                      <td className="px-4 py-3 font-semibold">{fmt(a.amount)}</td>
+                      <td className="px-4 py-3">
+                        <span className="text-xs font-medium px-2 py-1 rounded-full bg-purple-100 text-purple-700">{(a.mode || 'UPI').replace('_', ' ')}</span>
+                      </td>
+                      <td className="px-4 py-3">{a.receivedBy ? `${a.receivedBy.firstName} ${a.receivedBy.lastName}` : '—'}</td>
+                      <td className="px-4 py-3 text-muted-foreground">{a.paidAt ? new Date(a.paidAt).toLocaleDateString() : '—'}</td>
+                      <td className="px-4 py-3">
+                        <button
+                          onClick={() => approveFromQueue(a.id)}
+                          disabled={approvingId === a.id}
+                          className="flex items-center gap-1 text-xs font-medium text-purple-700 hover:underline disabled:opacity-50"
+                        >
+                          <CheckCircle2 className="w-3.5 h-3.5" /> {approvingId === a.id ? 'Approving…' : 'Approve'}
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <div>
+            <p className="text-sm font-semibold mb-2">Refund Requests</p>
+            <div className="bg-card border rounded-xl overflow-hidden">
+              <table className="w-full text-sm">
+                <thead className="bg-muted/50 text-left text-xs uppercase text-muted-foreground">
+                  <tr>
+                    <th className="px-4 py-3">Student</th>
+                    <th className="px-4 py-3">Course</th>
+                    <th className="px-4 py-3">Refund Amount</th>
+                    <th className="px-4 py-3">Reason</th>
+                    <th className="px-4 py-3">Requested By</th>
+                    <th className="px-4 py-3">Action</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y">
+                  {requestsLoading ? (
+                    <tr><td colSpan={6} className="px-4 py-8 text-center text-muted-foreground">Loading...</td></tr>
+                  ) : refundRequests.length === 0 ? (
+                    <tr><td colSpan={6} className="px-4 py-8 text-center text-muted-foreground">No refund requests</td></tr>
+                  ) : refundRequests.map((r) => (
+                    <tr key={r.id} className="hover:bg-muted/30">
+                      <td className="px-4 py-3 font-medium">
+                        {r.lead.name}
+                        <p className="text-xs text-muted-foreground font-normal">{r.lead.phone}</p>
+                      </td>
+                      <td className="px-4 py-3 text-muted-foreground">{r.courseName}</td>
+                      <td className="px-4 py-3 font-semibold">{r.refundAmount != null ? fmt(r.refundAmount) : '—'}</td>
+                      <td className="px-4 py-3 text-muted-foreground max-w-[220px] truncate" title={r.refundReason || ''}>{r.refundReason || '—'}</td>
+                      <td className="px-4 py-3">{r.refundRequestedBy ? `${r.refundRequestedBy.firstName} ${r.refundRequestedBy.lastName}` : '—'}</td>
+                      <td className="px-4 py-3">
+                        <div className="flex items-center gap-3">
+                          <button
+                            onClick={() => completeRefund(r.id)}
+                            disabled={busyRequestId === r.id}
+                            className="flex items-center gap-1 text-xs font-medium text-green-700 hover:underline disabled:opacity-50"
+                          >
+                            <CheckCircle2 className="w-3.5 h-3.5" /> {busyRequestId === r.id ? 'Saving…' : 'Mark Transferred'}
+                          </button>
+                          <button
+                            onClick={() => rejectRefund(r.id)}
+                            disabled={busyRequestId === r.id}
+                            className="text-xs text-muted-foreground hover:underline disabled:opacity-50"
+                          >
+                            Reject
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <div>
+            <p className="text-sm font-semibold mb-2">Deletion Requests</p>
+            <div className="bg-card border rounded-xl overflow-hidden">
+              <table className="w-full text-sm">
+                <thead className="bg-muted/50 text-left text-xs uppercase text-muted-foreground">
+                  <tr>
+                    <th className="px-4 py-3">Student</th>
+                    <th className="px-4 py-3">Course</th>
+                    <th className="px-4 py-3">Reason</th>
+                    <th className="px-4 py-3">Requested By</th>
+                    <th className="px-4 py-3">Action</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y">
+                  {requestsLoading ? (
+                    <tr><td colSpan={5} className="px-4 py-8 text-center text-muted-foreground">Loading...</td></tr>
+                  ) : deletionRequests.length === 0 ? (
+                    <tr><td colSpan={5} className="px-4 py-8 text-center text-muted-foreground">No deletion requests</td></tr>
+                  ) : deletionRequests.map((r) => (
+                    <tr key={r.id} className="hover:bg-muted/30">
+                      <td className="px-4 py-3 font-medium">
+                        {r.lead.name}
+                        <p className="text-xs text-muted-foreground font-normal">{r.lead.phone}</p>
+                      </td>
+                      <td className="px-4 py-3 text-muted-foreground">{r.courseName}</td>
+                      <td className="px-4 py-3 text-muted-foreground max-w-[220px] truncate" title={r.deletionReason || ''}>{r.deletionReason || '—'}</td>
+                      <td className="px-4 py-3">{r.deletionRequestedBy ? `${r.deletionRequestedBy.firstName} ${r.deletionRequestedBy.lastName}` : '—'}</td>
+                      <td className="px-4 py-3">
+                        <div className="flex items-center gap-3">
+                          <button
+                            onClick={() => approveDelete(r.id)}
+                            disabled={busyRequestId === r.id}
+                            className="flex items-center gap-1 text-xs font-medium text-red-600 hover:underline disabled:opacity-50"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" /> {busyRequestId === r.id ? 'Deleting…' : 'Approve Delete'}
+                          </button>
+                          <button
+                            onClick={() => rejectDelete(r.id)}
+                            disabled={busyRequestId === r.id}
+                            className="text-xs text-muted-foreground hover:underline disabled:opacity-50"
+                          >
+                            Reject
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
         </div>
       ) : tab === 'ledger' ? (
         <>
@@ -373,6 +599,7 @@ export default function FinanceSalesPage() {
               <option value="ACTIVE">Active</option>
               <option value="COMPLETED">Completed</option>
               <option value="CANCELLED">Cancelled</option>
+              <option value="REFUNDED">Refunded</option>
             </select>
             <p className="text-sm text-muted-foreground">{plans.length} plan{plans.length === 1 ? '' : 's'}</p>
           </div>
@@ -427,14 +654,32 @@ export default function FinanceSalesPage() {
                         <span className={`text-[11px] font-medium rounded-full px-2 py-1 ${PLAN_STATUS_COLOR[p.status]}`}>{p.status}</span>
                       </td>
                       <td className="px-4 py-3" onClick={(e) => e.stopPropagation()}>
-                        {declare && canEdit ? (
-                          <button
-                            onClick={() => setOpenPlanId(p.id)}
-                            className="text-xs font-medium text-blue-600 hover:underline whitespace-nowrap"
-                          >
-                            Declare Payment
-                          </button>
-                        ) : <span className="text-muted-foreground text-xs">—</span>}
+                        <div className="flex items-center gap-3">
+                          {declare && canEdit && (
+                            <button
+                              onClick={() => setOpenPlanId(p.id)}
+                              className="text-xs font-medium text-blue-600 hover:underline whitespace-nowrap"
+                            >
+                              Declare Payment
+                            </button>
+                          )}
+                          {isRefundPending(p) && (
+                            <span className="text-[11px] text-orange-700 whitespace-nowrap">Refund pending</span>
+                          )}
+                          {canEdit && (
+                            isDeletionPending(p) ? (
+                              <span className="text-[11px] text-muted-foreground whitespace-nowrap">Deletion pending</span>
+                            ) : (
+                              <button
+                                onClick={() => requestDelete(p.id)}
+                                title="Request deletion"
+                                className="text-muted-foreground hover:text-red-600 flex-shrink-0"
+                              >
+                                <Trash2 className="w-4 h-4" />
+                              </button>
+                            )
+                          )}
+                        </div>
                       </td>
                     </tr>
                   );
@@ -710,6 +955,10 @@ function PlanDetailModal({ planId, canEdit, canApprove, onClose, onChanged }: {
   const [declareRows, setDeclareRows] = useState<DraftInstallment[]>([{ dueDate: '', amount: '' }]);
   const [declaring, setDeclaring] = useState(false);
 
+  const [showRefundForm, setShowRefundForm] = useState(false);
+  const [refundForm, setRefundForm] = useState({ amount: '', reason: '' });
+  const [requestingRefund, setRequestingRefund] = useState(false);
+
   const load = useCallback(async () => {
     setLoading(true);
     try {
@@ -808,6 +1057,26 @@ function PlanDetailModal({ planId, canEdit, canApprove, onClose, onChanged }: {
     }
   };
 
+  const submitRefundRequest = async () => {
+    if (!plan) return;
+    setRequestingRefund(true);
+    setError('');
+    try {
+      await api.post(`/api/finance-sales/plans/${plan.id}/refund`, {
+        amount: refundForm.amount || undefined, reason: refundForm.reason || undefined,
+      });
+      setShowRefundForm(false);
+      setRefundForm({ amount: '', reason: '' });
+      await load();
+      onChanged();
+    } catch (err: unknown) {
+      const e = err as { response?: { data?: { message?: string } } };
+      setError(e.response?.data?.message || 'Failed to submit the refund request');
+    } finally {
+      setRequestingRefund(false);
+    }
+  };
+
   const cancelPlan = async () => {
     if (!window.confirm('Cancel this fee plan? Every pending installment will be waived and reminders will stop. This does not affect enrollment.')) return;
     setBusy(true);
@@ -866,12 +1135,42 @@ function PlanDetailModal({ planId, canEdit, canApprove, onClose, onChanged }: {
                 <span className="text-[11px] font-medium rounded-full px-2 py-1 bg-gray-100 text-gray-600">
                   {needsDeclaration(plan) ? 'Not declared' : PLAN_TYPE_LABEL[plan.planType]}
                 </span>
-                {canEdit && plan.status === 'ACTIVE' && (
-                  <button onClick={cancelPlan} disabled={busy} className="ml-auto flex items-center gap-1 text-xs text-red-600 hover:underline disabled:opacity-50">
-                    <Ban className="w-3.5 h-3.5" /> Cancel plan
-                  </button>
+                {isRefundPending(plan) && (
+                  <span className="text-[11px] font-medium rounded-full px-2 py-1 bg-orange-100 text-orange-700">Refund pending</span>
                 )}
+                {isDeletionPending(plan) && (
+                  <span className="text-[11px] font-medium rounded-full px-2 py-1 bg-gray-200 text-gray-700">Deletion pending</span>
+                )}
+                <div className="ml-auto flex items-center gap-3">
+                  {canEdit && !isRefundPending(plan) && (plan.status === 'ACTIVE' || plan.status === 'COMPLETED') && (
+                    <button onClick={() => setShowRefundForm((v) => !v)} className="flex items-center gap-1 text-xs text-orange-600 hover:underline">
+                      Request Refund
+                    </button>
+                  )}
+                  {canEdit && plan.status === 'ACTIVE' && (
+                    <button onClick={cancelPlan} disabled={busy} className="flex items-center gap-1 text-xs text-red-600 hover:underline disabled:opacity-50">
+                      <Ban className="w-3.5 h-3.5" /> Cancel plan
+                    </button>
+                  )}
+                </div>
               </div>
+
+              {showRefundForm && (
+                <div className="border border-orange-200 bg-orange-50 rounded-xl p-4 space-y-2">
+                  <p className="text-sm font-semibold text-orange-800">Request Refund</p>
+                  <p className="text-xs text-orange-700">Admin does the actual transfer outside the app and marks it completed from the Approvals tab.</p>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                    <input type="number" className="px-3 py-2 border rounded-lg text-sm bg-white" placeholder="Refund amount" value={refundForm.amount} onChange={(e) => setRefundForm({ ...refundForm, amount: e.target.value })} />
+                    <input className="px-3 py-2 border rounded-lg text-sm bg-white" placeholder="Reason" value={refundForm.reason} onChange={(e) => setRefundForm({ ...refundForm, reason: e.target.value })} />
+                  </div>
+                  <div className="flex justify-end gap-2">
+                    <button onClick={() => setShowRefundForm(false)} className="px-3 py-1.5 text-xs rounded-lg border">Cancel</button>
+                    <button onClick={submitRefundRequest} disabled={requestingRefund} className="px-3 py-1.5 text-xs rounded-lg bg-orange-600 text-white disabled:opacity-50">
+                      {requestingRefund ? 'Submitting…' : 'Submit Refund Request'}
+                    </button>
+                  </div>
+                </div>
+              )}
 
               {needsDeclaration(plan) && (
                 <div className="border-2 border-amber-300 bg-amber-50 rounded-xl p-4 space-y-3">
