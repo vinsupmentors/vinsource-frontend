@@ -60,6 +60,21 @@ interface RequestItem extends FeePlan {
   refundRequestedBy?: EmployeeLite | null;
   deletionRequestedBy?: EmployeeLite | null;
 }
+interface ApprovalHistoryItem extends ApprovalItem {
+  approvedAt?: string | null;
+  approvedBy?: EmployeeLite | null;
+}
+interface RefundHistoryItem extends RequestItem {
+  refundCompletedBy?: EmployeeLite | null;
+}
+// Snapshot of a deleted plan — the plan row itself is gone, this is all
+// that's left, so it deliberately doesn't share a shape with FeePlan.
+interface DeletionLogItem {
+  id: string; leadName: string; leadPhone: string; courseName: string; totalFee: number;
+  planType: string; status: string; totalPaid: number; deletionReason?: string | null;
+  requestedAt: string; requestedBy?: EmployeeLite | null;
+  approvedAt: string; approvedBy?: EmployeeLite | null;
+}
 
 const PLAN_TYPE_LABEL: Record<FeePlanType, string> = { FULL: 'Full Payment', PART: 'Part Payment', EMI: 'EMI' };
 const PLAN_STATUS_COLOR: Record<FeePlanStatus, string> = {
@@ -118,15 +133,6 @@ export default function FinanceSalesPage() {
 
   const [tab, setTab] = useState<'ledger' | 'plans' | 'approvals'>('plans');
 
-  const [approvals, setApprovals] = useState<ApprovalItem[]>([]);
-  const [approvalsLoading, setApprovalsLoading] = useState(true);
-  const [approvingId, setApprovingId] = useState<string | null>(null);
-
-  const [refundRequests, setRefundRequests] = useState<RequestItem[]>([]);
-  const [deletionRequests, setDeletionRequests] = useState<RequestItem[]>([]);
-  const [requestsLoading, setRequestsLoading] = useState(true);
-  const [busyRequestId, setBusyRequestId] = useState<string | null>(null);
-
   const [collections, setCollections] = useState<Collection[]>([]);
   const [stats, setStats] = useState<Stats | null>(null);
   const [employees, setEmployees] = useState<EmployeeLite[]>([]);
@@ -180,104 +186,14 @@ export default function FinanceSalesPage() {
     }
   }, [planSearch, planStatusFilter]);
 
-  const fetchApprovals = useCallback(async () => {
-    setApprovalsLoading(true);
-    setError('');
+  const deleteCollection = async (id: string) => {
+    if (!window.confirm('Delete this collections ledger entry? This cannot be undone.')) return;
     try {
-      const res = await api.get('/api/finance-sales/approvals');
-      setApprovals(res.data.data);
+      await api.delete(`/api/finance-sales/${id}`);
+      fetchAll();
     } catch (err: unknown) {
       const e = err as { response?: { data?: { message?: string } } };
-      setError(e.response?.data?.message || 'Failed to load the approval queue');
-    } finally {
-      setApprovalsLoading(false);
-    }
-  }, []);
-
-  const approveFromQueue = async (id: string) => {
-    setApprovingId(id);
-    try {
-      await api.post(`/api/finance-sales/installments/${id}/approve`);
-      await fetchApprovals();
-    } catch (err: unknown) {
-      const e = err as { response?: { data?: { message?: string } } };
-      setError(e.response?.data?.message || 'Failed to approve the payment');
-    } finally {
-      setApprovingId(null);
-    }
-  };
-
-  const fetchRequests = useCallback(async () => {
-    setRequestsLoading(true);
-    setError('');
-    try {
-      const [refundRes, deleteRes] = await Promise.all([
-        api.get('/api/finance-sales/refund-requests'),
-        api.get('/api/finance-sales/deletion-requests'),
-      ]);
-      setRefundRequests(refundRes.data.data);
-      setDeletionRequests(deleteRes.data.data);
-    } catch (err: unknown) {
-      const e = err as { response?: { data?: { message?: string } } };
-      setError(e.response?.data?.message || 'Failed to load refund/deletion requests');
-    } finally {
-      setRequestsLoading(false);
-    }
-  }, []);
-
-  const completeRefund = async (id: string) => {
-    setBusyRequestId(id);
-    try {
-      await api.post(`/api/finance-sales/plans/${id}/refund/complete`);
-      await fetchRequests();
-      fetchPlans();
-    } catch (err: unknown) {
-      const e = err as { response?: { data?: { message?: string } } };
-      setError(e.response?.data?.message || 'Failed to complete the refund');
-    } finally {
-      setBusyRequestId(null);
-    }
-  };
-
-  const rejectRefund = async (id: string) => {
-    setBusyRequestId(id);
-    try {
-      await api.post(`/api/finance-sales/plans/${id}/refund/reject`);
-      await fetchRequests();
-    } catch (err: unknown) {
-      const e = err as { response?: { data?: { message?: string } } };
-      setError(e.response?.data?.message || 'Failed to reject the refund request');
-    } finally {
-      setBusyRequestId(null);
-    }
-  };
-
-  const approveDelete = async (id: string) => {
-    if (!window.confirm('Permanently delete this fee declaration and its installments? The collections ledger keeps its history either way. This cannot be undone.')) return;
-    setBusyRequestId(id);
-    try {
-      await api.post(`/api/finance-sales/plans/${id}/delete-request/approve`);
-      await fetchRequests();
-      fetchPlans();
-    } catch (err: unknown) {
-      const e = err as { response?: { data?: { message?: string } } };
-      setError(e.response?.data?.message || 'Failed to delete the plan');
-    } finally {
-      setBusyRequestId(null);
-    }
-  };
-
-  const rejectDelete = async (id: string) => {
-    setBusyRequestId(id);
-    try {
-      await api.post(`/api/finance-sales/plans/${id}/delete-request/reject`);
-      await fetchRequests();
-      fetchPlans();
-    } catch (err: unknown) {
-      const e = err as { response?: { data?: { message?: string } } };
-      setError(e.response?.data?.message || 'Failed to reject the deletion request');
-    } finally {
-      setBusyRequestId(null);
+      setError(e.response?.data?.message || 'Failed to delete the entry');
     }
   };
 
@@ -294,9 +210,6 @@ export default function FinanceSalesPage() {
 
   useEffect(() => { if (level && tab === 'ledger') fetchAll(); }, [level, tab, fetchAll]);
   useEffect(() => { if (level && tab === 'plans') fetchPlans(); }, [level, tab, fetchPlans]);
-  useEffect(() => {
-    if (level && tab === 'approvals' && canApprove) { fetchApprovals(); fetchRequests(); }
-  }, [level, tab, canApprove, fetchApprovals, fetchRequests]);
 
   useEffect(() => {
     if (!level) return;
@@ -348,16 +261,7 @@ export default function FinanceSalesPage() {
         {([
           { id: 'plans' as const, label: 'Fee Declarations' },
           { id: 'ledger' as const, label: 'Collections Ledger' },
-          ...(canApprove
-            ? [{
-                id: 'approvals' as const,
-                label: `Approvals${
-                  approvals.length + refundRequests.length + deletionRequests.length
-                    ? ` (${approvals.length + refundRequests.length + deletionRequests.length})`
-                    : ''
-                }`,
-              }]
-            : []),
+          ...(canApprove ? [{ id: 'approvals' as const, label: 'Approvals' }] : []),
         ]).map((t) => (
           <button
             key={t.id}
@@ -372,162 +276,7 @@ export default function FinanceSalesPage() {
       </div>
 
       {tab === 'approvals' ? (
-        <div className="space-y-6">
-          <div>
-            <p className="text-sm font-semibold mb-2">Payments Awaiting Approval</p>
-            <div className="bg-card border rounded-xl overflow-hidden">
-              <table className="w-full text-sm">
-                <thead className="bg-muted/50 text-left text-xs uppercase text-muted-foreground">
-                  <tr>
-                    <th className="px-4 py-3">Student</th>
-                    <th className="px-4 py-3">Course</th>
-                    <th className="px-4 py-3">Amount</th>
-                    <th className="px-4 py-3">Mode</th>
-                    <th className="px-4 py-3">Collected By</th>
-                    <th className="px-4 py-3">Date</th>
-                    <th className="px-4 py-3">Action</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y">
-                  {approvalsLoading ? (
-                    <tr><td colSpan={7} className="px-4 py-8 text-center text-muted-foreground">Loading...</td></tr>
-                  ) : approvals.length === 0 ? (
-                    <tr><td colSpan={7} className="px-4 py-8 text-center text-muted-foreground">Nothing awaiting approval</td></tr>
-                  ) : approvals.map((a) => (
-                    <tr key={a.id} className="hover:bg-muted/30">
-                      <td className="px-4 py-3 font-medium">
-                        {a.plan.lead.name}
-                        <p className="text-xs text-muted-foreground font-normal">{a.plan.lead.phone}</p>
-                      </td>
-                      <td className="px-4 py-3 text-muted-foreground">{a.plan.courseName}</td>
-                      <td className="px-4 py-3 font-semibold">{fmt(a.amount)}</td>
-                      <td className="px-4 py-3">
-                        <span className="text-xs font-medium px-2 py-1 rounded-full bg-purple-100 text-purple-700">{(a.mode || 'UPI').replace('_', ' ')}</span>
-                      </td>
-                      <td className="px-4 py-3">{a.receivedBy ? `${a.receivedBy.firstName} ${a.receivedBy.lastName}` : '—'}</td>
-                      <td className="px-4 py-3 text-muted-foreground">{a.paidAt ? new Date(a.paidAt).toLocaleDateString() : '—'}</td>
-                      <td className="px-4 py-3">
-                        <button
-                          onClick={() => approveFromQueue(a.id)}
-                          disabled={approvingId === a.id}
-                          className="flex items-center gap-1 text-xs font-medium text-purple-700 hover:underline disabled:opacity-50"
-                        >
-                          <CheckCircle2 className="w-3.5 h-3.5" /> {approvingId === a.id ? 'Approving…' : 'Approve'}
-                        </button>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </div>
-
-          <div>
-            <p className="text-sm font-semibold mb-2">Refund Requests</p>
-            <div className="bg-card border rounded-xl overflow-hidden">
-              <table className="w-full text-sm">
-                <thead className="bg-muted/50 text-left text-xs uppercase text-muted-foreground">
-                  <tr>
-                    <th className="px-4 py-3">Student</th>
-                    <th className="px-4 py-3">Course</th>
-                    <th className="px-4 py-3">Refund Amount</th>
-                    <th className="px-4 py-3">Reason</th>
-                    <th className="px-4 py-3">Requested By</th>
-                    <th className="px-4 py-3">Action</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y">
-                  {requestsLoading ? (
-                    <tr><td colSpan={6} className="px-4 py-8 text-center text-muted-foreground">Loading...</td></tr>
-                  ) : refundRequests.length === 0 ? (
-                    <tr><td colSpan={6} className="px-4 py-8 text-center text-muted-foreground">No refund requests</td></tr>
-                  ) : refundRequests.map((r) => (
-                    <tr key={r.id} className="hover:bg-muted/30">
-                      <td className="px-4 py-3 font-medium">
-                        {r.lead.name}
-                        <p className="text-xs text-muted-foreground font-normal">{r.lead.phone}</p>
-                      </td>
-                      <td className="px-4 py-3 text-muted-foreground">{r.courseName}</td>
-                      <td className="px-4 py-3 font-semibold">{r.refundAmount != null ? fmt(r.refundAmount) : '—'}</td>
-                      <td className="px-4 py-3 text-muted-foreground max-w-[220px] truncate" title={r.refundReason || ''}>{r.refundReason || '—'}</td>
-                      <td className="px-4 py-3">{r.refundRequestedBy ? `${r.refundRequestedBy.firstName} ${r.refundRequestedBy.lastName}` : '—'}</td>
-                      <td className="px-4 py-3">
-                        <div className="flex items-center gap-3">
-                          <button
-                            onClick={() => completeRefund(r.id)}
-                            disabled={busyRequestId === r.id}
-                            className="flex items-center gap-1 text-xs font-medium text-green-700 hover:underline disabled:opacity-50"
-                          >
-                            <CheckCircle2 className="w-3.5 h-3.5" /> {busyRequestId === r.id ? 'Saving…' : 'Mark Transferred'}
-                          </button>
-                          <button
-                            onClick={() => rejectRefund(r.id)}
-                            disabled={busyRequestId === r.id}
-                            className="text-xs text-muted-foreground hover:underline disabled:opacity-50"
-                          >
-                            Reject
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </div>
-
-          <div>
-            <p className="text-sm font-semibold mb-2">Deletion Requests</p>
-            <div className="bg-card border rounded-xl overflow-hidden">
-              <table className="w-full text-sm">
-                <thead className="bg-muted/50 text-left text-xs uppercase text-muted-foreground">
-                  <tr>
-                    <th className="px-4 py-3">Student</th>
-                    <th className="px-4 py-3">Course</th>
-                    <th className="px-4 py-3">Reason</th>
-                    <th className="px-4 py-3">Requested By</th>
-                    <th className="px-4 py-3">Action</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y">
-                  {requestsLoading ? (
-                    <tr><td colSpan={5} className="px-4 py-8 text-center text-muted-foreground">Loading...</td></tr>
-                  ) : deletionRequests.length === 0 ? (
-                    <tr><td colSpan={5} className="px-4 py-8 text-center text-muted-foreground">No deletion requests</td></tr>
-                  ) : deletionRequests.map((r) => (
-                    <tr key={r.id} className="hover:bg-muted/30">
-                      <td className="px-4 py-3 font-medium">
-                        {r.lead.name}
-                        <p className="text-xs text-muted-foreground font-normal">{r.lead.phone}</p>
-                      </td>
-                      <td className="px-4 py-3 text-muted-foreground">{r.courseName}</td>
-                      <td className="px-4 py-3 text-muted-foreground max-w-[220px] truncate" title={r.deletionReason || ''}>{r.deletionReason || '—'}</td>
-                      <td className="px-4 py-3">{r.deletionRequestedBy ? `${r.deletionRequestedBy.firstName} ${r.deletionRequestedBy.lastName}` : '—'}</td>
-                      <td className="px-4 py-3">
-                        <div className="flex items-center gap-3">
-                          <button
-                            onClick={() => approveDelete(r.id)}
-                            disabled={busyRequestId === r.id}
-                            className="flex items-center gap-1 text-xs font-medium text-red-600 hover:underline disabled:opacity-50"
-                          >
-                            <Trash2 className="w-3.5 h-3.5" /> {busyRequestId === r.id ? 'Deleting…' : 'Approve Delete'}
-                          </button>
-                          <button
-                            onClick={() => rejectDelete(r.id)}
-                            disabled={busyRequestId === r.id}
-                            className="text-xs text-muted-foreground hover:underline disabled:opacity-50"
-                          >
-                            Reject
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        </div>
+        <ApprovalsPanel onChanged={fetchPlans} />
       ) : tab === 'ledger' ? (
         <>
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
@@ -556,13 +305,14 @@ export default function FinanceSalesPage() {
                   <th className="px-4 py-3">Receipt No.</th>
                   <th className="px-4 py-3">Received By</th>
                   <th className="px-4 py-3">Date</th>
+                  {canApprove && <th className="px-4 py-3"></th>}
                 </tr>
               </thead>
               <tbody className="divide-y">
                 {loading ? (
-                  <tr><td colSpan={6} className="px-4 py-8 text-center text-muted-foreground">Loading...</td></tr>
+                  <tr><td colSpan={7} className="px-4 py-8 text-center text-muted-foreground">Loading...</td></tr>
                 ) : collections.length === 0 ? (
-                  <tr><td colSpan={6} className="px-4 py-8 text-center text-muted-foreground">No collections recorded</td></tr>
+                  <tr><td colSpan={7} className="px-4 py-8 text-center text-muted-foreground">No collections recorded</td></tr>
                 ) : collections.map((c) => (
                   <tr key={c.id} className="hover:bg-muted/30">
                     <td className="px-4 py-3 font-medium">
@@ -576,6 +326,17 @@ export default function FinanceSalesPage() {
                     <td className="px-4 py-3 text-muted-foreground">{c.receiptNo || '—'}</td>
                     <td className="px-4 py-3">{c.receivedBy ? `${c.receivedBy.firstName} ${c.receivedBy.lastName}` : '—'}</td>
                     <td className="px-4 py-3 text-muted-foreground">{new Date(c.collectedAt).toLocaleDateString()}</td>
+                    {canApprove && (
+                      <td className="px-4 py-3">
+                        <button
+                          onClick={() => deleteCollection(c.id)}
+                          title="Delete this ledger entry"
+                          className="text-muted-foreground hover:text-red-600"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      </td>
+                    )}
                   </tr>
                 ))}
               </tbody>
@@ -715,7 +476,7 @@ export default function FinanceSalesPage() {
           canEdit={canEdit}
           canApprove={canApprove}
           onClose={() => setOpenPlanId(null)}
-          onChanged={() => { fetchPlans(); if (canApprove) fetchApprovals(); }}
+          onChanged={fetchPlans}
         />
       )}
     </div>
@@ -1294,6 +1055,370 @@ function PlanDetailModal({ planId, canEdit, canApprove, onClose, onChanged }: {
           )}
         </div>
       </div>
+    </div>
+  );
+}
+
+// ── Approvals: three sub-tabs (Payments / Refunds / Deletions), each with
+// a Pending queue and a permanent History view. ───────────────────────────
+const APPROVAL_SUBTABS = [
+  { id: 'payments' as const, label: 'Payments' },
+  { id: 'refunds' as const, label: 'Refunds' },
+  { id: 'deletions' as const, label: 'Deletions' },
+];
+
+function ApprovalsPanel({ onChanged }: { onChanged: () => void }) {
+  const [subTab, setSubTab] = useState<'payments' | 'refunds' | 'deletions'>('payments');
+  const [view, setView] = useState<'pending' | 'history'>('pending');
+
+  const [approvals, setApprovals] = useState<ApprovalItem[]>([]);
+  const [approvalHistory, setApprovalHistory] = useState<ApprovalHistoryItem[]>([]);
+  const [refundRequests, setRefundRequests] = useState<RequestItem[]>([]);
+  const [refundHistory, setRefundHistory] = useState<RefundHistoryItem[]>([]);
+  const [deletionRequests, setDeletionRequests] = useState<RequestItem[]>([]);
+  const [deletionLog, setDeletionLog] = useState<DeletionLogItem[]>([]);
+
+  const [loading, setLoading] = useState(true);
+  const [busyId, setBusyId] = useState<string | null>(null);
+  const [error, setError] = useState('');
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    setError('');
+    try {
+      if (subTab === 'payments') {
+        const res = await api.get(view === 'pending' ? '/api/finance-sales/approvals' : '/api/finance-sales/approval-history');
+        if (view === 'pending') setApprovals(res.data.data); else setApprovalHistory(res.data.data);
+      } else if (subTab === 'refunds') {
+        const res = await api.get(view === 'pending' ? '/api/finance-sales/refund-requests' : '/api/finance-sales/refund-history');
+        if (view === 'pending') setRefundRequests(res.data.data); else setRefundHistory(res.data.data);
+      } else {
+        const res = await api.get(view === 'pending' ? '/api/finance-sales/deletion-requests' : '/api/finance-sales/deletion-log');
+        if (view === 'pending') setDeletionRequests(res.data.data); else setDeletionLog(res.data.data);
+      }
+    } catch (err: unknown) {
+      const e = err as { response?: { data?: { message?: string } } };
+      setError(e.response?.data?.message || 'Failed to load');
+    } finally {
+      setLoading(false);
+    }
+  }, [subTab, view]);
+
+  useEffect(() => { load(); }, [load]);
+
+  const switchSubTab = (t: typeof subTab) => { setSubTab(t); setView('pending'); };
+
+  const approvePayment = async (id: string) => {
+    setBusyId(id);
+    try {
+      await api.post(`/api/finance-sales/installments/${id}/approve`);
+      await load();
+      onChanged();
+    } catch (err: unknown) {
+      const e = err as { response?: { data?: { message?: string } } };
+      setError(e.response?.data?.message || 'Failed to approve the payment');
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  const completeRefund = async (id: string) => {
+    setBusyId(id);
+    try {
+      await api.post(`/api/finance-sales/plans/${id}/refund/complete`);
+      await load();
+      onChanged();
+    } catch (err: unknown) {
+      const e = err as { response?: { data?: { message?: string } } };
+      setError(e.response?.data?.message || 'Failed to complete the refund');
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  const rejectRefund = async (id: string) => {
+    setBusyId(id);
+    try {
+      await api.post(`/api/finance-sales/plans/${id}/refund/reject`);
+      await load();
+    } catch (err: unknown) {
+      const e = err as { response?: { data?: { message?: string } } };
+      setError(e.response?.data?.message || 'Failed to reject the refund request');
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  const approveDelete = async (id: string) => {
+    if (!window.confirm('Permanently delete this fee declaration and its installments? The collections ledger keeps its history either way. This cannot be undone.')) return;
+    setBusyId(id);
+    try {
+      await api.post(`/api/finance-sales/plans/${id}/delete-request/approve`);
+      await load();
+      onChanged();
+    } catch (err: unknown) {
+      const e = err as { response?: { data?: { message?: string } } };
+      setError(e.response?.data?.message || 'Failed to delete the plan');
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  const rejectDelete = async (id: string) => {
+    setBusyId(id);
+    try {
+      await api.post(`/api/finance-sales/plans/${id}/delete-request/reject`);
+      await load();
+    } catch (err: unknown) {
+      const e = err as { response?: { data?: { message?: string } } };
+      setError(e.response?.data?.message || 'Failed to reject the deletion request');
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center flex-wrap gap-3">
+        <div className="flex items-center gap-1">
+          {APPROVAL_SUBTABS.map((t) => (
+            <button
+              key={t.id}
+              onClick={() => switchSubTab(t.id)}
+              className={`px-3 py-1.5 text-sm rounded-lg border ${subTab === t.id ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-gray-700'}`}
+            >
+              {t.label}
+            </button>
+          ))}
+        </div>
+        <div className="ml-auto flex items-center gap-1 border rounded-lg p-0.5">
+          {(['pending', 'history'] as const).map((v) => (
+            <button
+              key={v}
+              onClick={() => setView(v)}
+              className={`px-3 py-1 text-xs rounded-md capitalize ${view === v ? 'bg-gray-900 text-white' : 'text-muted-foreground'}`}
+            >
+              {v}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {error && <div className="bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg px-4 py-3">{error}</div>}
+
+      {subTab === 'payments' && (
+        <div className="bg-card border rounded-xl overflow-hidden">
+          <table className="w-full text-sm">
+            <thead className="bg-muted/50 text-left text-xs uppercase text-muted-foreground">
+              <tr>
+                <th className="px-4 py-3">Student</th>
+                <th className="px-4 py-3">Course</th>
+                <th className="px-4 py-3">Amount</th>
+                <th className="px-4 py-3">Mode</th>
+                <th className="px-4 py-3">Collected By</th>
+                <th className="px-4 py-3">Date</th>
+                {view === 'pending' ? <th className="px-4 py-3">Action</th> : <th className="px-4 py-3">Approved By</th>}
+              </tr>
+            </thead>
+            <tbody className="divide-y">
+              {loading ? (
+                <tr><td colSpan={7} className="px-4 py-8 text-center text-muted-foreground">Loading...</td></tr>
+              ) : view === 'pending' ? (
+                approvals.length === 0 ? (
+                  <tr><td colSpan={7} className="px-4 py-8 text-center text-muted-foreground">Nothing awaiting approval</td></tr>
+                ) : approvals.map((a) => (
+                  <tr key={a.id} className="hover:bg-muted/30">
+                    <td className="px-4 py-3 font-medium">
+                      {a.plan.lead.name}
+                      <p className="text-xs text-muted-foreground font-normal">{a.plan.lead.phone}</p>
+                    </td>
+                    <td className="px-4 py-3 text-muted-foreground">{a.plan.courseName}</td>
+                    <td className="px-4 py-3 font-semibold">{fmt(a.amount)}</td>
+                    <td className="px-4 py-3">
+                      <span className="text-xs font-medium px-2 py-1 rounded-full bg-purple-100 text-purple-700">{(a.mode || 'UPI').replace('_', ' ')}</span>
+                    </td>
+                    <td className="px-4 py-3">{a.receivedBy ? `${a.receivedBy.firstName} ${a.receivedBy.lastName}` : '—'}</td>
+                    <td className="px-4 py-3 text-muted-foreground">{a.paidAt ? new Date(a.paidAt).toLocaleDateString() : '—'}</td>
+                    <td className="px-4 py-3">
+                      <button
+                        onClick={() => approvePayment(a.id)}
+                        disabled={busyId === a.id}
+                        className="flex items-center gap-1 text-xs font-medium text-purple-700 hover:underline disabled:opacity-50"
+                      >
+                        <CheckCircle2 className="w-3.5 h-3.5" /> {busyId === a.id ? 'Approving…' : 'Approve'}
+                      </button>
+                    </td>
+                  </tr>
+                ))
+              ) : approvalHistory.length === 0 ? (
+                <tr><td colSpan={7} className="px-4 py-8 text-center text-muted-foreground">No approvals yet</td></tr>
+              ) : approvalHistory.map((a) => (
+                <tr key={a.id} className="hover:bg-muted/30">
+                  <td className="px-4 py-3 font-medium">
+                    {a.plan.lead.name}
+                    <p className="text-xs text-muted-foreground font-normal">{a.plan.lead.phone}</p>
+                  </td>
+                  <td className="px-4 py-3 text-muted-foreground">{a.plan.courseName}</td>
+                  <td className="px-4 py-3 font-semibold">{fmt(a.amount)}</td>
+                  <td className="px-4 py-3">
+                    <span className="text-xs font-medium px-2 py-1 rounded-full bg-green-100 text-green-700">{(a.mode || 'UPI').replace('_', ' ')}</span>
+                  </td>
+                  <td className="px-4 py-3">{a.receivedBy ? `${a.receivedBy.firstName} ${a.receivedBy.lastName}` : '—'}</td>
+                  <td className="px-4 py-3 text-muted-foreground">{a.paidAt ? new Date(a.paidAt).toLocaleDateString() : '—'}</td>
+                  <td className="px-4 py-3 text-muted-foreground">
+                    {a.approvedBy ? `${a.approvedBy.firstName} ${a.approvedBy.lastName}` : '—'}
+                    {a.approvedAt && <span className="block text-[11px]">{new Date(a.approvedAt).toLocaleDateString()}</span>}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {subTab === 'refunds' && (
+        <div className="bg-card border rounded-xl overflow-hidden">
+          <table className="w-full text-sm">
+            <thead className="bg-muted/50 text-left text-xs uppercase text-muted-foreground">
+              <tr>
+                <th className="px-4 py-3">Student</th>
+                <th className="px-4 py-3">Course</th>
+                <th className="px-4 py-3">Refund Amount</th>
+                <th className="px-4 py-3">Reason</th>
+                <th className="px-4 py-3">Requested By</th>
+                {view === 'pending' ? <th className="px-4 py-3">Action</th> : <th className="px-4 py-3">Transferred By</th>}
+              </tr>
+            </thead>
+            <tbody className="divide-y">
+              {loading ? (
+                <tr><td colSpan={6} className="px-4 py-8 text-center text-muted-foreground">Loading...</td></tr>
+              ) : view === 'pending' ? (
+                refundRequests.length === 0 ? (
+                  <tr><td colSpan={6} className="px-4 py-8 text-center text-muted-foreground">No refund requests</td></tr>
+                ) : refundRequests.map((r) => (
+                  <tr key={r.id} className="hover:bg-muted/30">
+                    <td className="px-4 py-3 font-medium">
+                      {r.lead.name}
+                      <p className="text-xs text-muted-foreground font-normal">{r.lead.phone}</p>
+                    </td>
+                    <td className="px-4 py-3 text-muted-foreground">{r.courseName}</td>
+                    <td className="px-4 py-3 font-semibold">{r.refundAmount != null ? fmt(r.refundAmount) : '—'}</td>
+                    <td className="px-4 py-3 text-muted-foreground max-w-[220px] truncate" title={r.refundReason || ''}>{r.refundReason || '—'}</td>
+                    <td className="px-4 py-3">{r.refundRequestedBy ? `${r.refundRequestedBy.firstName} ${r.refundRequestedBy.lastName}` : '—'}</td>
+                    <td className="px-4 py-3">
+                      <div className="flex items-center gap-3">
+                        <button
+                          onClick={() => completeRefund(r.id)}
+                          disabled={busyId === r.id}
+                          className="flex items-center gap-1 text-xs font-medium text-green-700 hover:underline disabled:opacity-50"
+                        >
+                          <CheckCircle2 className="w-3.5 h-3.5" /> {busyId === r.id ? 'Saving…' : 'Mark Transferred'}
+                        </button>
+                        <button
+                          onClick={() => rejectRefund(r.id)}
+                          disabled={busyId === r.id}
+                          className="text-xs text-muted-foreground hover:underline disabled:opacity-50"
+                        >
+                          Reject
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                ))
+              ) : refundHistory.length === 0 ? (
+                <tr><td colSpan={6} className="px-4 py-8 text-center text-muted-foreground">No refunds yet</td></tr>
+              ) : refundHistory.map((r) => (
+                <tr key={r.id} className="hover:bg-muted/30">
+                  <td className="px-4 py-3 font-medium">
+                    {r.lead.name}
+                    <p className="text-xs text-muted-foreground font-normal">{r.lead.phone}</p>
+                  </td>
+                  <td className="px-4 py-3 text-muted-foreground">{r.courseName}</td>
+                  <td className="px-4 py-3 font-semibold">{r.refundAmount != null ? fmt(r.refundAmount) : '—'}</td>
+                  <td className="px-4 py-3 text-muted-foreground max-w-[220px] truncate" title={r.refundReason || ''}>{r.refundReason || '—'}</td>
+                  <td className="px-4 py-3">{r.refundRequestedBy ? `${r.refundRequestedBy.firstName} ${r.refundRequestedBy.lastName}` : '—'}</td>
+                  <td className="px-4 py-3 text-muted-foreground">
+                    {r.refundCompletedBy ? `${r.refundCompletedBy.firstName} ${r.refundCompletedBy.lastName}` : '—'}
+                    {r.refundCompletedAt && <span className="block text-[11px]">{new Date(r.refundCompletedAt).toLocaleDateString()}</span>}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {subTab === 'deletions' && (
+        <div className="bg-card border rounded-xl overflow-hidden">
+          <table className="w-full text-sm">
+            <thead className="bg-muted/50 text-left text-xs uppercase text-muted-foreground">
+              <tr>
+                <th className="px-4 py-3">Student</th>
+                <th className="px-4 py-3">Course</th>
+                <th className="px-4 py-3">Reason</th>
+                <th className="px-4 py-3">Requested By</th>
+                {view === 'pending' ? <th className="px-4 py-3">Action</th> : <th className="px-4 py-3">Deleted By</th>}
+              </tr>
+            </thead>
+            <tbody className="divide-y">
+              {loading ? (
+                <tr><td colSpan={5} className="px-4 py-8 text-center text-muted-foreground">Loading...</td></tr>
+              ) : view === 'pending' ? (
+                deletionRequests.length === 0 ? (
+                  <tr><td colSpan={5} className="px-4 py-8 text-center text-muted-foreground">No deletion requests</td></tr>
+                ) : deletionRequests.map((r) => (
+                  <tr key={r.id} className="hover:bg-muted/30">
+                    <td className="px-4 py-3 font-medium">
+                      {r.lead.name}
+                      <p className="text-xs text-muted-foreground font-normal">{r.lead.phone}</p>
+                    </td>
+                    <td className="px-4 py-3 text-muted-foreground">{r.courseName}</td>
+                    <td className="px-4 py-3 text-muted-foreground max-w-[220px] truncate" title={r.deletionReason || ''}>{r.deletionReason || '—'}</td>
+                    <td className="px-4 py-3">{r.deletionRequestedBy ? `${r.deletionRequestedBy.firstName} ${r.deletionRequestedBy.lastName}` : '—'}</td>
+                    <td className="px-4 py-3">
+                      <div className="flex items-center gap-3">
+                        <button
+                          onClick={() => approveDelete(r.id)}
+                          disabled={busyId === r.id}
+                          className="flex items-center gap-1 text-xs font-medium text-red-600 hover:underline disabled:opacity-50"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" /> {busyId === r.id ? 'Deleting…' : 'Approve Delete'}
+                        </button>
+                        <button
+                          onClick={() => rejectDelete(r.id)}
+                          disabled={busyId === r.id}
+                          className="text-xs text-muted-foreground hover:underline disabled:opacity-50"
+                        >
+                          Reject
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                ))
+              ) : deletionLog.length === 0 ? (
+                <tr><td colSpan={5} className="px-4 py-8 text-center text-muted-foreground">No deletions yet</td></tr>
+              ) : deletionLog.map((r) => (
+                <tr key={r.id} className="hover:bg-muted/30">
+                  <td className="px-4 py-3 font-medium">
+                    {r.leadName}
+                    <p className="text-xs text-muted-foreground font-normal">{r.leadPhone}</p>
+                  </td>
+                  <td className="px-4 py-3 text-muted-foreground">
+                    {r.courseName}
+                    <p className="text-[11px]">{fmt(r.totalPaid)} paid of {fmt(r.totalFee)}</p>
+                  </td>
+                  <td className="px-4 py-3 text-muted-foreground max-w-[220px] truncate" title={r.deletionReason || ''}>{r.deletionReason || '—'}</td>
+                  <td className="px-4 py-3">{r.requestedBy ? `${r.requestedBy.firstName} ${r.requestedBy.lastName}` : '—'}</td>
+                  <td className="px-4 py-3 text-muted-foreground">
+                    {r.approvedBy ? `${r.approvedBy.firstName} ${r.approvedBy.lastName}` : '—'}
+                    <span className="block text-[11px]">{new Date(r.approvedAt).toLocaleDateString()}</span>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
     </div>
   );
 }
