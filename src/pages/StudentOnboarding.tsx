@@ -565,7 +565,9 @@ interface ApprovalStudent {
   profileCompletedAt: string | null;
   documentsCompletedAt: string | null;
   requiredCount: number;
+  batches: string[];
 }
+interface BatchOption { id: string; code: string; }
 
 interface ApprovalItem {
   kind: 'template' | 'fee_declaration';
@@ -601,18 +603,29 @@ interface ApprovalStudentDetail {
 
 function ApprovalTab({ canEdit, setError }: { canEdit: boolean; setError: (s: string) => void }) {
   const [search, setSearch] = useState('');
+  const [batchId, setBatchId] = useState('');
+  const [batchOptions, setBatchOptions] = useState<BatchOption[]>([]);
   const [students, setStudents] = useState<ApprovalStudent[]>([]);
   const [loading, setLoading] = useState(true);
   const [openId, setOpenId] = useState<string | null>(null);
 
+  useEffect(() => {
+    api.get('/api/student-onboarding/batches')
+      .then((res) => setBatchOptions((res.data.data.batches || []).map((b: { id: string; code: string }) => ({ id: b.id, code: b.code }))))
+      .catch(() => setBatchOptions([]));
+  }, []);
+
   const load = useCallback(() => {
     setLoading(true);
-    api.get('/api/student-onboarding/approvals', { params: search.trim() ? { search: search.trim() } : {} })
+    const params: Record<string, string> = {};
+    if (search.trim()) params.search = search.trim();
+    if (batchId) params.batchId = batchId;
+    api.get('/api/student-onboarding/approvals', { params })
       .then((res) => setStudents(res.data.data))
       .catch((err) => setError(errMsg(err, 'Failed to load approvals')))
       .finally(() => setLoading(false));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [search]);
+  }, [search, batchId]);
 
   useEffect(() => {
     const t = setTimeout(load, 300);
@@ -624,14 +637,25 @@ function ApprovalTab({ canEdit, setError }: { canEdit: boolean; setError: (s: st
       <p className="text-sm text-muted-foreground">
         Students who've completed their profile and signed every required document — review and approve before their dashboard unlocks.
       </p>
-      <div className="relative max-w-sm">
-        <Search className="w-4 h-4 text-muted-foreground absolute left-3 top-1/2 -translate-y-1/2" />
-        <input
-          className="w-full pl-9 pr-3 py-2 border rounded-lg text-sm"
-          placeholder="Search by name or phone…"
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-        />
+      <div className="flex flex-wrap items-center gap-3">
+        <div className="relative max-w-sm flex-1 min-w-[220px]">
+          <Search className="w-4 h-4 text-muted-foreground absolute left-3 top-1/2 -translate-y-1/2" />
+          <input
+            className="w-full pl-9 pr-3 py-2 border rounded-lg text-sm"
+            placeholder="Search by name or phone…"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+          />
+        </div>
+        {batchOptions.length > 0 && (
+          <select className="px-3 py-2 border rounded-lg text-sm" value={batchId} onChange={(e) => setBatchId(e.target.value)}>
+            <option value="">All batches</option>
+            {batchOptions.map((b) => <option key={b.id} value={b.id}>{b.code}</option>)}
+          </select>
+        )}
+        {batchId && (
+          <button onClick={() => setBatchId('')} className="text-xs text-blue-600 hover:underline">Clear</button>
+        )}
       </div>
 
       {loading ? (
@@ -650,7 +674,7 @@ function ApprovalTab({ canEdit, setError }: { canEdit: boolean; setError: (s: st
                 )}
                 <div>
                   <p className="font-medium text-sm">{s.firstName} {s.lastName} <span className="text-muted-foreground font-normal">({s.studentCode})</span></p>
-                  <p className="text-xs text-muted-foreground">{s.phone} · {s.track} track</p>
+                  <p className="text-xs text-muted-foreground">{s.phone} · {s.track} track{s.batches.length > 0 ? ` · ${s.batches.join(', ')}` : ''}</p>
                 </div>
               </div>
               <span className="text-xs px-2 py-1 rounded-full bg-amber-100 text-amber-700 font-medium shrink-0">Awaiting approval</span>
