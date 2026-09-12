@@ -5,7 +5,7 @@ import { RootState, AppDispatch } from '@/store';
 import { fetchNotifications, markAllRead } from '@/store/slices/notificationSlice';
 import { logout } from '@/store/slices/authSlice';
 import { useAuth } from '@/hooks/useAuth';
-import { Bell, Sun, Moon, Search, ChevronDown, CheckCheck, Settings, User, Lock, LogOut, Menu, Camera, Loader2 } from 'lucide-react';
+import { Bell, Search, ChevronDown, CheckCheck, Settings, User, Lock, LogOut, Menu, Camera, Loader2 } from 'lucide-react';
 import api from '@/lib/api';
 import { cn, timeAgo, getInitials } from '@/lib/utils';
 import ChangePasswordModal from '@/components/ChangePasswordModal';
@@ -17,10 +17,6 @@ export function Header() {
   const { unreadCount, items } = useSelector((s: RootState) => s.notifications);
   const { toggle: toggleSidebar } = useSidebarContext();
 
-  // Initial value just mirrors whatever the inline script in index.html already
-  // applied to <html> before this component mounted (it reads the same
-  // localStorage key), so there's no mismatch/flash between the two.
-  const [dark, setDark] = useState(() => document.documentElement.classList.contains('dark'));
   const [showNotif, setShowNotif] = useState(false);
   const [showUser, setShowUser] = useState(false);
   const [showChangePw, setShowChangePw] = useState(false);
@@ -52,13 +48,6 @@ export function Header() {
   };
 
   useEffect(() => { dispatch(fetchNotifications()); }, [dispatch]);
-
-  useEffect(() => {
-    document.documentElement.classList.toggle('dark', dark);
-    // Persist so the choice survives a refresh/new tab — previously this was
-    // never saved anywhere, so every reload lost it and fell back to light.
-    localStorage.setItem('theme', dark ? 'dark' : 'light');
-  }, [dark]);
 
   // Close dropdowns on outside click
   useEffect(() => {
@@ -101,15 +90,6 @@ export function Header() {
       </div>
 
       <div className="flex items-center gap-1 ml-auto">
-        {/* Dark mode */}
-        <button
-          onClick={() => setDark((d) => !d)}
-          className="w-9 h-9 rounded-lg hover:bg-muted flex items-center justify-center transition-colors"
-          title="Toggle dark mode"
-        >
-          {dark ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
-        </button>
-
         {/* Notifications */}
         <div className="relative" ref={notifRef}>
           <button
