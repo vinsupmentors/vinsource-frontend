@@ -13,7 +13,7 @@ import {
   Wallet, GraduationCap, Target, Megaphone, KeyRound,
   BookOpen, PiggyBank, Store, Repeat, PieChart, X, Receipt, CheckCircle2,
   Presentation, CalendarClock, Handshake, ListChecks, Mic2, Network, FileBadge, Percent, Activity, RefreshCw,
-  FileSignature, Award, ClipboardCheck,
+  FileSignature, Award, ClipboardCheck, Ticket, Settings2, Tags,
 } from 'lucide-react';
 
 const LEVEL_RANK: Record<AccessLevel, number> = { NONE: 0, VIEW: 1, EDIT: 2, ADMIN: 3 };
@@ -95,6 +95,7 @@ const MODULE_DEFAULT_TABS: Record<string, string> = {
   '/placements': 'drives',
   '/sales': 'leads',
   '/student-onboarding': 'add',
+  '/admission': 'new',
 };
 
 // Business modules — visibility driven entirely by effective module access
@@ -103,6 +104,20 @@ const MODULE_DEFAULT_TABS: Record<string, string> = {
 // separate expandable groups so users with only one of the two accesses see
 // exactly the right section.
 const moduleNavItems: ModuleNavItem[] = [
+  {
+    label: 'Admission',
+    to: '/admission',
+    icon: Ticket,
+    module: 'ADMISSION',
+    children: [
+      { label: 'New Admission',  to: '/admission?tab=new',     icon: UserPlus,   module: 'ADMISSION' },
+      { label: 'Admissions',     to: '/admission?tab=list',    icon: ClipboardList, module: 'ADMISSION' },
+      { label: 'Upcoming Batches', to: '/admission?tab=batches', icon: CalendarClock, module: 'ADMISSION' },
+      { label: 'Coupons',        to: '/admission?tab=coupons', icon: Tags,       module: 'ADMISSION' },
+      { label: 'Course Fees',    to: '/admission?tab=fees',    icon: Wallet,     module: 'ADMISSION', minLevel: 'ADMIN' },
+      { label: 'Config',         to: '/admission?tab=config',  icon: Settings2,  module: 'ADMISSION', minLevel: 'ADMIN' },
+    ],
+  },
   {
     label: 'Sales',
     to: '/sales',
@@ -208,7 +223,7 @@ const moduleNavItems: ModuleNavItem[] = [
 // Explicit top-of-sidebar ordering requested by the user.
 // Anything not listed here falls through to the "More" section, and
 // Resignation is pinned to sit right above Master Control / Sign out.
-const PINNED_TOP = ['Dashboard', 'Attendance', 'Finance (Admin)', 'Digital Marketing', 'Production', 'Placements', 'Student Onboarding'];
+const PINNED_TOP = ['Dashboard', 'Admission', 'Attendance', 'Finance (Admin)', 'Digital Marketing', 'Production', 'Placements', 'Student Onboarding'];
 const PINNED_SECOND = ['Employees', 'Onboarding', 'Assets', 'Documents'];
 const PINNED_LAST = ['Resignation'];
 

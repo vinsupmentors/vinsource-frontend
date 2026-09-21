@@ -18,6 +18,7 @@ const MODULES: { key: ModuleName; label: string }[] = [
   { key: 'DIGITAL_MARKETING', label: 'Digital Marketing' },
   { key: 'CERTIFICATES', label: 'Certificate Generator' },
   { key: 'STUDENT_ONBOARDING', label: 'Student Onboarding' },
+  { key: 'ADMISSION', label: 'Admission' },
 ];
 
 const LEVELS: { key: AccessLevel; label: string }[] = [

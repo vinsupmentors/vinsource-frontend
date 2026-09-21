@@ -61,7 +61,8 @@ export type ModuleName =
   | 'PLACEMENTS'
   | 'DIGITAL_MARKETING'
   | 'CERTIFICATES'
-  | 'STUDENT_ONBOARDING';
+  | 'STUDENT_ONBOARDING'
+  | 'ADMISSION';
 
 export type AccessLevel = 'NONE' | 'VIEW' | 'EDIT' | 'ADMIN';
 

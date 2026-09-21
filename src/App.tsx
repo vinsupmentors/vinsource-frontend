@@ -37,6 +37,7 @@ import ProductionPage from './pages/Production';
 import SalesPage from './pages/Sales';
 import MyStudentsPage from './pages/MyStudents';
 import StudentOnboardingPage from './pages/StudentOnboarding';
+import AdmissionPage from './pages/Admission';
 import DigitalMarketingPage from './pages/DigitalMarketing';
 import CampaignDetailPage from './pages/CampaignDetail';
 import DigitalMarketingDayPage from './pages/DigitalMarketingDay';
@@ -200,6 +201,7 @@ export default function App() {
             <Route path="sales" element={<SalesPage />} />
             <Route path="my-students" element={<MyStudentsPage />} />
             <Route path="student-onboarding" element={<StudentOnboardingPage />} />
+            <Route path="admission" element={<AdmissionPage />} />
             <Route path="finance/sales" element={<FinanceSalesPage />} />
             <Route path="finance/admin" element={<FinanceAdminPage />} />
             <Route path="admin-ops" element={<AdminOpsPage />} />
