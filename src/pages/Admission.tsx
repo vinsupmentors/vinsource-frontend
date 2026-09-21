@@ -73,10 +73,26 @@ type DeliveryMode = 'ONLINE' | 'OFFLINE' | 'HYBRID';
 interface SeatBand { total: number | null; booked: number; available: number | null; status: 'OPEN' | 'LIMITED' | 'ALMOST_FULL' | 'FULL'; label: string }
 interface SeatInfo extends SeatBand { mode: DeliveryMode; online?: SeatBand; offline?: SeatBand }
 interface Schedule {
-  id: string; code: string | null; timing: string; dayPattern?: string; mode: DeliveryMode; startDate: string;
+  id: string; code: string | null; timing: string; startTime?: string | null; endTime?: string | null;
+  dayPattern?: string; mode: DeliveryMode; startDate: string;
   course: { id: string; name: string };
   batch: { id: string; code: string };
   seats: SeatInfo;
+}
+
+/** "09:30" -> "9:30 AM" */
+function formatTime(hhmm?: string | null) {
+  if (!hhmm) return '';
+  const [h, m] = hhmm.split(':').map(Number);
+  const period = h >= 12 ? 'PM' : 'AM';
+  const hour12 = h % 12 === 0 ? 12 : h % 12;
+  return `${hour12}:${String(m).padStart(2, '0')} ${period}`;
+}
+
+/** Exact slot when recorded ("9:30 AM – 11:30 AM"), falling back to the coarse bucket for schedules created before exact times existed. */
+function timingLabel(s: { timing: string; startTime?: string | null; endTime?: string | null }) {
+  if (s.startTime && s.endTime) return `${formatTime(s.startTime)} – ${formatTime(s.endTime)}`;
+  return s.timing.charAt(0) + s.timing.slice(1).toLowerCase();
 }
 interface BatchGroup { id: string; code: string; status: string; startDate: string }
 interface FeeBreakdown {
@@ -330,7 +346,7 @@ function NewAdmissionTab({ canEdit, setError }: { canEdit: boolean; setError: (s
                     }`}
                   >
                     <p className="font-medium text-sm text-foreground">{s.batch.code}{s.code ? ` / ${s.code}` : ''}</p>
-                    <p className="text-muted-foreground">{s.timing} · Starts {formatDate(s.startDate)}</p>
+                    <p className="text-muted-foreground">{timingLabel(s)} · Starts {formatDate(s.startDate)}</p>
                     <div className="mt-1.5"><SeatMap seats={s.seats} /></div>
                     <p className={`mt-1 font-medium ${disabled ? 'text-red-600' : s.seats.status === 'ALMOST_FULL' ? 'text-orange-600' : 'text-green-700'}`}>
                       {s.seats.label}
@@ -658,7 +674,7 @@ function BatchesTab({ canAdmin, setError }: { canAdmin: boolean; setError: (s: s
                 </div>
                 <span className={`text-xs font-medium px-2 py-0.5 rounded-full whitespace-nowrap ${BADGE_STYLES[s.seats.status]}`}>{MODE_LABELS[s.mode]}</span>
               </div>
-              <p className="text-xs text-muted-foreground">{s.timing} · Starts {formatDate(s.startDate)}</p>
+              <p className="text-xs text-muted-foreground">{timingLabel(s)} · Starts {formatDate(s.startDate)}</p>
 
               {s.mode === 'HYBRID' && s.seats.online && s.seats.offline ? (
                 <div className="space-y-2 pt-1">
@@ -699,7 +715,8 @@ function CreateBatchModal({ onClose, onSaved, setError }: { onClose: () => void;
   const [batchId, setBatchId] = useState('');
   const [newBatchCode, setNewBatchCode] = useState('');
   const [courseId, setCourseId] = useState('');
-  const [timing, setTiming] = useState<'MORNING' | 'AFTERNOON' | 'EVENING'>('MORNING');
+  const [startTime, setStartTime] = useState('');
+  const [endTime, setEndTime] = useState('');
   const [dayPattern, setDayPattern] = useState<'MON_SAT' | 'SAT_SUN' | 'SUNDAY_ONLY'>('MON_SAT');
   const [mode, setMode] = useState<DeliveryMode>('OFFLINE');
   const [capacity, setCapacity] = useState('');
@@ -713,7 +730,7 @@ function CreateBatchModal({ onClose, onSaved, setError }: { onClose: () => void;
     api.get('/api/admissions/courses').then((r) => setCourses(r.data.data)).catch(() => setCourses([]));
   }, []);
 
-  const canSubmit = courseId && startDate && (batchChoice === 'existing' ? batchId : newBatchCode.trim())
+  const canSubmit = courseId && startTime && endTime && startDate && (batchChoice === 'existing' ? batchId : newBatchCode.trim())
     && (mode !== 'HYBRID' || onlineCapacity || offlineCapacity);
 
   const submit = () => {
@@ -722,7 +739,7 @@ function CreateBatchModal({ onClose, onSaved, setError }: { onClose: () => void;
     api.post('/api/admissions/batches', {
       batchId: batchChoice === 'existing' ? batchId : undefined,
       newBatchCode: batchChoice === 'new' ? newBatchCode.trim() : undefined,
-      courseId, timing, dayPattern, mode, startDate,
+      courseId, startTime, endTime, dayPattern, mode, startDate,
       capacity: mode !== 'HYBRID' && capacity ? Number(capacity) : undefined,
       onlineCapacity: mode === 'HYBRID' && onlineCapacity ? Number(onlineCapacity) : undefined,
       offlineCapacity: mode === 'HYBRID' && offlineCapacity ? Number(offlineCapacity) : undefined,
@@ -756,13 +773,8 @@ function CreateBatchModal({ onClose, onSaved, setError }: { onClose: () => void;
             {courses.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
           </select>
         </Field>
-        <Field label="Timing *">
-          <select className={inputCls} value={timing} onChange={(e) => setTiming(e.target.value as typeof timing)}>
-            <option value="MORNING">Morning</option>
-            <option value="AFTERNOON">Afternoon</option>
-            <option value="EVENING">Evening</option>
-          </select>
-        </Field>
+        <Field label="Start Time *"><input type="time" className={inputCls} value={startTime} onChange={(e) => setStartTime(e.target.value)} /></Field>
+        <Field label="End Time *"><input type="time" className={inputCls} value={endTime} onChange={(e) => setEndTime(e.target.value)} /></Field>
         <Field label="Days">
           <select className={inputCls} value={dayPattern} onChange={(e) => setDayPattern(e.target.value as typeof dayPattern)}>
             <option value="MON_SAT">Mon–Sat</option>
@@ -778,6 +790,7 @@ function CreateBatchModal({ onClose, onSaved, setError }: { onClose: () => void;
           </select>
         </Field>
       </div>
+      <p className="text-xs text-muted-foreground">Two Morning slots (e.g. 9:30–11:30 and 12:00–2:00) are both fine — each is its own batch here, and the coarse Morning/Afternoon/Evening label used elsewhere is worked out automatically from the start time.</p>
 
       {mode === 'HYBRID' ? (
         <div className="grid grid-cols-2 gap-3">
