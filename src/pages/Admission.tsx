@@ -2,9 +2,10 @@ import { useEffect, useState, useCallback } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import api from '@/lib/api';
 import { useModuleAccess } from '@/hooks/useModuleAccess';
+import { useAuth } from '@/hooks/useAuth';
 import {
   UserPlus, ClipboardList, CalendarClock, Tags, Wallet, Settings2, X, Loader2,
-  Search, CheckCircle2, PlusCircle,
+  Search, CheckCircle2, PlusCircle, Monitor, Building2,
 } from 'lucide-react';
 
 function errMsg(err: unknown, fallback: string) {
@@ -68,13 +69,16 @@ const PAYMENT_METHODS: { id: PaymentMethod; label: string }[] = [
 ];
 
 interface Course { id: string; name: string }
-interface SeatInfo { total: number | null; booked: number; available: number | null; status: 'OPEN' | 'LIMITED' | 'ALMOST_FULL' | 'FULL' }
+type DeliveryMode = 'ONLINE' | 'OFFLINE' | 'HYBRID';
+interface SeatBand { total: number | null; booked: number; available: number | null; status: 'OPEN' | 'LIMITED' | 'ALMOST_FULL' | 'FULL'; label: string }
+interface SeatInfo extends SeatBand { mode: DeliveryMode; online?: SeatBand; offline?: SeatBand }
 interface Schedule {
-  id: string; code: string | null; timing: string; startDate: string;
+  id: string; code: string | null; timing: string; dayPattern?: string; mode: DeliveryMode; startDate: string;
   course: { id: string; name: string };
   batch: { id: string; code: string };
   seats: SeatInfo;
 }
+interface BatchGroup { id: string; code: string; status: string; startDate: string }
 interface FeeBreakdown {
   baseFee: number; couponCode: string | null; couponDiscount: number; netCourseFee: number; paymentMethod: PaymentMethod;
   paymentDiscountPct?: number; paymentDiscountAmount?: number; finalPayable?: number;
@@ -85,6 +89,7 @@ interface FeeBreakdown {
 interface Admission {
   id: string; admissionId: string; admissionStatus: string; planType: PaymentMethod; totalFee: number;
   couponDiscount: number | null; paymentStatus: string; totalPaid: number; balance: number; createdAt: string;
+  deliveryMode: DeliveryMode | null;
   lead: { name: string; phone: string; email: string | null };
   course: { id: string; name: string } | null; track: string | null;
   schedule: { id: string; code: string | null; batch: { code: string } } | null;
@@ -105,11 +110,14 @@ interface AdmissionConfig {
 
 type Tab = 'new' | 'list' | 'batches' | 'coupons' | 'fees' | 'config';
 const VALID_TABS: Tab[] = ['new', 'list', 'batches', 'coupons', 'fees', 'config'];
+// Admissions (everyone's data), Coupons, Course Fees, and Config are
+// admin-only screens — reps work entirely out of New Admission (which shows
+// their own recent admissions inline) and Upcoming Batches.
 const TABS: { id: Tab; label: string; icon: React.ComponentType<{ className?: string }>; adminOnly?: boolean }[] = [
   { id: 'new', label: 'New Admission', icon: UserPlus },
-  { id: 'list', label: 'Admissions', icon: ClipboardList },
   { id: 'batches', label: 'Upcoming Batches', icon: CalendarClock },
-  { id: 'coupons', label: 'Coupons', icon: Tags },
+  { id: 'list', label: 'Admissions', icon: ClipboardList, adminOnly: true },
+  { id: 'coupons', label: 'Coupons', icon: Tags, adminOnly: true },
   { id: 'fees', label: 'Course Fees', icon: Wallet, adminOnly: true },
   { id: 'config', label: 'Config', icon: Settings2, adminOnly: true },
 ];
@@ -156,9 +164,9 @@ export default function AdmissionPage() {
       )}
 
       {tab === 'new' && <NewAdmissionTab canEdit={canEdit} setError={setError} />}
-      {tab === 'list' && <AdmissionsListTab setError={setError} />}
-      {tab === 'batches' && <BatchesTab setError={setError} />}
-      {tab === 'coupons' && <CouponsTab canEdit={canEdit} setError={setError} />}
+      {tab === 'list' && canAdmin && <AdmissionsListTab setError={setError} />}
+      {tab === 'batches' && <BatchesTab canAdmin={canAdmin} setError={setError} />}
+      {tab === 'coupons' && canAdmin && <CouponsTab setError={setError} />}
       {tab === 'fees' && canAdmin && <CourseFeesTab setError={setError} />}
       {tab === 'config' && canAdmin && <ConfigTab setError={setError} />}
     </div>
@@ -167,6 +175,7 @@ export default function AdmissionPage() {
 
 // ── New Admission tab ────────────────────────────────────────────────────────
 function NewAdmissionTab({ canEdit, setError }: { canEdit: boolean; setError: (s: string) => void }) {
+  const { user } = useAuth();
   const [courses, setCourses] = useState<Course[]>([]);
   const [schedules, setSchedules] = useState<Schedule[]>([]);
 
@@ -182,6 +191,7 @@ function NewAdmissionTab({ canEdit, setError }: { canEdit: boolean; setError: (s
   const [courseId, setCourseId] = useState('');
   const [track, setTrack] = useState<Track | ''>('');
   const [scheduleId, setScheduleId] = useState('');
+  const [deliveryMode, setDeliveryMode] = useState<'ONLINE' | 'OFFLINE' | ''>('');
   const [couponCode, setCouponCode] = useState('');
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>('SPOT');
   const [emiMonths, setEmiMonths] = useState(3);
@@ -194,6 +204,9 @@ function NewAdmissionTab({ canEdit, setError }: { canEdit: boolean; setError: (s
   const [paymentMode, setPaymentMode] = useState('UPI');
   const [saving, setSaving] = useState(false);
   const [success, setSuccess] = useState<Admission | null>(null);
+  const [refreshMine, setRefreshMine] = useState(0);
+
+  const selectedSchedule = schedules.find((s) => s.id === scheduleId) || null;
 
   useEffect(() => {
     api.get('/api/admissions/courses').then((r) => setCourses(r.data.data)).catch(() => setCourses([]));
@@ -205,6 +218,8 @@ function NewAdmissionTab({ canEdit, setError }: { canEdit: boolean; setError: (s
       .then((r) => setSchedules(r.data.data))
       .catch(() => setSchedules([]));
   }, [courseId]);
+
+  useEffect(() => { setDeliveryMode(''); }, [scheduleId]);
 
   const calculate = useCallback(() => {
     if (!courseId || !track || !paymentMethod) return;
@@ -226,84 +241,139 @@ function NewAdmissionTab({ canEdit, setError }: { canEdit: boolean; setError: (s
 
   useEffect(() => { calculate(); }, [calculate]);
 
-  const canSubmit = canEdit && name.trim() && phone.trim() && courseId && track && scheduleId && breakdown && !calcError;
+  const needsDeliveryMode = selectedSchedule?.mode === 'HYBRID';
+  const canSubmit = canEdit && name.trim() && phone.trim() && courseId && track && scheduleId
+    && (!needsDeliveryMode || deliveryMode) && breakdown && !calcError;
 
   const submit = () => {
     if (!canSubmit) return;
     setSaving(true);
     api.post('/api/admissions', {
       newLead: { name, phone, email: email || undefined, city: city || undefined, degree: degree || undefined, college: college || undefined, passedOutYear: passedOutYear || undefined, currentStatus: currentStatus || undefined },
-      courseId, track, scheduleId, couponCode: couponCode || undefined, paymentMethod,
+      courseId, track, scheduleId, deliveryMode: needsDeliveryMode ? deliveryMode : undefined,
+      couponCode: couponCode || undefined, paymentMethod,
       emiMonths: paymentMethod === 'EMI' ? emiMonths : undefined,
       payment: { amount: Number(paymentAmount || 0), mode: paymentMode },
     })
       .then((r) => {
         setSuccess(r.data.data);
         setName(''); setPhone(''); setEmail(''); setCity(''); setDegree(''); setCollege(''); setPassedOutYear(''); setCurrentStatus('');
-        setCourseId(''); setTrack(''); setScheduleId(''); setCouponCode(''); setPaymentMethod('SPOT'); setBreakdown(null); setPaymentAmount('');
+        setCourseId(''); setTrack(''); setScheduleId(''); setDeliveryMode(''); setCouponCode(''); setPaymentMethod('SPOT'); setBreakdown(null); setPaymentAmount('');
+        setRefreshMine((n) => n + 1);
       })
       .catch((err) => setError(errMsg(err, 'Could not create the admission.')))
       .finally(() => setSaving(false));
   };
 
   return (
-    <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-      <div className="lg:col-span-2 space-y-6">
-        {success && (
-          <div className="bg-green-50 border border-green-200 rounded-xl p-4 flex items-start gap-3">
-            <CheckCircle2 className="w-5 h-5 text-green-600 flex-shrink-0 mt-0.5" />
-            <div className="text-sm">
-              <p className="font-medium text-green-800">Admission {success.admissionId} confirmed.</p>
-              <p className="text-green-700">The payment is awaiting Admin approval in Finance (Sales) before the receipt is emailed.</p>
-            </div>
-            <button onClick={() => setSuccess(null)} className="ml-auto"><X className="w-4 h-4 text-green-700" /></button>
+    <div className="space-y-6">
+      {success && (
+        <div className="bg-green-50 border border-green-200 rounded-xl p-4 flex items-start gap-3">
+          <CheckCircle2 className="w-5 h-5 text-green-600 flex-shrink-0 mt-0.5" />
+          <div className="text-sm">
+            <p className="font-medium text-green-800">Admission {success.admissionId} confirmed.</p>
+            <p className="text-green-700">The payment is awaiting Admin approval in Finance (Sales) before the receipt is emailed.</p>
           </div>
-        )}
-
-        <div className="border rounded-xl p-5 space-y-4">
-          <h3 className="font-semibold text-sm">Student Details</h3>
-          <div className="grid grid-cols-2 gap-3">
-            <Field label="Name *"><input className={inputCls} value={name} onChange={(e) => setName(e.target.value)} /></Field>
-            <Field label="Mobile Number *"><input className={inputCls} value={phone} onChange={(e) => setPhone(e.target.value)} /></Field>
-            <Field label="Email"><input className={inputCls} value={email} onChange={(e) => setEmail(e.target.value)} /></Field>
-            <Field label="City"><input className={inputCls} value={city} onChange={(e) => setCity(e.target.value)} /></Field>
-            <Field label="Degree"><input className={inputCls} value={degree} onChange={(e) => setDegree(e.target.value)} /></Field>
-            <Field label="College"><input className={inputCls} value={college} onChange={(e) => setCollege(e.target.value)} /></Field>
-            <Field label="Passed Out Year"><input className={inputCls} value={passedOutYear} onChange={(e) => setPassedOutYear(e.target.value)} /></Field>
-            <Field label="Current Status"><input className={inputCls} value={currentStatus} onChange={(e) => setCurrentStatus(e.target.value)} /></Field>
-          </div>
+          <button onClick={() => setSuccess(null)} className="ml-auto"><X className="w-4 h-4 text-green-700" /></button>
         </div>
+      )}
 
-        <div className="border rounded-xl p-5 space-y-4">
-          <h3 className="font-semibold text-sm">Course, Track &amp; Batch</h3>
-          <div className="grid grid-cols-2 gap-3">
-            <Field label="Course *">
-              <select className={inputCls} value={courseId} onChange={(e) => { setCourseId(e.target.value); setScheduleId(''); }}>
-                <option value="">Select course</option>
-                {courses.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
-              </select>
-            </Field>
-            <Field label="Track *">
-              <select className={inputCls} value={track} onChange={(e) => setTrack(e.target.value as Track)}>
-                <option value="">Select track</option>
-                {TRACKS.map((t) => <option key={t} value={t}>{TRACK_LABELS[t]}</option>)}
-              </select>
-            </Field>
-          </div>
-          <Field label="Batch *">
-            <select className={inputCls} value={scheduleId} onChange={(e) => setScheduleId(e.target.value)} disabled={!courseId}>
-              <option value="">{courseId ? 'Select batch' : 'Select a course first'}</option>
-              {schedules.map((s) => (
-                <option key={s.id} value={s.id}>
-                  {s.batch.code}{s.code ? ` / ${s.code}` : ''} — {s.timing} — starts {formatDate(s.startDate)}
-                  {s.seats.total != null ? ` — ${s.seats.available}/${s.seats.total} seats left` : ''}
-                </option>
-              ))}
+      <div className="border rounded-xl p-5 space-y-4">
+        <h3 className="font-semibold text-sm">Student Details</h3>
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+          <Field label="Name *"><input className={inputCls} value={name} onChange={(e) => setName(e.target.value)} /></Field>
+          <Field label="Mobile Number *"><input className={inputCls} value={phone} onChange={(e) => setPhone(e.target.value)} /></Field>
+          <Field label="Email"><input className={inputCls} value={email} onChange={(e) => setEmail(e.target.value)} /></Field>
+          <Field label="City"><input className={inputCls} value={city} onChange={(e) => setCity(e.target.value)} /></Field>
+          <Field label="Degree"><input className={inputCls} value={degree} onChange={(e) => setDegree(e.target.value)} /></Field>
+          <Field label="College"><input className={inputCls} value={college} onChange={(e) => setCollege(e.target.value)} /></Field>
+          <Field label="Passed Out Year"><input className={inputCls} value={passedOutYear} onChange={(e) => setPassedOutYear(e.target.value)} /></Field>
+          <Field label="Current Status"><input className={inputCls} value={currentStatus} onChange={(e) => setCurrentStatus(e.target.value)} /></Field>
+        </div>
+      </div>
+
+      <div className="border rounded-xl p-5 space-y-4">
+        <h3 className="font-semibold text-sm">Course, Track &amp; Batch</h3>
+        <div className="grid grid-cols-2 gap-3">
+          <Field label="Course *">
+            <select className={inputCls} value={courseId} onChange={(e) => { setCourseId(e.target.value); setScheduleId(''); }}>
+              <option value="">Select course</option>
+              {courses.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+            </select>
+          </Field>
+          <Field label="Track *">
+            <select className={inputCls} value={track} onChange={(e) => setTrack(e.target.value as Track)}>
+              <option value="">Select track</option>
+              {TRACKS.map((t) => <option key={t} value={t}>{TRACK_LABELS[t]}</option>)}
             </select>
           </Field>
         </div>
 
-        <div className="border rounded-xl p-5 space-y-4">
+        <Field label="Batch *">
+          {!courseId ? (
+            <p className="text-xs text-muted-foreground border rounded-lg px-3 py-2">Select a course first</p>
+          ) : schedules.length === 0 ? (
+            <p className="text-xs text-muted-foreground border rounded-lg px-3 py-2">No upcoming batches open for this course yet.</p>
+          ) : (
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+              {schedules.map((s) => {
+                const selected = s.id === scheduleId;
+                const disabled = s.seats.status === 'FULL';
+                return (
+                  <button
+                    type="button"
+                    key={s.id}
+                    disabled={disabled}
+                    onClick={() => setScheduleId(s.id)}
+                    className={`text-left border rounded-lg px-3 py-2.5 text-xs transition ${
+                      selected ? 'border-blue-600 ring-1 ring-blue-600 bg-blue-50' : disabled ? 'opacity-50 cursor-not-allowed' : 'hover:border-blue-300'
+                    }`}
+                  >
+                    <p className="font-medium text-sm text-foreground">{s.batch.code}{s.code ? ` / ${s.code}` : ''}</p>
+                    <p className="text-muted-foreground">{s.timing} · Starts {formatDate(s.startDate)}</p>
+                    <div className="mt-1.5"><SeatMap seats={s.seats} /></div>
+                    <p className={`mt-1 font-medium ${disabled ? 'text-red-600' : s.seats.status === 'ALMOST_FULL' ? 'text-orange-600' : 'text-green-700'}`}>
+                      {s.seats.label}
+                    </p>
+                  </button>
+                );
+              })}
+            </div>
+          )}
+        </Field>
+
+        {needsDeliveryMode && (
+          <Field label="Delivery Mode * (this batch is Hybrid)">
+            <div className="flex gap-2">
+              {(['ONLINE', 'OFFLINE'] as const).map((m) => {
+                const band = m === 'ONLINE' ? selectedSchedule?.seats.online : selectedSchedule?.seats.offline;
+                const disabled = band?.status === 'FULL';
+                return (
+                  <button
+                    type="button"
+                    key={m}
+                    disabled={disabled}
+                    onClick={() => setDeliveryMode(m)}
+                    className={`flex-1 text-left border rounded-lg px-3 py-2 text-sm transition ${
+                      deliveryMode === m ? 'border-blue-600 ring-1 ring-blue-600 bg-blue-50' : disabled ? 'opacity-50 cursor-not-allowed' : 'hover:border-blue-300'
+                    }`}
+                  >
+                    <div className="flex items-center gap-2">
+                      {m === 'ONLINE' ? <Monitor className="w-4 h-4" /> : <Building2 className="w-4 h-4" />}
+                      <span>{m === 'ONLINE' ? 'Online' : 'Offline'}</span>
+                      {band && <span className="ml-auto text-xs text-muted-foreground">{band.label}</span>}
+                    </div>
+                    {band && <div className="mt-1.5"><SeatMap seats={band} /></div>}
+                  </button>
+                );
+              })}
+            </div>
+          </Field>
+        )}
+      </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        <div className="lg:col-span-2 border rounded-xl p-5 space-y-4">
           <h3 className="font-semibold text-sm">Payment</h3>
           <div className="grid grid-cols-2 gap-3">
             <Field label="Coupon Code">
@@ -330,56 +400,141 @@ function NewAdmissionTab({ canEdit, setError }: { canEdit: boolean; setError: (s
               </select>
             </Field>
           </div>
-        </div>
 
-        {canEdit ? (
-          <button onClick={submit} disabled={!canSubmit || saving} className="px-5 py-2.5 text-sm rounded-lg bg-blue-600 text-white disabled:opacity-50">
-            {saving ? 'Confirming...' : 'Confirm Admission'}
-          </button>
-        ) : (
-          <p className="text-sm text-muted-foreground">You have view-only access to Admission — confirming a new admission needs Edit access.</p>
-        )}
-      </div>
-
-      <div className="lg:col-span-1">
-        <div className="border rounded-xl p-5 sticky top-6 space-y-3">
-          <h3 className="font-semibold text-sm">Fee Breakdown {calculating && <Loader2 className="w-3.5 h-3.5 inline animate-spin ml-1" />}</h3>
-          {calcError && <p className="text-xs text-red-600">{calcError}</p>}
-          {!breakdown && !calcError && <p className="text-xs text-muted-foreground">Select a course, track, and payment method to see the fee.</p>}
-          {breakdown && (
-            <div className="text-sm space-y-1.5">
-              <Row label="Base Fee" value={money(breakdown.baseFee)} />
-              {breakdown.couponDiscount > 0 && <Row label={`Coupon (${breakdown.couponCode})`} value={`− ${money(breakdown.couponDiscount)}`} />}
-              <Row label="Net Course Fee" value={money(breakdown.netCourseFee)} bold />
-              {breakdown.paymentDiscountAmount != null && (
-                <Row label={`${paymentMethod === 'SPOT' ? 'Spot' : 'Full'} Discount (${breakdown.paymentDiscountPct}%)`} value={`− ${money(breakdown.paymentDiscountAmount)}`} />
-              )}
-              {breakdown.finalPayable != null && <Row label="Payable Now" value={money(breakdown.finalPayable)} bold highlight />}
-              {breakdown.registrationFee != null && (
-                <>
-                  <Row label="Registration Fee (now)" value={money(breakdown.registrationFee)} bold highlight />
-                  <Row label="Orientation Balance (later)" value={money(breakdown.orientationBalance)} />
-                </>
-              )}
-              {breakdown.interestAmount != null && (
-                <>
-                  <Row label={`Interest (${breakdown.interestRatePct}%)`} value={money(breakdown.interestAmount)} />
-                  <Row label="EMI Total" value={money(breakdown.emiTotal)} />
-                  <Row label={`Down Payment (${breakdown.downPaymentPct}%, now)`} value={money(breakdown.downPayment)} bold highlight />
-                  <Row label="EMI Balance" value={money(breakdown.emiBalance)} />
-                  {breakdown.monthlyInstallments && (
-                    <div className="pt-1 text-xs text-muted-foreground">
-                      {breakdown.monthlyInstallments.map((m, i) => (
-                        <div key={i} className="flex justify-between"><span>EMI {i + 1}</span><span>{money(m)}</span></div>
-                      ))}
-                    </div>
-                  )}
-                </>
-              )}
-            </div>
+          {canEdit ? (
+            <button onClick={submit} disabled={!canSubmit || saving} className="px-5 py-2.5 text-sm rounded-lg bg-blue-600 text-white disabled:opacity-50">
+              {saving ? 'Confirming...' : 'Confirm Admission'}
+            </button>
+          ) : (
+            <p className="text-sm text-muted-foreground">You have view-only access to Admission — confirming a new admission needs Edit access.</p>
           )}
         </div>
+
+        <div className="lg:col-span-1">
+          <div className="border rounded-xl p-5 sticky top-6 space-y-3">
+            <h3 className="font-semibold text-sm">Fee Breakdown {calculating && <Loader2 className="w-3.5 h-3.5 inline animate-spin ml-1" />}</h3>
+            {calcError && <p className="text-xs text-red-600">{calcError}</p>}
+            {!breakdown && !calcError && <p className="text-xs text-muted-foreground">Select a course, track, and payment method to see the fee.</p>}
+            {breakdown && (
+              <div className="text-sm space-y-1.5">
+                <Row label="Base Fee" value={money(breakdown.baseFee)} />
+                {breakdown.couponDiscount > 0 && <Row label={`Coupon (${breakdown.couponCode})`} value={`− ${money(breakdown.couponDiscount)}`} />}
+                <Row label="Net Course Fee" value={money(breakdown.netCourseFee)} bold />
+                {breakdown.paymentDiscountAmount != null && (
+                  <Row label={`${paymentMethod === 'SPOT' ? 'Spot' : 'Full'} Discount (${breakdown.paymentDiscountPct}%)`} value={`− ${money(breakdown.paymentDiscountAmount)}`} />
+                )}
+                {breakdown.finalPayable != null && <Row label="Payable Now" value={money(breakdown.finalPayable)} bold highlight />}
+                {breakdown.registrationFee != null && (
+                  <>
+                    <Row label="Registration Fee (now)" value={money(breakdown.registrationFee)} bold highlight />
+                    <Row label="Orientation Balance (later)" value={money(breakdown.orientationBalance)} />
+                  </>
+                )}
+                {breakdown.interestAmount != null && (
+                  <>
+                    <Row label={`Interest (${breakdown.interestRatePct}%)`} value={money(breakdown.interestAmount)} />
+                    <Row label="EMI Total" value={money(breakdown.emiTotal)} />
+                    <Row label={`Down Payment (${breakdown.downPaymentPct}%, now)`} value={money(breakdown.downPayment)} bold highlight />
+                    <Row label="EMI Balance" value={money(breakdown.emiBalance)} />
+                    {breakdown.monthlyInstallments && (
+                      <div className="pt-1 text-xs text-muted-foreground">
+                        {breakdown.monthlyInstallments.map((m, i) => (
+                          <div key={i} className="flex justify-between"><span>EMI {i + 1}</span><span>{money(m)}</span></div>
+                        ))}
+                      </div>
+                    )}
+                  </>
+                )}
+              </div>
+            )}
+          </div>
+        </div>
       </div>
+
+      {user?.employee?.id && <MyRecentAdmissions employeeId={user.employee.id} refreshKey={refreshMine} setError={setError} />}
+    </div>
+  );
+}
+
+// ── "My Recent Admissions" — shown under New Admission, scoped to the
+// current rep. The backend already pins non-admin callers to their own
+// createdById regardless of this filter, so this is consistent for admins too.
+function MyRecentAdmissions({ employeeId, refreshKey, setError }: { employeeId: string; refreshKey: number; setError: (s: string) => void }) {
+  const [rows, setRows] = useState<Admission[] | null>(null);
+
+  useEffect(() => {
+    api.get('/api/admissions', { params: { salespersonId: employeeId } })
+      .then((r) => setRows(r.data.data.slice(0, 10)))
+      .catch((err) => setError(errMsg(err, 'Could not load your admissions.')));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [employeeId, refreshKey]);
+
+  return (
+    <div>
+      <h3 className="font-semibold text-sm mb-3">My Recent Admissions</h3>
+      {rows === null ? (
+        <div className="flex justify-center py-6"><Loader2 className="w-5 h-5 animate-spin text-blue-600" /></div>
+      ) : rows.length === 0 ? (
+        <p className="text-sm text-muted-foreground text-center py-4">You haven't created any admissions yet.</p>
+      ) : (
+        <div className="border rounded-xl overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead className="bg-gray-50 text-xs text-muted-foreground">
+              <tr>
+                <th className="text-left px-4 py-2">Admission ID</th>
+                <th className="text-left px-4 py-2">Student</th>
+                <th className="text-left px-4 py-2">Course / Track</th>
+                <th className="text-left px-4 py-2">Method</th>
+                <th className="text-left px-4 py-2">Paid / Balance</th>
+                <th className="text-left px-4 py-2">Status</th>
+                <th className="text-left px-4 py-2">Date</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y">
+              {rows.map((a) => (
+                <tr key={a.id}>
+                  <td className="px-4 py-2.5 font-medium">{a.admissionId}</td>
+                  <td className="px-4 py-2.5">{a.lead.name}<div className="text-xs text-muted-foreground">{a.lead.phone}</div></td>
+                  <td className="px-4 py-2.5">{a.course?.name || '—'}<div className="text-xs text-muted-foreground">{a.track}</div></td>
+                  <td className="px-4 py-2.5">{a.planType}</td>
+                  <td className="px-4 py-2.5">{money(a.totalPaid)} / {money(a.balance)}</td>
+                  <td className="px-4 py-2.5"><span className="px-2 py-0.5 rounded-full text-xs bg-blue-50 text-blue-700">{a.admissionStatus}</span></td>
+                  <td className="px-4 py-2.5 text-xs text-muted-foreground">{formatDate(a.createdAt)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/**
+ * redBus/BookMyShow-style capacity visual — one dot per seat when the count
+ * is small enough to read at a glance, otherwise a proportional fill bar.
+ * Still represents aggregate capacity (booked vs available), not
+ * individually-numbered seats — one admission always books exactly one seat.
+ */
+function SeatMap({ seats }: { seats: SeatBand }) {
+  if (seats.total == null) return <p className="text-xs text-muted-foreground">Unlimited seats</p>;
+  if (seats.total <= 24) {
+    return (
+      <div className="flex flex-wrap gap-1">
+        {Array.from({ length: seats.total }).map((_, i) => (
+          <div
+            key={i}
+            className={`w-3 h-3 rounded-sm ${i < seats.booked ? 'bg-gray-300' : 'bg-green-500'}`}
+            title={i < seats.booked ? 'Booked' : 'Available'}
+          />
+        ))}
+      </div>
+    );
+  }
+  const availablePct = Math.round(((seats.available ?? 0) / seats.total) * 100);
+  return (
+    <div className="h-2 w-full bg-gray-200 rounded-full overflow-hidden">
+      <div className="h-full bg-green-500" style={{ width: `${availablePct}%` }} />
     </div>
   );
 }
@@ -460,43 +615,193 @@ const SEAT_STYLES: Record<SeatInfo['status'], string> = {
   ALMOST_FULL: 'bg-orange-50 text-orange-700 border-orange-200',
   FULL: 'bg-red-50 text-red-700 border-red-200',
 };
-const SEAT_LABELS: Record<SeatInfo['status'], string> = { OPEN: 'Available', LIMITED: 'Limited', ALMOST_FULL: 'Almost Full', FULL: 'Full' };
+const BADGE_STYLES: Record<SeatInfo['status'], string> = {
+  OPEN: 'bg-green-100 text-green-800',
+  LIMITED: 'bg-amber-100 text-amber-800',
+  ALMOST_FULL: 'bg-orange-100 text-orange-800',
+  FULL: 'bg-red-100 text-red-800',
+};
+const MODE_LABELS: Record<DeliveryMode, string> = { ONLINE: 'Online', OFFLINE: 'Offline', HYBRID: 'Hybrid' };
 
-function BatchesTab({ setError }: { setError: (s: string) => void }) {
+function BatchesTab({ canAdmin, setError }: { canAdmin: boolean; setError: (s: string) => void }) {
   const [schedules, setSchedules] = useState<Schedule[] | null>(null);
+  const [showCreate, setShowCreate] = useState(false);
 
-  useEffect(() => {
+  const load = useCallback(() => {
     api.get('/api/admissions/batches/upcoming', { params: { includeFull: 'true' } })
       .then((r) => setSchedules(r.data.data))
       .catch((err) => setError(errMsg(err, 'Could not load batches.')));
   }, [setError]);
-
-  if (schedules === null) return <div className="flex justify-center py-8"><Loader2 className="w-5 h-5 animate-spin text-blue-600" /></div>;
-  if (schedules.length === 0) return <p className="text-sm text-muted-foreground text-center py-6">No upcoming batches configured.</p>;
+  useEffect(() => { load(); }, [load]);
 
   return (
-    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-      {schedules.map((s) => (
-        <div key={s.id} className={`border rounded-xl p-4 space-y-2 ${SEAT_STYLES[s.seats.status]}`}>
-          <div className="flex items-start justify-between">
-            <div>
-              <p className="font-semibold text-sm text-foreground">{s.batch.code}{s.code ? ` / ${s.code}` : ''}</p>
-              <p className="text-xs text-muted-foreground">{s.course.name}</p>
+    <div className="space-y-4">
+      {canAdmin && (
+        <button onClick={() => setShowCreate(true)} className="px-4 py-2 text-sm rounded-lg bg-blue-600 text-white inline-flex items-center gap-1.5">
+          <PlusCircle className="w-4 h-4" /> Create Batch
+        </button>
+      )}
+      {showCreate && <CreateBatchModal onClose={() => setShowCreate(false)} onSaved={() => { setShowCreate(false); load(); }} setError={setError} />}
+
+      {schedules === null ? (
+        <div className="flex justify-center py-8"><Loader2 className="w-5 h-5 animate-spin text-blue-600" /></div>
+      ) : schedules.length === 0 ? (
+        <p className="text-sm text-muted-foreground text-center py-6">No upcoming batches configured yet.</p>
+      ) : (
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+          {schedules.map((s) => (
+            <div key={s.id} className={`border rounded-xl p-4 space-y-2 ${SEAT_STYLES[s.seats.status]}`}>
+              <div className="flex items-start justify-between gap-2">
+                <div>
+                  <p className="font-semibold text-sm text-foreground">{s.batch.code}{s.code ? ` / ${s.code}` : ''}</p>
+                  <p className="text-xs text-muted-foreground">{s.course.name}</p>
+                </div>
+                <span className={`text-xs font-medium px-2 py-0.5 rounded-full whitespace-nowrap ${BADGE_STYLES[s.seats.status]}`}>{MODE_LABELS[s.mode]}</span>
+              </div>
+              <p className="text-xs text-muted-foreground">{s.timing} · Starts {formatDate(s.startDate)}</p>
+
+              {s.mode === 'HYBRID' && s.seats.online && s.seats.offline ? (
+                <div className="space-y-2 pt-1">
+                  <div>
+                    <div className="flex items-center justify-between text-xs mb-1">
+                      <span className="flex items-center gap-1"><Monitor className="w-3.5 h-3.5" /> Online</span>
+                      <span className="font-medium">{s.seats.online.label}</span>
+                    </div>
+                    <SeatMap seats={s.seats.online} />
+                  </div>
+                  <div>
+                    <div className="flex items-center justify-between text-xs mb-1">
+                      <span className="flex items-center gap-1"><Building2 className="w-3.5 h-3.5" /> Offline</span>
+                      <span className="font-medium">{s.seats.offline.label}</span>
+                    </div>
+                    <SeatMap seats={s.seats.offline} />
+                  </div>
+                </div>
+              ) : (
+                <div className="space-y-1.5 pt-1">
+                  <SeatMap seats={s.seats} />
+                  <p className="text-sm font-medium">{s.seats.label}</p>
+                </div>
+              )}
             </div>
-            <span className="text-xs font-medium px-2 py-0.5 rounded-full border">{SEAT_LABELS[s.seats.status]}</span>
-          </div>
-          <p className="text-xs text-muted-foreground">{s.timing} · Starts {formatDate(s.startDate)}</p>
-          <p className="text-sm font-medium">
-            {s.seats.total != null ? `${s.seats.available} of ${s.seats.total} seats available` : 'Unlimited seats'}
-          </p>
+          ))}
         </div>
-      ))}
+      )}
     </div>
   );
 }
 
-// ── Coupons tab ───────────────────────────────────────────────────────────────
-function CouponsTab({ canEdit, setError }: { canEdit: boolean; setError: (s: string) => void }) {
+function CreateBatchModal({ onClose, onSaved, setError }: { onClose: () => void; onSaved: () => void; setError: (s: string) => void }) {
+  const [batchGroups, setBatchGroups] = useState<BatchGroup[]>([]);
+  const [courses, setCourses] = useState<Course[]>([]);
+
+  const [batchChoice, setBatchChoice] = useState<'existing' | 'new'>('new');
+  const [batchId, setBatchId] = useState('');
+  const [newBatchCode, setNewBatchCode] = useState('');
+  const [courseId, setCourseId] = useState('');
+  const [timing, setTiming] = useState<'MORNING' | 'AFTERNOON' | 'EVENING'>('MORNING');
+  const [dayPattern, setDayPattern] = useState<'MON_SAT' | 'SAT_SUN' | 'SUNDAY_ONLY'>('MON_SAT');
+  const [mode, setMode] = useState<DeliveryMode>('OFFLINE');
+  const [capacity, setCapacity] = useState('');
+  const [onlineCapacity, setOnlineCapacity] = useState('');
+  const [offlineCapacity, setOfflineCapacity] = useState('');
+  const [startDate, setStartDate] = useState('');
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    api.get('/api/admissions/batches/groups').then((r) => setBatchGroups(r.data.data)).catch(() => setBatchGroups([]));
+    api.get('/api/admissions/courses').then((r) => setCourses(r.data.data)).catch(() => setCourses([]));
+  }, []);
+
+  const canSubmit = courseId && startDate && (batchChoice === 'existing' ? batchId : newBatchCode.trim())
+    && (mode !== 'HYBRID' || onlineCapacity || offlineCapacity);
+
+  const submit = () => {
+    if (!canSubmit) return;
+    setSaving(true);
+    api.post('/api/admissions/batches', {
+      batchId: batchChoice === 'existing' ? batchId : undefined,
+      newBatchCode: batchChoice === 'new' ? newBatchCode.trim() : undefined,
+      courseId, timing, dayPattern, mode, startDate,
+      capacity: mode !== 'HYBRID' && capacity ? Number(capacity) : undefined,
+      onlineCapacity: mode === 'HYBRID' && onlineCapacity ? Number(onlineCapacity) : undefined,
+      offlineCapacity: mode === 'HYBRID' && offlineCapacity ? Number(offlineCapacity) : undefined,
+    })
+      .then(onSaved)
+      .catch((err) => setError(errMsg(err, 'Could not create batch.')))
+      .finally(() => setSaving(false));
+  };
+
+  return (
+    <Modal title="Create Batch" onClose={onClose}>
+      <Field label="Batch">
+        <div className="flex gap-2 mb-2">
+          <button type="button" onClick={() => setBatchChoice('new')} className={`flex-1 px-3 py-1.5 text-xs rounded-lg border ${batchChoice === 'new' ? 'border-blue-600 bg-blue-50 text-blue-700' : ''}`}>New Batch</button>
+          <button type="button" onClick={() => setBatchChoice('existing')} className={`flex-1 px-3 py-1.5 text-xs rounded-lg border ${batchChoice === 'existing' ? 'border-blue-600 bg-blue-50 text-blue-700' : ''}`}>Add to Existing</button>
+        </div>
+        {batchChoice === 'new' ? (
+          <input className={inputCls} value={newBatchCode} onChange={(e) => setNewBatchCode(e.target.value)} placeholder="e.g. Batch 18" />
+        ) : (
+          <select className={inputCls} value={batchId} onChange={(e) => setBatchId(e.target.value)}>
+            <option value="">Select batch</option>
+            {batchGroups.map((b) => <option key={b.id} value={b.id}>{b.code}</option>)}
+          </select>
+        )}
+      </Field>
+
+      <div className="grid grid-cols-2 gap-3">
+        <Field label="Course *">
+          <select className={inputCls} value={courseId} onChange={(e) => setCourseId(e.target.value)}>
+            <option value="">Select course</option>
+            {courses.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+          </select>
+        </Field>
+        <Field label="Timing *">
+          <select className={inputCls} value={timing} onChange={(e) => setTiming(e.target.value as typeof timing)}>
+            <option value="MORNING">Morning</option>
+            <option value="AFTERNOON">Afternoon</option>
+            <option value="EVENING">Evening</option>
+          </select>
+        </Field>
+        <Field label="Days">
+          <select className={inputCls} value={dayPattern} onChange={(e) => setDayPattern(e.target.value as typeof dayPattern)}>
+            <option value="MON_SAT">Mon–Sat</option>
+            <option value="SAT_SUN">Sat–Sun</option>
+            <option value="SUNDAY_ONLY">Sunday Only</option>
+          </select>
+        </Field>
+        <Field label="Mode *">
+          <select className={inputCls} value={mode} onChange={(e) => setMode(e.target.value as DeliveryMode)}>
+            <option value="OFFLINE">Offline</option>
+            <option value="ONLINE">Online</option>
+            <option value="HYBRID">Hybrid</option>
+          </select>
+        </Field>
+      </div>
+
+      {mode === 'HYBRID' ? (
+        <div className="grid grid-cols-2 gap-3">
+          <Field label="Offline Seats"><input type="number" className={inputCls} value={offlineCapacity} onChange={(e) => setOfflineCapacity(e.target.value)} placeholder="Unlimited" /></Field>
+          <Field label="Online Seats"><input type="number" className={inputCls} value={onlineCapacity} onChange={(e) => setOnlineCapacity(e.target.value)} placeholder="Unlimited" /></Field>
+        </div>
+      ) : (
+        <Field label={`${mode === 'ONLINE' ? 'Online' : 'Offline'} Seats`}>
+          <input type="number" className={inputCls} value={capacity} onChange={(e) => setCapacity(e.target.value)} placeholder="Unlimited" />
+        </Field>
+      )}
+
+      <Field label="Expected Start Date *"><input type="date" className={inputCls} value={startDate} onChange={(e) => setStartDate(e.target.value)} /></Field>
+
+      <div className="flex justify-end gap-2 pt-2">
+        <button onClick={onClose} className="px-4 py-2 text-sm rounded-lg border">Cancel</button>
+        <button onClick={submit} disabled={!canSubmit || saving} className="px-4 py-2 text-sm rounded-lg bg-blue-600 text-white disabled:opacity-50">{saving ? 'Creating...' : 'Create Batch'}</button>
+      </div>
+    </Modal>
+  );
+}
+
+// ── Coupons tab (admin only) ─────────────────────────────────────────────────
+function CouponsTab({ setError }: { setError: (s: string) => void }) {
   const [coupons, setCoupons] = useState<Coupon[] | null>(null);
   const [showAdd, setShowAdd] = useState(false);
 
@@ -507,11 +812,9 @@ function CouponsTab({ canEdit, setError }: { canEdit: boolean; setError: (s: str
 
   return (
     <div className="space-y-4">
-      {canEdit && (
-        <button onClick={() => setShowAdd(true)} className="px-4 py-2 text-sm rounded-lg bg-blue-600 text-white inline-flex items-center gap-1.5">
-          <PlusCircle className="w-4 h-4" /> New Coupon
-        </button>
-      )}
+      <button onClick={() => setShowAdd(true)} className="px-4 py-2 text-sm rounded-lg bg-blue-600 text-white inline-flex items-center gap-1.5">
+        <PlusCircle className="w-4 h-4" /> New Coupon
+      </button>
       {showAdd && <AddCouponModal onClose={() => setShowAdd(false)} onSaved={() => { setShowAdd(false); load(); }} setError={setError} />}
 
       {coupons === null ? (

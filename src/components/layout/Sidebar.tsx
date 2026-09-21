@@ -111,9 +111,12 @@ const moduleNavItems: ModuleNavItem[] = [
     module: 'ADMISSION',
     children: [
       { label: 'New Admission',  to: '/admission?tab=new',     icon: UserPlus,   module: 'ADMISSION' },
-      { label: 'Admissions',     to: '/admission?tab=list',    icon: ClipboardList, module: 'ADMISSION' },
       { label: 'Upcoming Batches', to: '/admission?tab=batches', icon: CalendarClock, module: 'ADMISSION' },
-      { label: 'Coupons',        to: '/admission?tab=coupons', icon: Tags,       module: 'ADMISSION' },
+      // Admissions (all reps' data), Coupons, Course Fees, and Config are
+      // admin-only — reps only ever work from New Admission + Upcoming
+      // Batches, and see their own admissions inline under New Admission.
+      { label: 'Admissions',     to: '/admission?tab=list',    icon: ClipboardList, module: 'ADMISSION', minLevel: 'ADMIN' },
+      { label: 'Coupons',        to: '/admission?tab=coupons', icon: Tags,       module: 'ADMISSION', minLevel: 'ADMIN' },
       { label: 'Course Fees',    to: '/admission?tab=fees',    icon: Wallet,     module: 'ADMISSION', minLevel: 'ADMIN' },
       { label: 'Config',         to: '/admission?tab=config',  icon: Settings2,  module: 'ADMISSION', minLevel: 'ADMIN' },
     ],
