@@ -726,8 +726,9 @@ function BatchesTab({ canAdmin, canEdit, setError }: { canAdmin: boolean; canEdi
                 )}
 
                 {!!totalHeld && (
-                  <p className="text-xs text-orange-600 flex items-center gap-1 pt-0.5">
-                    <Lock className="w-3 h-3" /> {totalHeld} seat{totalHeld > 1 ? 's' : ''} held back{canAdmin ? '' : ' — request release below'}
+                  <p className="text-xs flex items-center gap-1 pt-0.5 text-muted-foreground">
+                    <Lock className="w-3 h-3 text-red-600" />
+                    <span className="text-red-600 font-semibold">{totalHeld}</span> held back
                   </p>
                 )}
 
