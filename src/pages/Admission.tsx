@@ -5,7 +5,8 @@ import { useModuleAccess } from '@/hooks/useModuleAccess';
 import { useAuth } from '@/hooks/useAuth';
 import {
   UserPlus, ClipboardList, CalendarClock, Tags, Wallet, Settings2, X, Loader2,
-  Search, CheckCircle2, PlusCircle, Monitor, Building2,
+  Search, CheckCircle2, PlusCircle, Monitor, Building2, Grid3x3,
+  Ticket, Lock, Check, XCircle,
 } from 'lucide-react';
 
 function errMsg(err: unknown, fallback: string) {
@@ -70,7 +71,10 @@ const PAYMENT_METHODS: { id: PaymentMethod; label: string }[] = [
 
 interface Course { id: string; name: string }
 type DeliveryMode = 'ONLINE' | 'OFFLINE' | 'HYBRID';
-interface SeatBand { total: number | null; booked: number; available: number | null; status: 'OPEN' | 'LIMITED' | 'ALMOST_FULL' | 'FULL'; label: string }
+interface SeatBand {
+  rawTotal: number | null; held: number; total: number | null; booked: number; available: number | null;
+  status: 'OPEN' | 'LIMITED' | 'ALMOST_FULL' | 'FULL'; label: string;
+}
 interface SeatInfo extends SeatBand { mode: DeliveryMode; online?: SeatBand; offline?: SeatBand }
 interface Schedule {
   id: string; code: string | null; timing: string; startTime?: string | null; endTime?: string | null;
@@ -112,26 +116,37 @@ interface Admission {
   coupon: { code: string } | null;
   createdBy: { firstName: string; lastName: string } | null;
 }
+interface EmployeeLite { id: string; firstName: string; lastName: string; employeeCode: string }
 interface Coupon {
   id: string; code: string; name: string; discountType: 'FIXED' | 'PERCENTAGE'; discountValue: number;
   status: 'ACTIVE' | 'INACTIVE'; validFrom: string; validUntil: string; maxUsage: number | null;
-  course: { name: string } | null; _count?: { usages: number };
+  course: { name: string } | null; restrictedToEmployee: EmployeeLite | null; _count?: { usages: number };
 }
 interface CourseFee { id: string; course: { name: string }; track: string; baseFee: number; effectiveDate: string; isActive: boolean }
+interface SeatHoldRequestItem {
+  id: string; scheduleId: string; deliveryMode: DeliveryMode | null; seatsRequested: number; reason: string | null;
+  status: 'PENDING' | 'APPROVED' | 'REJECTED'; responseNote: string | null; createdAt: string; respondedAt: string | null;
+  schedule: { id: string; code: string | null; mode: DeliveryMode; timing: string; startTime?: string | null; endTime?: string | null; course: { id: string; name: string } };
+  requestedBy: EmployeeLite | null;
+  respondedBy: EmployeeLite | null;
+}
 interface AdmissionConfig {
   spotDiscountPct: number; fullDiscountPct: number; registrationFee: number;
   emiInterest3To4MonthPct: number; emiInterest5PlusMonthPct: number; downPaymentPct: number;
   portalApprovalMinPaidPct: number; trackEmiMonthLimits: Record<string, number>;
 }
 
-type Tab = 'new' | 'list' | 'batches' | 'coupons' | 'fees' | 'config';
-const VALID_TABS: Tab[] = ['new', 'list', 'batches', 'coupons', 'fees', 'config'];
+type Tab = 'new' | 'list' | 'batches' | 'plan' | 'requests' | 'coupons' | 'fees' | 'config';
+const VALID_TABS: Tab[] = ['new', 'list', 'batches', 'plan', 'requests', 'coupons', 'fees', 'config'];
 // Admissions (everyone's data), Coupons, Course Fees, and Config are
 // admin-only screens — reps work entirely out of New Admission (which shows
-// their own recent admissions inline) and Upcoming Batches.
+// their own recent admissions inline), Upcoming Batches, Batch Plan, and
+// Seat Requests (where they can ask for held-back seats and admins release them).
 const TABS: { id: Tab; label: string; icon: React.ComponentType<{ className?: string }>; adminOnly?: boolean }[] = [
   { id: 'new', label: 'New Admission', icon: UserPlus },
   { id: 'batches', label: 'Upcoming Batches', icon: CalendarClock },
+  { id: 'plan', label: 'Batch Plan', icon: Grid3x3 },
+  { id: 'requests', label: 'Seat Requests', icon: Ticket },
   { id: 'list', label: 'Admissions', icon: ClipboardList, adminOnly: true },
   { id: 'coupons', label: 'Coupons', icon: Tags, adminOnly: true },
   { id: 'fees', label: 'Course Fees', icon: Wallet, adminOnly: true },
@@ -181,7 +196,9 @@ export default function AdmissionPage() {
 
       {tab === 'new' && <NewAdmissionTab canEdit={canEdit} setError={setError} />}
       {tab === 'list' && canAdmin && <AdmissionsListTab setError={setError} />}
-      {tab === 'batches' && <BatchesTab canAdmin={canAdmin} setError={setError} />}
+      {tab === 'batches' && <BatchesTab canAdmin={canAdmin} canEdit={canEdit} setError={setError} />}
+      {tab === 'plan' && <BatchPlanTab setError={setError} />}
+      {tab === 'requests' && <SeatRequestsTab canAdmin={canAdmin} canEdit={canEdit} setError={setError} />}
       {tab === 'coupons' && canAdmin && <CouponsTab setError={setError} />}
       {tab === 'fees' && canAdmin && <CourseFeesTab setError={setError} />}
       {tab === 'config' && canAdmin && <ConfigTab setError={setError} />}
@@ -639,9 +656,11 @@ const BADGE_STYLES: Record<SeatInfo['status'], string> = {
 };
 const MODE_LABELS: Record<DeliveryMode, string> = { ONLINE: 'Online', OFFLINE: 'Offline', HYBRID: 'Hybrid' };
 
-function BatchesTab({ canAdmin, setError }: { canAdmin: boolean; setError: (s: string) => void }) {
+function BatchesTab({ canAdmin, canEdit, setError }: { canAdmin: boolean; canEdit: boolean; setError: (s: string) => void }) {
   const [schedules, setSchedules] = useState<Schedule[] | null>(null);
   const [showCreate, setShowCreate] = useState(false);
+  const [holdFor, setHoldFor] = useState<Schedule | null>(null);
+  const [requestFor, setRequestFor] = useState<Schedule | null>(null);
 
   const load = useCallback(() => {
     api.get('/api/admissions/batches/upcoming', { params: { includeFull: 'true' } })
@@ -658,6 +677,8 @@ function BatchesTab({ canAdmin, setError }: { canAdmin: boolean; setError: (s: s
         </button>
       )}
       {showCreate && <CreateBatchModal onClose={() => setShowCreate(false)} onSaved={() => { setShowCreate(false); load(); }} setError={setError} />}
+      {holdFor && <HoldSeatsModal schedule={holdFor} onClose={() => setHoldFor(null)} onSaved={() => { setHoldFor(null); load(); }} setError={setError} />}
+      {requestFor && <RequestSeatModal schedule={requestFor} onClose={() => setRequestFor(null)} onSaved={() => setRequestFor(null)} setError={setError} />}
 
       {schedules === null ? (
         <div className="flex justify-center py-8"><Loader2 className="w-5 h-5 animate-spin text-blue-600" /></div>
@@ -665,42 +686,274 @@ function BatchesTab({ canAdmin, setError }: { canAdmin: boolean; setError: (s: s
         <p className="text-sm text-muted-foreground text-center py-6">No upcoming batches configured yet.</p>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-          {schedules.map((s) => (
-            <div key={s.id} className={`border rounded-xl p-4 space-y-2 ${SEAT_STYLES[s.seats.status]}`}>
-              <div className="flex items-start justify-between gap-2">
-                <div>
-                  <p className="font-semibold text-sm text-foreground">{s.batch.code}{s.code ? ` / ${s.code}` : ''}</p>
-                  <p className="text-xs text-muted-foreground">{s.course.name}</p>
+          {schedules.map((s) => {
+            const totalHeld = s.mode === 'HYBRID'
+              ? (s.seats.online?.held ?? 0) + (s.seats.offline?.held ?? 0)
+              : s.seats.held;
+            return (
+              <div key={s.id} className={`border rounded-xl p-4 space-y-2 ${SEAT_STYLES[s.seats.status]}`}>
+                <div className="flex items-start justify-between gap-2">
+                  <div>
+                    <p className="font-semibold text-sm text-foreground">{s.batch.code}{s.code ? ` / ${s.code}` : ''}</p>
+                    <p className="text-xs text-muted-foreground">{s.course.name}</p>
+                  </div>
+                  <span className={`text-xs font-medium px-2 py-0.5 rounded-full whitespace-nowrap ${BADGE_STYLES[s.seats.status]}`}>{MODE_LABELS[s.mode]}</span>
                 </div>
-                <span className={`text-xs font-medium px-2 py-0.5 rounded-full whitespace-nowrap ${BADGE_STYLES[s.seats.status]}`}>{MODE_LABELS[s.mode]}</span>
-              </div>
-              <p className="text-xs text-muted-foreground">{timingLabel(s)} · Starts {formatDate(s.startDate)}</p>
+                <p className="text-xs text-muted-foreground">{timingLabel(s)} · Starts {formatDate(s.startDate)}</p>
 
-              {s.mode === 'HYBRID' && s.seats.online && s.seats.offline ? (
-                <div className="space-y-2 pt-1">
-                  <div>
-                    <div className="flex items-center justify-between text-xs mb-1">
-                      <span className="flex items-center gap-1"><Monitor className="w-3.5 h-3.5" /> Online</span>
-                      <span className="font-medium">{s.seats.online.label}</span>
+                {s.mode === 'HYBRID' && s.seats.online && s.seats.offline ? (
+                  <div className="space-y-2 pt-1">
+                    <div>
+                      <div className="flex items-center justify-between text-xs mb-1">
+                        <span className="flex items-center gap-1"><Monitor className="w-3.5 h-3.5" /> Online</span>
+                        <span className="font-medium">{s.seats.online.label}</span>
+                      </div>
+                      <SeatMap seats={s.seats.online} />
                     </div>
-                    <SeatMap seats={s.seats.online} />
-                  </div>
-                  <div>
-                    <div className="flex items-center justify-between text-xs mb-1">
-                      <span className="flex items-center gap-1"><Building2 className="w-3.5 h-3.5" /> Offline</span>
-                      <span className="font-medium">{s.seats.offline.label}</span>
+                    <div>
+                      <div className="flex items-center justify-between text-xs mb-1">
+                        <span className="flex items-center gap-1"><Building2 className="w-3.5 h-3.5" /> Offline</span>
+                        <span className="font-medium">{s.seats.offline.label}</span>
+                      </div>
+                      <SeatMap seats={s.seats.offline} />
                     </div>
-                    <SeatMap seats={s.seats.offline} />
                   </div>
+                ) : (
+                  <div className="space-y-1.5 pt-1">
+                    <SeatMap seats={s.seats} />
+                    <p className="text-sm font-medium">{s.seats.label}</p>
+                  </div>
+                )}
+
+                {!!totalHeld && (
+                  <p className="text-xs text-orange-600 flex items-center gap-1 pt-0.5">
+                    <Lock className="w-3 h-3" /> {totalHeld} seat{totalHeld > 1 ? 's' : ''} held back{canAdmin ? '' : ' — request release below'}
+                  </p>
+                )}
+
+                <div className="flex gap-2 pt-1">
+                  {canAdmin && (
+                    <button onClick={() => setHoldFor(s)} className="text-xs px-2.5 py-1.5 rounded-lg border inline-flex items-center gap-1 hover:bg-white/60">
+                      <Lock className="w-3 h-3" /> Manage Hold
+                    </button>
+                  )}
+                  {canEdit && (
+                    <button onClick={() => setRequestFor(s)} className="text-xs px-2.5 py-1.5 rounded-lg border inline-flex items-center gap-1 hover:bg-white/60">
+                      <Ticket className="w-3 h-3" /> Request Seat
+                    </button>
+                  )}
                 </div>
-              ) : (
-                <div className="space-y-1.5 pt-1">
-                  <SeatMap seats={s.seats} />
-                  <p className="text-sm font-medium">{s.seats.label}</p>
-                </div>
-              )}
-            </div>
-          ))}
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** Admin sets exactly how many seats are held back for a schedule (direct set, not a delta). */
+function HoldSeatsModal({ schedule, onClose, onSaved, setError }: { schedule: Schedule; onClose: () => void; onSaved: () => void; setError: (s: string) => void }) {
+  const isHybrid = schedule.mode === 'HYBRID';
+  const [heldSeats, setHeldSeatsVal] = useState(String(schedule.seats.held ?? 0));
+  const [heldOnlineSeats, setHeldOnlineSeatsVal] = useState(String(schedule.seats.online?.held ?? 0));
+  const [heldOfflineSeats, setHeldOfflineSeatsVal] = useState(String(schedule.seats.offline?.held ?? 0));
+  const [saving, setSaving] = useState(false);
+
+  const submit = () => {
+    setSaving(true);
+    api.put(`/api/admissions/batches/${schedule.id}/hold`, isHybrid
+      ? { heldOnlineSeats: Number(heldOnlineSeats || 0), heldOfflineSeats: Number(heldOfflineSeats || 0) }
+      : { heldSeats: Number(heldSeats || 0) })
+      .then(onSaved)
+      .catch((err) => setError(errMsg(err, 'Could not update held seats.')))
+      .finally(() => setSaving(false));
+  };
+
+  return (
+    <Modal title={`Hold Seats — ${schedule.batch.code}${schedule.code ? ` / ${schedule.code}` : ''}`} onClose={onClose}>
+      <p className="text-xs text-muted-foreground">
+        Held seats are withheld from normal booking right now — e.g. reserved for a pending college enrollment. This is a real cap enforced when confirming an admission, not just a display change. Reps can request a release under Seat Requests.
+      </p>
+      {isHybrid ? (
+        <div className="grid grid-cols-2 gap-3">
+          <Field label={`Offline Held (of ${schedule.seats.offline?.rawTotal ?? '∞'}, ${schedule.seats.offline?.booked ?? 0} booked)`}>
+            <input type="number" min={0} className={inputCls} value={heldOfflineSeats} onChange={(e) => setHeldOfflineSeatsVal(e.target.value)} />
+          </Field>
+          <Field label={`Online Held (of ${schedule.seats.online?.rawTotal ?? '∞'}, ${schedule.seats.online?.booked ?? 0} booked)`}>
+            <input type="number" min={0} className={inputCls} value={heldOnlineSeats} onChange={(e) => setHeldOnlineSeatsVal(e.target.value)} />
+          </Field>
+        </div>
+      ) : (
+        <Field label={`Held (of ${schedule.seats.rawTotal ?? '∞'}, ${schedule.seats.booked} booked)`}>
+          <input type="number" min={0} className={inputCls} value={heldSeats} onChange={(e) => setHeldSeatsVal(e.target.value)} />
+        </Field>
+      )}
+      <div className="flex justify-end gap-2 pt-2">
+        <button onClick={onClose} className="px-4 py-2 text-sm rounded-lg border">Cancel</button>
+        <button onClick={submit} disabled={saving} className="px-4 py-2 text-sm rounded-lg bg-blue-600 text-white disabled:opacity-50">{saving ? 'Saving...' : 'Save'}</button>
+      </div>
+    </Modal>
+  );
+}
+
+/** A rep asks for N of the held-back seats to be released so they can book into this schedule. */
+function RequestSeatModal({ schedule, onClose, onSaved, setError }: { schedule: Schedule; onClose: () => void; onSaved: () => void; setError: (s: string) => void }) {
+  const isHybrid = schedule.mode === 'HYBRID';
+  const [deliveryMode, setDeliveryMode] = useState<'ONLINE' | 'OFFLINE' | ''>('');
+  const [seatsRequested, setSeatsRequested] = useState('1');
+  const [reason, setReason] = useState('');
+  const [saving, setSaving] = useState(false);
+
+  const canSubmit = Number(seatsRequested) > 0 && (!isHybrid || deliveryMode);
+
+  const submit = () => {
+    if (!canSubmit) return;
+    setSaving(true);
+    api.post('/api/admissions/seat-requests', {
+      scheduleId: schedule.id,
+      deliveryMode: isHybrid ? deliveryMode : undefined,
+      seatsRequested: Number(seatsRequested),
+      reason: reason || undefined,
+    })
+      .then(onSaved)
+      .catch((err) => setError(errMsg(err, 'Could not submit the seat request.')))
+      .finally(() => setSaving(false));
+  };
+
+  return (
+    <Modal title={`Request Seats — ${schedule.batch.code}${schedule.code ? ` / ${schedule.code}` : ''}`} onClose={onClose}>
+      <p className="text-xs text-muted-foreground">Asks an admin to release seats being held back for this batch. Check status under the Seat Requests tab.</p>
+      {isHybrid && (
+        <Field label="Delivery Mode *">
+          <div className="flex gap-2">
+            {(['OFFLINE', 'ONLINE'] as const).map((m) => (
+              <button
+                type="button"
+                key={m}
+                onClick={() => setDeliveryMode(m)}
+                className={`flex-1 text-sm border rounded-lg px-3 py-2 ${deliveryMode === m ? 'border-blue-600 ring-1 ring-blue-600 bg-blue-50' : ''}`}
+              >
+                {m === 'ONLINE' ? 'Online' : 'Offline'}
+              </button>
+            ))}
+          </div>
+        </Field>
+      )}
+      <Field label="Seats Requested *"><input type="number" min={1} className={inputCls} value={seatsRequested} onChange={(e) => setSeatsRequested(e.target.value)} /></Field>
+      <Field label="Reason"><textarea className={inputCls} rows={2} value={reason} onChange={(e) => setReason(e.target.value)} placeholder="Optional — helps the admin decide" /></Field>
+      <div className="flex justify-end gap-2 pt-2">
+        <button onClick={onClose} className="px-4 py-2 text-sm rounded-lg border">Cancel</button>
+        <button onClick={submit} disabled={!canSubmit || saving} className="px-4 py-2 text-sm rounded-lg bg-blue-600 text-white disabled:opacity-50">{saving ? 'Sending...' : 'Send Request'}</button>
+      </div>
+    </Modal>
+  );
+}
+
+// ── Seat Requests tab ─────────────────────────────────────────────────────────
+const REQUEST_STATUS_STYLES: Record<SeatHoldRequestItem['status'], string> = {
+  PENDING: 'bg-amber-50 text-amber-700',
+  APPROVED: 'bg-green-50 text-green-700',
+  REJECTED: 'bg-gray-100 text-gray-600',
+};
+
+function SeatRequestsTab({ canAdmin, canEdit, setError }: { canAdmin: boolean; canEdit: boolean; setError: (s: string) => void }) {
+  const [requests, setRequests] = useState<SeatHoldRequestItem[] | null>(null);
+  const [statusFilter, setStatusFilter] = useState<'' | 'PENDING' | 'APPROVED' | 'REJECTED'>(canAdmin ? 'PENDING' : '');
+  const [respondingId, setRespondingId] = useState<string | null>(null);
+  const [responseNote, setResponseNote] = useState('');
+  const [busy, setBusy] = useState(false);
+
+  const load = useCallback(() => {
+    api.get('/api/admissions/seat-requests', { params: statusFilter ? { status: statusFilter } : {} })
+      .then((r) => setRequests(r.data.data))
+      .catch((err) => setError(errMsg(err, 'Could not load seat requests.')));
+  }, [statusFilter, setError]);
+  useEffect(() => { load(); }, [load]);
+
+  const respond = (id: string, action: 'approve' | 'reject') => {
+    setBusy(true);
+    api.post(`/api/admissions/seat-requests/${id}/${action}`, { responseNote: responseNote || undefined })
+      .then(() => { setRespondingId(null); setResponseNote(''); load(); })
+      .catch((err) => setError(errMsg(err, `Could not ${action} the request.`)))
+      .finally(() => setBusy(false));
+  };
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center gap-2">
+        {(['', 'PENDING', 'APPROVED', 'REJECTED'] as const).map((s) => (
+          <button
+            key={s || 'ALL'}
+            onClick={() => setStatusFilter(s)}
+            className={`text-xs px-3 py-1.5 rounded-full border ${statusFilter === s ? 'border-blue-600 bg-blue-50 text-blue-700' : 'text-muted-foreground'}`}
+          >
+            {s || 'All'}
+          </button>
+        ))}
+      </div>
+
+      {!canEdit && <p className="text-xs text-muted-foreground">You have view-only access — requesting seats needs Edit access.</p>}
+
+      {requests === null ? (
+        <div className="flex justify-center py-8"><Loader2 className="w-5 h-5 animate-spin text-blue-600" /></div>
+      ) : requests.length === 0 ? (
+        <p className="text-sm text-muted-foreground text-center py-6">{canAdmin ? 'No seat requests yet.' : "You haven't requested any held-back seats yet — use \"Request Seat\" on a batch under Upcoming Batches."}</p>
+      ) : (
+        <div className="border rounded-xl overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead className="bg-gray-50 text-xs text-muted-foreground">
+              <tr>
+                <th className="text-left px-4 py-2">Batch / Course</th>
+                <th className="text-left px-4 py-2">Mode</th>
+                <th className="text-left px-4 py-2">Seats</th>
+                <th className="text-left px-4 py-2">Reason</th>
+                {canAdmin && <th className="text-left px-4 py-2">Requested By</th>}
+                <th className="text-left px-4 py-2">Status</th>
+                <th className="text-left px-4 py-2">Date</th>
+                {canAdmin && <th className="text-left px-4 py-2">Action</th>}
+              </tr>
+            </thead>
+            <tbody className="divide-y">
+              {requests.map((r) => (
+                  <tr key={r.id}>
+                    <td className="px-4 py-2.5">
+                      <p className="font-medium">{r.schedule.code || r.schedule.course.name}</p>
+                      <p className="text-xs text-muted-foreground">{r.schedule.course.name} · {timingLabel(r.schedule)}</p>
+                    </td>
+                    <td className="px-4 py-2.5">{r.deliveryMode ? MODE_LABELS[r.deliveryMode] : MODE_LABELS[r.schedule.mode]}</td>
+                    <td className="px-4 py-2.5">{r.seatsRequested}</td>
+                    <td className="px-4 py-2.5 text-xs text-muted-foreground max-w-[220px] truncate" title={r.reason || ''}>{r.reason || '—'}</td>
+                    {canAdmin && <td className="px-4 py-2.5">{r.requestedBy ? `${r.requestedBy.firstName} ${r.requestedBy.lastName}` : '—'}</td>}
+                    <td className="px-4 py-2.5"><span className={`px-2 py-0.5 rounded-full text-xs ${REQUEST_STATUS_STYLES[r.status]}`}>{r.status}</span></td>
+                    <td className="px-4 py-2.5 text-xs text-muted-foreground">{formatDate(r.createdAt)}</td>
+                    {canAdmin && (
+                      <td className="px-4 py-2.5">
+                        {r.status === 'PENDING' ? (
+                          respondingId === r.id ? (
+                            <div className="flex items-center gap-1">
+                              <input
+                                className="border rounded-lg px-2 py-1 text-xs w-28"
+                                placeholder="Note (optional)"
+                                value={responseNote}
+                                onChange={(e) => setResponseNote(e.target.value)}
+                              />
+                              <button disabled={busy} onClick={() => respond(r.id, 'approve')} className="p-1.5 rounded-lg bg-green-600 text-white disabled:opacity-50"><Check className="w-3.5 h-3.5" /></button>
+                              <button disabled={busy} onClick={() => respond(r.id, 'reject')} className="p-1.5 rounded-lg bg-red-600 text-white disabled:opacity-50"><XCircle className="w-3.5 h-3.5" /></button>
+                              <button onClick={() => { setRespondingId(null); setResponseNote(''); }} className="p-1.5 rounded-lg border"><X className="w-3.5 h-3.5" /></button>
+                            </div>
+                          ) : (
+                            <button onClick={() => setRespondingId(r.id)} className="text-xs px-2.5 py-1.5 rounded-lg border">Respond</button>
+                          )
+                        ) : (
+                          <span className="text-xs text-muted-foreground">{r.respondedBy ? `by ${r.respondedBy.firstName} ${r.respondedBy.lastName}` : '—'}{r.responseNote ? ` — ${r.responseNote}` : ''}</span>
+                        )}
+                      </td>
+                    )}
+                  </tr>
+              ))}
+            </tbody>
+          </table>
         </div>
       )}
     </div>
@@ -813,6 +1066,83 @@ function CreateBatchModal({ onClose, onSaved, setError }: { onClose: () => void;
   );
 }
 
+// ── Batch Plan tab ────────────────────────────────────────────────────────────
+interface BatchPlanCell { booked: number; total: number | null }
+interface BatchPlanData {
+  courses: Course[];
+  offlineSlots: string[];
+  onlineSlots: string[];
+  matrix: Record<string, { offline: Record<string, BatchPlanCell>; online: Record<string, BatchPlanCell> }>;
+}
+
+function planCellStyle(cell?: BatchPlanCell) {
+  if (!cell) return 'text-muted-foreground/40';
+  if (cell.total == null) return 'text-green-700 bg-green-50';
+  const pct = cell.total === 0 ? 1 : cell.booked / cell.total;
+  if (pct >= 1) return 'text-red-700 bg-red-50 font-medium';
+  if (pct >= 0.75) return 'text-orange-700 bg-orange-50 font-medium';
+  return 'text-green-700 bg-green-50 font-medium';
+}
+
+function BatchPlanTab({ setError }: { setError: (s: string) => void }) {
+  const [data, setData] = useState<BatchPlanData | null>(null);
+
+  useEffect(() => {
+    api.get('/api/admissions/batch-plan').then((r) => setData(r.data.data)).catch((err) => setError(errMsg(err, 'Could not load the batch plan.')));
+  }, [setError]);
+
+  if (data === null) return <div className="flex justify-center py-8"><Loader2 className="w-5 h-5 animate-spin text-blue-600" /></div>;
+  if (data.courses.length === 0) return <p className="text-sm text-muted-foreground text-center py-6">No open batches to plan against yet — create one under Upcoming Batches.</p>;
+
+  return (
+    <div className="border rounded-xl overflow-x-auto">
+      <table className="text-sm border-collapse">
+        <thead>
+          <tr className="bg-gray-50 text-xs text-muted-foreground">
+            <th rowSpan={2} className="text-left px-4 py-2 border-r sticky left-0 bg-gray-50">Course</th>
+            {data.offlineSlots.length > 0 && <th colSpan={data.offlineSlots.length} className="text-center px-2 py-1 border-r border-b font-semibold text-foreground">Offline</th>}
+            {data.onlineSlots.length > 0 && <th colSpan={data.onlineSlots.length} className="text-center px-2 py-1 border-b font-semibold text-foreground">Online</th>}
+          </tr>
+          <tr className="bg-gray-50 text-xs text-muted-foreground">
+            {data.offlineSlots.map((slot, i) => (
+              <th key={`o-${slot}`} className={`text-center px-3 py-1.5 whitespace-nowrap ${i === data.offlineSlots.length - 1 ? 'border-r' : ''}`}>{slot}</th>
+            ))}
+            {data.onlineSlots.map((slot) => (
+              <th key={`n-${slot}`} className="text-center px-3 py-1.5 whitespace-nowrap">{slot}</th>
+            ))}
+          </tr>
+        </thead>
+        <tbody className="divide-y">
+          {data.courses.map((c) => {
+            const row = data.matrix[c.id];
+            return (
+              <tr key={c.id}>
+                <td className="px-4 py-2 border-r font-medium sticky left-0 bg-white">{c.name}</td>
+                {data.offlineSlots.map((slot, i) => {
+                  const cell = row?.offline[slot];
+                  return (
+                    <td key={`o-${slot}`} className={`text-center px-3 py-2 ${planCellStyle(cell)} ${i === data.offlineSlots.length - 1 ? 'border-r' : ''}`}>
+                      {cell ? `${cell.booked}/${cell.total ?? '∞'}` : '—'}
+                    </td>
+                  );
+                })}
+                {data.onlineSlots.map((slot) => {
+                  const cell = row?.online[slot];
+                  return (
+                    <td key={`n-${slot}`} className={`text-center px-3 py-2 ${planCellStyle(cell)}`}>
+                      {cell ? `${cell.booked}/${cell.total ?? '∞'}` : '—'}
+                    </td>
+                  );
+                })}
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
 // ── Coupons tab (admin only) ─────────────────────────────────────────────────
 function CouponsTab({ setError }: { setError: (s: string) => void }) {
   const [coupons, setCoupons] = useState<Coupon[] | null>(null);
@@ -854,7 +1184,12 @@ function CouponsTab({ setError }: { setError: (s: string) => void }) {
                   <td className="px-4 py-2.5 font-medium">{c.code}</td>
                   <td className="px-4 py-2.5">{c.name}</td>
                   <td className="px-4 py-2.5">{c.discountType === 'FIXED' ? money(c.discountValue) : `${c.discountValue}%`}</td>
-                  <td className="px-4 py-2.5 text-xs text-muted-foreground">{c.course?.name || 'All courses'}</td>
+                  <td className="px-4 py-2.5 text-xs text-muted-foreground">
+                    {c.course?.name || 'All courses'}
+                    {c.restrictedToEmployee && (
+                      <div className="text-orange-600 font-medium">Only {c.restrictedToEmployee.firstName} {c.restrictedToEmployee.lastName} ({c.restrictedToEmployee.employeeCode})</div>
+                    )}
+                  </td>
                   <td className="px-4 py-2.5 text-xs text-muted-foreground">{formatDate(c.validFrom)} – {formatDate(c.validUntil)}</td>
                   <td className="px-4 py-2.5 text-xs text-muted-foreground">{c._count?.usages ?? 0}{c.maxUsage ? ` / ${c.maxUsage}` : ''}</td>
                   <td className="px-4 py-2.5"><span className={`px-2 py-0.5 rounded-full text-xs ${c.status === 'ACTIVE' ? 'bg-green-50 text-green-700' : 'bg-gray-100 text-gray-600'}`}>{c.status}</span></td>
@@ -878,12 +1213,29 @@ function AddCouponModal({ onClose, onSaved, setError }: { onClose: () => void; o
   const [maxUsage, setMaxUsage] = useState('');
   const [saving, setSaving] = useState(false);
 
+  const [restrictToEmployee, setRestrictToEmployee] = useState(false);
+  const [empQuery, setEmpQuery] = useState('');
+  const [empResults, setEmpResults] = useState<EmployeeLite[]>([]);
+  const [selectedEmp, setSelectedEmp] = useState<EmployeeLite | null>(null);
+
+  useEffect(() => {
+    if (!restrictToEmployee || selectedEmp || !empQuery.trim()) { setEmpResults([]); return; }
+    const t = setTimeout(() => {
+      api.get('/api/admissions/employees/search', { params: { q: empQuery } })
+        .then((r) => setEmpResults(r.data.data))
+        .catch(() => setEmpResults([]));
+    }, 250);
+    return () => clearTimeout(t);
+  }, [empQuery, restrictToEmployee, selectedEmp]);
+
   const submit = () => {
     if (!code || !name || !discountValue || !validFrom || !validUntil) return;
+    if (restrictToEmployee && !selectedEmp) return;
     setSaving(true);
     api.post('/api/admissions/coupons', {
       code, name, discountType, discountValue: Number(discountValue),
       validFrom, validUntil, maxUsage: maxUsage || undefined,
+      restrictedToEmployeeId: restrictToEmployee ? selectedEmp?.id : undefined,
     })
       .then(onSaved)
       .catch((err) => setError(errMsg(err, 'Could not create coupon.')))
@@ -906,9 +1258,45 @@ function AddCouponModal({ onClose, onSaved, setError }: { onClose: () => void; o
         <Field label="Valid Until *"><input type="date" className={inputCls} value={validUntil} onChange={(e) => setValidUntil(e.target.value)} /></Field>
         <Field label="Max Usage"><input type="number" className={inputCls} value={maxUsage} onChange={(e) => setMaxUsage(e.target.value)} placeholder="Unlimited" /></Field>
       </div>
+
+      <div>
+        <label className="flex items-center gap-2 text-sm">
+          <input type="checkbox" checked={restrictToEmployee} onChange={(e) => { setRestrictToEmployee(e.target.checked); setSelectedEmp(null); setEmpQuery(''); }} />
+          Restrict to one employee (only they can apply this coupon)
+        </label>
+        {restrictToEmployee && (
+          <div className="mt-2">
+            {selectedEmp ? (
+              <div className="flex items-center justify-between border rounded-lg px-3 py-2 text-sm bg-blue-50 border-blue-200">
+                <span>{selectedEmp.firstName} {selectedEmp.lastName} ({selectedEmp.employeeCode})</span>
+                <button onClick={() => setSelectedEmp(null)}><X className="w-4 h-4" /></button>
+              </div>
+            ) : (
+              <>
+                <input className={inputCls} value={empQuery} onChange={(e) => setEmpQuery(e.target.value)} placeholder="Search by name or employee code" />
+                {empResults.length > 0 && (
+                  <div className="border rounded-lg mt-1 divide-y max-h-40 overflow-y-auto">
+                    {empResults.map((emp) => (
+                      <button
+                        type="button"
+                        key={emp.id}
+                        onClick={() => { setSelectedEmp(emp); setEmpResults([]); }}
+                        className="w-full text-left px-3 py-2 text-sm hover:bg-gray-50"
+                      >
+                        {emp.firstName} {emp.lastName} <span className="text-xs text-muted-foreground">({emp.employeeCode})</span>
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </>
+            )}
+          </div>
+        )}
+      </div>
+
       <div className="flex justify-end gap-2 pt-2">
         <button onClick={onClose} className="px-4 py-2 text-sm rounded-lg border">Cancel</button>
-        <button onClick={submit} disabled={saving} className="px-4 py-2 text-sm rounded-lg bg-blue-600 text-white disabled:opacity-50">{saving ? 'Saving...' : 'Create Coupon'}</button>
+        <button onClick={submit} disabled={saving || (restrictToEmployee && !selectedEmp)} className="px-4 py-2 text-sm rounded-lg bg-blue-600 text-white disabled:opacity-50">{saving ? 'Saving...' : 'Create Coupon'}</button>
       </div>
     </Modal>
   );

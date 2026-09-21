@@ -13,7 +13,7 @@ import {
   Wallet, GraduationCap, Target, Megaphone, KeyRound,
   BookOpen, PiggyBank, Store, Repeat, PieChart, X, Receipt, CheckCircle2,
   Presentation, CalendarClock, Handshake, ListChecks, Mic2, Network, FileBadge, Percent, Activity, RefreshCw,
-  FileSignature, Award, ClipboardCheck, Ticket, Settings2, Tags,
+  FileSignature, Award, ClipboardCheck, Ticket, Settings2, Tags, Grid3x3,
 } from 'lucide-react';
 
 const LEVEL_RANK: Record<AccessLevel, number> = { NONE: 0, VIEW: 1, EDIT: 2, ADMIN: 3 };
@@ -112,6 +112,8 @@ const moduleNavItems: ModuleNavItem[] = [
     children: [
       { label: 'New Admission',  to: '/admission?tab=new',     icon: UserPlus,   module: 'ADMISSION' },
       { label: 'Upcoming Batches', to: '/admission?tab=batches', icon: CalendarClock, module: 'ADMISSION' },
+      { label: 'Batch Plan',     to: '/admission?tab=plan',    icon: Grid3x3,    module: 'ADMISSION' },
+      { label: 'Seat Requests',  to: '/admission?tab=requests', icon: Ticket,    module: 'ADMISSION' },
       // Admissions (all reps' data), Coupons, Course Fees, and Config are
       // admin-only — reps only ever work from New Admission + Upcoming
       // Batches, and see their own admissions inline under New Admission.
