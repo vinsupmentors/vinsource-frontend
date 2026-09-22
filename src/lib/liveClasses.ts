@@ -65,6 +65,102 @@ export const STATUS_BADGE: Record<LiveClassStatus, string> = {
   CANCELLED: 'bg-gray-100 text-gray-600',
 };
 
+// ── Attendance-from-video ───────────────────────────────────────────────────
+export type LiveClassAttendanceStatus = 'PRESENT' | 'PARTIAL' | 'ABSENT';
+
+export interface LiveClassAttendanceRecord {
+  id: string;
+  liveClassId: string;
+  studentId: string;
+  status: LiveClassAttendanceStatus;
+  attendedMinutes: number;
+  classMinutes: number;
+  percentAttended: number;
+  student: { id: string; firstName: string; lastName: string; studentCode: string; photo: string | null };
+}
+
+export interface LiveClassAttendanceResponse {
+  forEveryone: boolean;
+  computed: boolean; // false until the class has actually ended
+  records: LiveClassAttendanceRecord[];
+}
+
+export const ATTENDANCE_BADGE: Record<LiveClassAttendanceStatus, string> = {
+  PRESENT: 'bg-emerald-50 text-emerald-700',
+  PARTIAL: 'bg-amber-50 text-amber-700',
+  ABSENT: 'bg-red-50 text-red-700',
+};
+
+// ── Analytics ────────────────────────────────────────────────────────────────
+export interface LiveClassAnalyticsSummary {
+  totalClasses: number;
+  completedClasses: number;
+  cancelledClasses: number;
+  avgAttendancePercent: number;
+  totalChatMessages: number;
+  avgChatMessagesPerClass: number;
+}
+
+export interface LiveClassAnalyticsTrainerRow {
+  trainerId: string;
+  name: string;
+  classesHosted: number;
+  avgAttendancePercent: number;
+}
+
+export interface LiveClassAnalyticsBatchRow {
+  batchId: string;
+  code: string;
+  classesCount: number;
+  avgAttendancePercent: number;
+}
+
+export interface LiveClassAnalyticsTrendPoint {
+  classId: string;
+  date: string;
+  avgAttendancePercent: number;
+  present: number;
+  partial: number;
+  absent: number;
+}
+
+export interface LiveClassAnalytics {
+  summary: LiveClassAnalyticsSummary;
+  byTrainer: LiveClassAnalyticsTrainerRow[];
+  byBatch: LiveClassAnalyticsBatchRow[];
+  trend: LiveClassAnalyticsTrendPoint[];
+}
+
+// ── Recording ────────────────────────────────────────────────────────────────
+export type LiveClassRecordingStatus = 'RECORDING' | 'READY' | 'FAILED';
+
+export interface LiveClassRecordingRecord {
+  id: string;
+  status: LiveClassRecordingStatus;
+  durationSec: number | null;
+  startedAt: string;
+  endedAt: string | null;
+}
+
+export interface LiveClassPlaybackUrl {
+  url: string;
+  expiresInSeconds: number;
+}
+
+export const RECORDING_BADGE: Record<LiveClassRecordingStatus, string> = {
+  RECORDING: 'bg-blue-50 text-blue-700',
+  READY: 'bg-emerald-50 text-emerald-700',
+  FAILED: 'bg-red-50 text-red-700',
+};
+
+/** "754" seconds -> "12:34" */
+export function formatDuration(sec?: number | null): string {
+  if (!sec && sec !== 0) return '—';
+  const m = Math.floor(sec / 60);
+  const s = sec % 60;
+  return `${m}:${String(s).padStart(2, '0')}`;
+}
+
 /** "09:30" -> "9:30 AM" */
 export function formatClockTime(hhmm?: string | null): string {
   if (!hhmm) return '';

@@ -2,10 +2,25 @@ import { useCallback, useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import api from '@/lib/api';
 import {
-  LiveClass, LiveClassDashboard, STATUS_BADGE,
+  LiveClass, LiveClassDashboard, STATUS_BADGE, ATTENDANCE_BADGE, LiveClassAttendanceResponse,
+  LiveClassRecordingRecord, LiveClassPlaybackUrl, RECORDING_BADGE, formatDuration,
   formatTimeRange, formatClassDate, errMsg,
 } from '@/lib/liveClasses';
-import { Radio, Clock, CalendarClock, CheckCircle2, Loader2, X } from 'lucide-react';
+import { Radio, Clock, CalendarClock, CheckCircle2, Loader2, X, Film, PlayCircle } from 'lucide-react';
+
+function Modal({ title, onClose, children }: { title: string; onClose: () => void; children: React.ReactNode }) {
+  return (
+    <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
+      <div className="bg-white rounded-xl w-full max-w-lg max-h-[90vh] flex flex-col overflow-hidden">
+        <div className="flex items-center justify-between px-6 py-4 border-b flex-shrink-0">
+          <h2 className="font-semibold text-lg">{title}</h2>
+          <button onClick={onClose}><X className="w-4 h-4" /></button>
+        </div>
+        <div className="p-6 space-y-4 overflow-y-auto">{children}</div>
+      </div>
+    </div>
+  );
+}
 
 type Tab = 'today' | 'upcoming' | 'completed';
 const TABS: { id: Tab; label: string }[] = [
@@ -80,6 +95,7 @@ function LiveNowBanner({ setError, onJoin }: { setError: (s: string) => void; on
 
 function ClassList({ view, setError }: { view: Tab; setError: (s: string) => void }) {
   const [classes, setClasses] = useState<LiveClass[] | null>(null);
+  const [recordingsFor, setRecordingsFor] = useState<LiveClass | null>(null);
   const navigate = useNavigate();
 
   const load = useCallback(() => {
@@ -121,13 +137,103 @@ function ClassList({ view, setError }: { view: Tab; setError: (s: string) => voi
               </button>
             )}
             {c.status === 'COMPLETED' && (
-              <button disabled className="w-full px-3 py-1.5 text-xs rounded-lg border text-muted-foreground inline-flex items-center justify-center gap-1">
-                <CheckCircle2 className="w-3 h-3" /> Completed
-              </button>
+              <div className="space-y-1.5">
+                <MyAttendance liveClassId={c.id} />
+                <button onClick={() => setRecordingsFor(c)} className="w-full px-3 py-1.5 text-xs rounded-lg border inline-flex items-center justify-center gap-1">
+                  <Film className="w-3 h-3" /> Recording
+                </button>
+              </div>
             )}
           </div>
         </div>
       ))}
+      {recordingsFor && <RecordingsModal liveClass={recordingsFor} onClose={() => setRecordingsFor(null)} setError={setError} />}
+    </div>
+  );
+}
+
+/** Own-class recording playback — same signed-URL flow as the staff page,
+ * reachable here because a student who was enrolled in the class passes the
+ * same assertCanJoin() ownership check the backend runs for every recording
+ * endpoint (see liveClasses.controller.ts `recordings`/`playRecording`). */
+function RecordingsModal({ liveClass, onClose, setError }: { liveClass: LiveClass; onClose: () => void; setError: (s: string) => void }) {
+  const [recordings, setRecordings] = useState<LiveClassRecordingRecord[] | null>(null);
+  const [playingId, setPlayingId] = useState<string | null>(null);
+  const [playback, setPlayback] = useState<LiveClassPlaybackUrl | null>(null);
+
+  useEffect(() => {
+    api.get(`/api/live-classes/${liveClass.id}/recordings`).then((r) => setRecordings(r.data.data)).catch((err) => setError(errMsg(err, 'Could not load the recording.')));
+  }, [liveClass.id, setError]);
+
+  const play = (recordingId: string) => {
+    setPlayingId(recordingId);
+    setPlayback(null);
+    api.get(`/api/live-classes/${liveClass.id}/recordings/${recordingId}/play`)
+      .then((r) => setPlayback(r.data.data))
+      .catch((err) => { setError(errMsg(err, 'Could not load the recording.')); setPlayingId(null); });
+  };
+
+  return (
+    <Modal title={`Recording — ${liveClass.title}`} onClose={onClose}>
+      {!recordings ? (
+        <div className="flex justify-center py-8"><Loader2 className="w-5 h-5 animate-spin text-blue-600" /></div>
+      ) : recordings.length === 0 ? (
+        <p className="text-sm text-muted-foreground text-center py-6">No recording available for this class.</p>
+      ) : (
+        <div className="space-y-3">
+          {playingId && playback && (
+            <video key={playback.url} src={playback.url} controls autoPlay className="w-full rounded-lg bg-black max-h-[50vh]" />
+          )}
+          {playingId && !playback && (
+            <div className="flex justify-center py-6"><Loader2 className="w-5 h-5 animate-spin text-blue-600" /></div>
+          )}
+          <div className="border rounded-lg divide-y">
+            {recordings.map((r) => (
+              <div key={r.id} className="px-3 py-2.5 flex items-center justify-between gap-3">
+                <div>
+                  <p className="text-sm font-medium">{formatClassDate(r.startedAt)} · {formatDuration(r.durationSec)}</p>
+                  <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${RECORDING_BADGE[r.status]}`}>{r.status}</span>
+                </div>
+                {r.status === 'READY' ? (
+                  <button onClick={() => play(r.id)} className="px-3 py-1.5 text-xs rounded-lg bg-blue-600 text-white font-medium inline-flex items-center gap-1">
+                    <PlayCircle className="w-3 h-3" /> {playingId === r.id ? 'Playing' : 'Play'}
+                  </button>
+                ) : r.status === 'RECORDING' ? (
+                  <span className="text-xs text-muted-foreground">Processing…</span>
+                ) : (
+                  <span className="text-xs text-red-600">Failed</span>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </Modal>
+  );
+}
+
+/** Own attendance status for one completed class — fetched lazily per-card
+ * (GET /:id/attendance self-scopes to the caller's own row for a student). */
+function MyAttendance({ liveClassId }: { liveClassId: string }) {
+  const [data, setData] = useState<LiveClassAttendanceResponse | null>(null);
+
+  useEffect(() => {
+    api.get(`/api/live-classes/${liveClassId}/attendance`).then((r) => setData(r.data.data)).catch(() => setData(null));
+  }, [liveClassId]);
+
+  const record = data?.records[0];
+  if (!data || !data.computed || !record) {
+    return (
+      <button disabled className="w-full px-3 py-1.5 text-xs rounded-lg border text-muted-foreground inline-flex items-center justify-center gap-1">
+        <CheckCircle2 className="w-3 h-3" /> Completed
+      </button>
+    );
+  }
+  return (
+    <div className={`w-full px-3 py-1.5 text-xs rounded-lg text-center font-medium ${ATTENDANCE_BADGE[record.status]}`}>
+      {record.status === 'PRESENT' && 'Present'}
+      {record.status === 'PARTIAL' && `Partial (${record.percentAttended}%)`}
+      {record.status === 'ABSENT' && 'Absent'}
     </div>
   );
 }
