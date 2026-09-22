@@ -1,10 +1,10 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import api, { BASE_URL } from '@/lib/api';
 import { useModuleAccess } from '@/hooks/useModuleAccess';
 import { useCertificateCapture, CertRenderData } from '@/hooks/useCertificateCapture';
 import {
   Award, Loader2, X, CheckCircle2, Circle, Download, User, GraduationCap,
-  Wallet, BarChart3, ClipboardList,
+  Wallet, BarChart3, ClipboardList, Search,
 } from 'lucide-react';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -250,18 +250,38 @@ export default function CertificateApprovals() {
   const [filter, setFilter] = useState<'ALL' | CertType>('ALL');
   const [reviewId, setReviewId] = useState<string | null>(null);
 
-  const load = () => {
+  const [batches, setBatches] = useState<{ id: string; code: string }[]>([]);
+  const [batchId, setBatchId] = useState('');
+  const [searchInput, setSearchInput] = useState('');
+  const [search, setSearch] = useState('');
+
+  // Debounce the search box so every keystroke doesn't fire a request.
+  useEffect(() => {
+    const t = setTimeout(() => setSearch(searchInput.trim()), 350);
+    return () => clearTimeout(t);
+  }, [searchInput]);
+
+  useEffect(() => {
+    api.get('/api/certificate-requests/batches').then((r) => setBatches(r.data.data || [])).catch(() => setBatches([]));
+  }, []);
+
+  // Batch + search are applied server-side (need a join through the
+  // student's enrollment); the type tab stays a client-side filter over that
+  // same result set, same as before.
+  const load = useCallback(() => {
     setLoading(true);
-    api.get('/api/certificate-requests').then((r) => setRows(r.data.data || [])).finally(() => setLoading(false));
-  };
-  useEffect(load, []);
+    api.get('/api/certificate-requests', { params: { batchId: batchId || undefined, search: search || undefined } })
+      .then((r) => setRows(r.data.data || []))
+      .finally(() => setLoading(false));
+  }, [batchId, search]);
+  useEffect(() => { load(); }, [load]);
 
   const filtered = filter === 'ALL' ? rows : rows.filter((r) => r.type === filter);
   const pendingCount = rows.filter((r) => !r.feeApprovedAt || !r.ldmApprovedAt).length;
 
   return (
     <div className="space-y-5">
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between flex-wrap gap-3">
         <div>
           <h1 className="text-xl font-bold flex items-center gap-2"><Award className="w-5 h-5 text-amber-600" /> Certificate Approvals</h1>
           <p className="text-sm text-muted-foreground mt-0.5">{pendingCount} awaiting approval · {rows.length} total</p>
@@ -277,6 +297,22 @@ export default function CertificateApprovals() {
             </button>
           ))}
         </div>
+      </div>
+
+      <div className="flex items-center gap-2 flex-wrap">
+        <div className="relative">
+          <Search className="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground" />
+          <input
+            value={searchInput}
+            onChange={(e) => setSearchInput(e.target.value)}
+            placeholder="Search by name or student code"
+            className="pl-8 pr-3 py-2 border rounded-lg text-sm w-64"
+          />
+        </div>
+        <select value={batchId} onChange={(e) => setBatchId(e.target.value)} className="px-3 py-2 border rounded-lg text-sm">
+          <option value="">All batches</option>
+          {batches.map((b) => <option key={b.id} value={b.id}>{b.code}</option>)}
+        </select>
       </div>
 
       {loading ? (

@@ -2462,16 +2462,22 @@ interface PortfolioRow {
   reviewedAt?: string | null;
   student: {
     id: string; firstName: string; lastName: string; studentCode: string; track: StudentTrack;
-    enrollments: { schedule: { course: { id: string; name: string } } }[];
+    enrollments: { schedule: { course: { id: string; name: string }; batch: { id: string; code: string } | null } }[];
   };
 }
 
 const PT_PORTFOLIO_GROUP = 'PT — Direct Placement';
+// PT (direct-placement) students have no enrollment at all, so they have no
+// batch or course to group under — both levels fall back to the same
+// "PT — Direct Placement" bucket.
+const portfolioBatchKey = (row: PortfolioRow) => row.student.enrollments?.[0]?.schedule.batch?.id || PT_PORTFOLIO_GROUP;
+const portfolioBatchLabel = (row: PortfolioRow) => row.student.enrollments?.[0]?.schedule.batch?.code || PT_PORTFOLIO_GROUP;
 const portfolioCourseName = (row: PortfolioRow) => row.student.enrollments?.[0]?.schedule.course.name || PT_PORTFOLIO_GROUP;
 
 function PortfoliosTab({ canEdit, setError }: { canEdit: boolean; setError: (s: string) => void }) {
   const [rows, setRows] = useState<PortfolioRow[]>([]);
   const [loading, setLoading] = useState(true);
+  const [selectedBatch, setSelectedBatch] = useState<string | null>(null);
   const [selectedGroup, setSelectedGroup] = useState<string | null>(null);
   const [expanded, setExpanded] = useState<string | null>(null);
   const [rejecting, setRejecting] = useState<PortfolioRow | null>(null);
@@ -2532,11 +2538,63 @@ function PortfoliosTab({ canEdit, setError }: { canEdit: boolean; setError: (s: 
     return <div className="flex items-center justify-center h-40"><Loader2 className="w-6 h-6 animate-spin text-primary" /></div>;
   }
 
-  // Group by course (PT / direct-placement students, who have no
-  // enrollment, land in their own bucket). Courses with zero submissions
+  // Group by Batch first (PT / direct-placement students, who have no
+  // enrollment, land in their own bucket). Batches with zero submissions
   // don't get a card — nothing to see there yet.
-  const groups = new Map<string, PortfolioRow[]>();
+  const batchGroups = new Map<string, { label: string; rows: PortfolioRow[] }>();
   for (const row of rows) {
+    const key = portfolioBatchKey(row);
+    if (!batchGroups.has(key)) batchGroups.set(key, { label: portfolioBatchLabel(row), rows: [] });
+    batchGroups.get(key)!.rows.push(row);
+  }
+  const batchList = Array.from(batchGroups.entries()).sort(([, a], [, b]) => a.label.localeCompare(b.label));
+
+  if (!selectedBatch) {
+    return (
+      <div className="space-y-4">
+        <div>
+          <h2 className="text-lg font-semibold">Portfolio Approvals</h2>
+          <p className="text-sm text-muted-foreground">Pick a batch, then a course, to review its students' portfolio submissions. Approving generates a public link and QR code for the student.</p>
+        </div>
+        {batchList.length === 0 ? (
+          <div className="text-sm text-muted-foreground border rounded-xl p-6 text-center">No portfolio submissions yet.</div>
+        ) : (
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+            {batchList.map(([key, group]) => {
+              const pending = group.rows.filter((r) => r.status === 'PENDING').length;
+              const approved = group.rows.filter((r) => r.status === 'APPROVED').length;
+              return (
+                <button
+                  key={key}
+                  onClick={() => setSelectedBatch(key)}
+                  className="text-left border rounded-xl p-4 bg-card hover:border-blue-400 hover:shadow-sm transition relative"
+                >
+                  <div className="flex items-center gap-2">
+                    <CalendarClock className="w-4 h-4 text-blue-600 shrink-0" />
+                    <p className="font-semibold text-sm">{group.label}</p>
+                  </div>
+                  <p className="text-xs text-muted-foreground mt-1.5">{approved} approved · {group.rows.length} total</p>
+                  {pending > 0 && (
+                    <span className="absolute top-3 right-3 text-[11px] font-bold bg-amber-500 text-white rounded-full min-w-[20px] h-5 px-1.5 flex items-center justify-center">
+                      {pending}
+                    </span>
+                  )}
+                </button>
+              );
+            })}
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  const batchRows = batchGroups.get(selectedBatch)?.rows || [];
+  const batchLabel = batchGroups.get(selectedBatch)?.label || selectedBatch;
+
+  // Within the selected batch, group by course. Courses with zero
+  // submissions in this batch don't get a card.
+  const groups = new Map<string, PortfolioRow[]>();
+  for (const row of batchRows) {
     const key = portfolioCourseName(row);
     if (!groups.has(key)) groups.set(key, []);
     groups.get(key)!.push(row);
@@ -2547,11 +2605,14 @@ function PortfoliosTab({ canEdit, setError }: { canEdit: boolean; setError: (s: 
     return (
       <div className="space-y-4">
         <div>
-          <h2 className="text-lg font-semibold">Portfolio Approvals</h2>
-          <p className="text-sm text-muted-foreground">Pick a course to review its students' portfolio submissions. Approving generates a public link and QR code for the student.</p>
+          <button onClick={() => setSelectedBatch(null)} className="text-xs text-blue-600 hover:underline flex items-center gap-1">
+            <ChevronLeft className="w-3.5 h-3.5" /> All batches
+          </button>
+          <h2 className="text-lg font-semibold mt-1">{batchLabel}</h2>
+          <p className="text-sm text-muted-foreground">Pick a course to review its students' portfolio submissions.</p>
         </div>
         {groupList.length === 0 ? (
-          <div className="text-sm text-muted-foreground border rounded-xl p-6 text-center">No portfolio submissions yet.</div>
+          <div className="text-sm text-muted-foreground border rounded-xl p-6 text-center">No portfolio submissions in this batch yet.</div>
         ) : (
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
             {groupList.map(([name, groupRows]) => {
@@ -2591,7 +2652,7 @@ function PortfoliosTab({ canEdit, setError }: { canEdit: boolean; setError: (s: 
     <div className="space-y-6">
       <div>
         <button onClick={() => setSelectedGroup(null)} className="text-xs text-blue-600 hover:underline flex items-center gap-1">
-          <ChevronLeft className="w-3.5 h-3.5" /> All courses
+          <ChevronLeft className="w-3.5 h-3.5" /> {batchLabel}
         </button>
         <h3 className="font-semibold text-lg mt-1">{selectedGroup}</h3>
       </div>
