@@ -67,7 +67,10 @@ import StudentReferFriend from './pages/student/StudentReferFriend';
 import StudentProjects from './pages/student/StudentProjects';
 import StudentFeedbackForms from './pages/student/StudentFeedbackForms';
 import StudentPortfolio from './pages/student/StudentPortfolio';
+import StudentLiveClasses from './pages/student/StudentLiveClasses';
 import PublicPortfolioPage from './pages/PublicPortfolio';
+import LiveClassesPage from './pages/LiveClasses';
+import LiveClassroom from './pages/LiveClassroom';
 
 // Toast — wraps the whole app so useToast() works everywhere
 import { ToastProvider } from './components/ui/toaster';
@@ -139,6 +142,18 @@ export default function App() {
           {/* Public, no-login portfolio page — this is what a scanned QR code / shared link opens */}
           <Route path="/portfolio/:slug" element={<PublicPortfolioPage />} />
 
+          {/* Standalone full-screen classroom — no sidebar/header for either shell;
+              reachable by staff and students alike, access is enforced entirely by
+              the backend's /join endpoint (see liveClasses.controller.ts). */}
+          <Route
+            path="/live-classes/:id/room"
+            element={
+              <PrivateRoute>
+                <LiveClassroom />
+              </PrivateRoute>
+            }
+          />
+
           {/* Student portal routes */}
           <Route
             path="/student"
@@ -161,6 +176,7 @@ export default function App() {
             <Route path="projects" element={<StudentProjects />} />
             <Route path="feedback-forms" element={<StudentFeedbackForms />} />
             <Route path="portfolio" element={<StudentPortfolio />} />
+            <Route path="live-classes" element={<StudentLiveClasses />} />
             <Route path="marks" element={<Navigate to="/student/test" replace />} />
             <Route path="online-tests" element={<Navigate to="/student/test" replace />} />
             <Route path="feedback" element={<Navigate to="/student/feedback-forms" replace />} />
@@ -202,6 +218,7 @@ export default function App() {
             <Route path="my-students" element={<MyStudentsPage />} />
             <Route path="student-onboarding" element={<StudentOnboardingPage />} />
             <Route path="admission" element={<AdmissionPage />} />
+            <Route path="live-classes" element={<LiveClassesPage />} />
             <Route path="finance/sales" element={<FinanceSalesPage />} />
             <Route path="finance/admin" element={<FinanceAdminPage />} />
             <Route path="admin-ops" element={<AdminOpsPage />} />

@@ -19,6 +19,7 @@ const MODULES: { key: ModuleName; label: string }[] = [
   { key: 'CERTIFICATES', label: 'Certificate Generator' },
   { key: 'STUDENT_ONBOARDING', label: 'Student Onboarding' },
   { key: 'ADMISSION', label: 'Admission' },
+  { key: 'LIVE_CLASSES', label: 'Live Classes' },
 ];
 
 const LEVELS: { key: AccessLevel; label: string }[] = [

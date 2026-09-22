@@ -14,6 +14,7 @@ import {
   BookOpen, PiggyBank, Store, Repeat, PieChart, X, Receipt, CheckCircle2,
   Presentation, CalendarClock, Handshake, ListChecks, Mic2, Network, FileBadge, Percent, Activity, RefreshCw,
   FileSignature, Award, ClipboardCheck, Ticket, Settings2, Tags, Grid3x3,
+  Video, PlayCircle,
 } from 'lucide-react';
 
 const LEVEL_RANK: Record<AccessLevel, number> = { NONE: 0, VIEW: 1, EDIT: 2, ADMIN: 3 };
@@ -96,6 +97,7 @@ const MODULE_DEFAULT_TABS: Record<string, string> = {
   '/sales': 'leads',
   '/student-onboarding': 'add',
   '/admission': 'new',
+  '/live-classes': 'dashboard',
 };
 
 // Business modules — visibility driven entirely by effective module access
@@ -221,6 +223,18 @@ const moduleNavItems: ModuleNavItem[] = [
       { label: 'Documents',      to: '/student-onboarding?tab=documents', icon: FileText,      module: 'STUDENT_ONBOARDING' },
       { label: 'Approval',       to: '/student-onboarding?tab=approval',  icon: CheckCircle2,  module: 'STUDENT_ONBOARDING' },
       { label: 'Reports',        to: '/student-onboarding?tab=reports',   icon: BarChart2,     module: 'STUDENT_ONBOARDING' },
+    ],
+  },
+  {
+    label: 'Live Classes',
+    to: '/live-classes',
+    icon: Video,
+    module: 'LIVE_CLASSES',
+    children: [
+      { label: 'Dashboard',         to: '/live-classes?tab=dashboard', icon: LayoutDashboard, module: 'LIVE_CLASSES' },
+      { label: "Today's Classes",   to: '/live-classes?tab=today',     icon: PlayCircle,      module: 'LIVE_CLASSES' },
+      { label: 'Upcoming Classes',  to: '/live-classes?tab=upcoming',  icon: CalendarClock,   module: 'LIVE_CLASSES' },
+      { label: 'Completed Classes', to: '/live-classes?tab=completed', icon: CheckCircle2,    module: 'LIVE_CLASSES' },
     ],
   },
 ];

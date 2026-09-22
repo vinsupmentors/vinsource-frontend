@@ -62,7 +62,8 @@ export type ModuleName =
   | 'DIGITAL_MARKETING'
   | 'CERTIFICATES'
   | 'STUDENT_ONBOARDING'
-  | 'ADMISSION';
+  | 'ADMISSION'
+  | 'LIVE_CLASSES';
 
 export type AccessLevel = 'NONE' | 'VIEW' | 'EDIT' | 'ADMIN';
 
