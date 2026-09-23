@@ -14,7 +14,7 @@ import {
   BookOpen, PiggyBank, Store, Repeat, PieChart, X, Receipt, CheckCircle2,
   Presentation, CalendarClock, Handshake, ListChecks, Mic2, Network, FileBadge, Percent, Activity, RefreshCw,
   FileSignature, Award, ClipboardCheck, Ticket, Settings2, Tags, Grid3x3,
-  Video, PlayCircle,
+  Video, PlayCircle, CalendarRange,
 } from 'lucide-react';
 
 const LEVEL_RANK: Record<AccessLevel, number> = { NONE: 0, VIEW: 1, EDIT: 2, ADMIN: 3 };
@@ -34,6 +34,11 @@ interface NavItem {
 // Kept as-is per the existing HR setup.
 const navItems: NavItem[] = [
   { label: 'Dashboard',      to: '/dashboard',      icon: LayoutDashboard },
+  // Standalone, ungated — every role (admin/HR/trainer/other staff) gets a
+  // calendar, same as Dashboard; there's no CALENDAR value in ModuleName
+  // and there doesn't need to be, since the controller scopes by identity
+  // rather than a module permission (see calendar.controller.ts).
+  { label: 'Calendar',       to: '/calendar',       icon: CalendarRange },
   { label: 'Employees',      to: '/employees',      icon: Users,         minRole: 'MANAGER' },
   {
     label: 'Attendance',

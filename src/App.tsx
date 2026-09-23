@@ -71,6 +71,8 @@ import StudentLiveClasses from './pages/student/StudentLiveClasses';
 import PublicPortfolioPage from './pages/PublicPortfolio';
 import LiveClassesPage from './pages/LiveClasses';
 import LiveClassroom from './pages/LiveClassroom';
+import CalendarPage from './pages/Calendar';
+import StudentCalendarPage from './pages/student/StudentCalendar';
 
 // Toast — wraps the whole app so useToast() works everywhere
 import { ToastProvider } from './components/ui/toaster';
@@ -165,6 +167,7 @@ export default function App() {
           >
             <Route index element={<Navigate to="/student/dashboard" replace />} />
             <Route path="dashboard" element={<StudentDashboard />} />
+            <Route path="calendar" element={<StudentCalendarPage />} />
             <Route path="attendance" element={<StudentAttendance />} />
             <Route path="test" element={<StudentTest />} />
             <Route path="certificates" element={<StudentCertificates />} />
@@ -193,6 +196,7 @@ export default function App() {
           >
             <Route index element={<Navigate to="/dashboard" replace />} />
             <Route path="dashboard" element={<DashboardPage />} />
+            <Route path="calendar" element={<CalendarPage />} />
             <Route path="profile" element={<MyProfilePage />} />
             <Route path="certificates" element={<CertificateGeneratorPage />} />
             <Route path="certificates/batch" element={<BatchCertificatesPage />} />

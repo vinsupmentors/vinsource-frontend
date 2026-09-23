@@ -5,12 +5,13 @@ import { RootState } from '@/store';
 import { useAuth } from '@/hooks/useAuth';
 import {
   Loader2, LayoutDashboard, CalendarCheck, ClipboardList, Award, Briefcase, UserCircle,
-  LogOut, BookOpen, Trophy, Gift, FileText, ListChecks, BadgeCheck, ChevronDown, Lock, Menu, Video,
+  LogOut, BookOpen, Trophy, Gift, FileText, ListChecks, BadgeCheck, ChevronDown, Lock, Menu, Video, CalendarRange,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
 const NAV = [
   { to: '/student/dashboard', label: 'Dashboard', icon: LayoutDashboard },
+  { to: '/student/calendar', label: 'Calendar', icon: CalendarRange },
   { to: '/student/live-classes', label: 'Live Classes', icon: Video },
   { to: '/student/attendance', label: 'Attendance', icon: CalendarCheck },
   { to: '/student/test', label: 'Test', icon: ClipboardList },
