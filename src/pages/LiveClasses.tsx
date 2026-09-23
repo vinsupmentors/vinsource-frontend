@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import api from '@/lib/api';
 import { useModuleAccess } from '@/hooks/useModuleAccess';
@@ -392,7 +392,7 @@ function RecordingsModal({ liveClass, onClose, setError }: { liveClass: LiveClas
       ) : (
         <div className="space-y-3">
           {playingId && playback && (
-            <video key={playback.url} src={playback.url} controls autoPlay className="w-full rounded-lg bg-black max-h-[50vh]" />
+            <RecordingVideoPlayer key={playback.url} url={playback.url} />
           )}
           {playingId && !playback && (
             <div className="flex justify-center py-6"><Loader2 className="w-5 h-5 animate-spin text-blue-600" /></div>
@@ -419,6 +419,38 @@ function RecordingsModal({ liveClass, onClose, setError }: { liveClass: LiveClas
         </div>
       )}
     </Modal>
+  );
+}
+
+// ── Recording playback — native controls (play/pause/seek/volume/fullscreen)
+// plus explicit speed buttons, since browsers don't consistently expose fast
+// playback speeds (2x/4x) in their built-in controls UI. ─────────────────────
+const PLAYBACK_RATES = [1, 1.5, 2, 4];
+function RecordingVideoPlayer({ url }: { url: string }) {
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const [rate, setRate] = useState(1);
+
+  const setPlaybackRate = (r: number) => {
+    setRate(r);
+    if (videoRef.current) videoRef.current.playbackRate = r;
+  };
+
+  return (
+    <div className="space-y-2">
+      <video ref={videoRef} src={url} controls autoPlay className="w-full rounded-lg bg-black max-h-[50vh]" />
+      <div className="flex items-center gap-1.5">
+        <span className="text-xs text-muted-foreground mr-1">Speed:</span>
+        {PLAYBACK_RATES.map((r) => (
+          <button
+            key={r}
+            onClick={() => setPlaybackRate(r)}
+            className={`px-2.5 py-1 text-xs rounded-md border font-medium ${rate === r ? 'bg-blue-600 text-white border-blue-600' : 'hover:bg-muted'}`}
+          >
+            {r}x
+          </button>
+        ))}
+      </div>
+    </div>
   );
 }
 
