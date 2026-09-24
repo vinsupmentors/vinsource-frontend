@@ -69,6 +69,7 @@ import StudentFeedbackForms from './pages/student/StudentFeedbackForms';
 import StudentPortfolio from './pages/student/StudentPortfolio';
 import StudentLiveClasses from './pages/student/StudentLiveClasses';
 import PublicPortfolioPage from './pages/PublicPortfolio';
+import VerifyCertificatePage from './pages/VerifyCertificate';
 import LiveClassesPage from './pages/LiveClasses';
 import LiveClassroom from './pages/LiveClassroom';
 import CalendarPage from './pages/Calendar';
@@ -143,6 +144,9 @@ export default function App() {
 
           {/* Public, no-login portfolio page — this is what a scanned QR code / shared link opens */}
           <Route path="/portfolio/:slug" element={<PublicPortfolioPage />} />
+
+          {/* Public, no-login certificate verification — what the QR code on an issued certificate opens */}
+          <Route path="/verify" element={<VerifyCertificatePage />} />
 
           {/* Standalone full-screen classroom — no sidebar/header for either shell;
               reachable by staff and students alike, access is enforced entirely by

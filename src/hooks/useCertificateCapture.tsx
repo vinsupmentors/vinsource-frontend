@@ -13,6 +13,7 @@ export interface CertRenderData {
   issueDate: string | null;
   photoUrl: string | null;
   certificateNo: string;
+  verifyUrl?: string | null;
 }
 
 const resolveUrl = (p?: string | null) => {
@@ -29,6 +30,7 @@ function toTemplateForm(d: CertRenderData): Record<string, string> {
     batch: d.batch || '',
     issueDate: d.issueDate ? new Date(d.issueDate).toISOString().slice(0, 10) : '',
     photoUrl: resolveUrl(d.photoUrl),
+    verifyUrl: d.verifyUrl || '',
   };
 }
 
