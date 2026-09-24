@@ -7,7 +7,13 @@ interface PlacementResult {
   id: string;
   result: string;
   package?: number;
-  drive: { role: string; partner: { name: string } };
+  // driveId is nullable on the backend (PlacementResult.driveId) — an offer
+  // given directly from the Placement Pool ("off-campus" hire, no formal
+  // drive) has drive: null and carries companyName/designation instead. Both
+  // fields must be optional here to match, or a direct offer crashes this page.
+  drive?: { role: string; partner: { name: string } } | null;
+  companyName?: string | null;
+  designation?: string | null;
 }
 
 interface PlacementInterview {
@@ -64,7 +70,10 @@ export default function StudentPlacements() {
             {results.map((r) => (
               <div key={r.id} className="flex items-center justify-between border rounded-lg px-4 py-3">
                 <div>
-                  <p className="text-sm font-medium">{r.drive.partner.name} — {r.drive.role}</p>
+                  <p className="text-sm font-medium">
+                    {r.drive ? `${r.drive.partner.name} — ${r.drive.role}` : (r.companyName || 'Direct offer')}
+                    {!r.drive && r.designation ? ` — ${r.designation}` : ''}
+                  </p>
                   {r.package && <p className="text-xs text-muted-foreground">Package: ₹{r.package.toLocaleString()}</p>}
                 </div>
                 <span className="text-xs px-2 py-1 rounded-full bg-muted font-medium">{r.result}</span>

@@ -117,6 +117,13 @@ const OFFER_STATUS_COLOR: Record<string, string> = {
   ACCEPTED: 'bg-green-100 text-green-700',
   DECLINED: 'bg-red-100 text-red-700',
 };
+const CANDIDATE_STATUSES: DriveCandidate['status'][] = ['SHORTLISTED', 'CONFIRMED', 'WITHDRAWN', 'REJECTED'];
+const CANDIDATE_STATUS_COLOR: Record<string, string> = {
+  SHORTLISTED: 'bg-blue-100 text-blue-700',
+  CONFIRMED: 'bg-green-100 text-green-700',
+  WITHDRAWN: 'bg-gray-200 text-gray-700',
+  REJECTED: 'bg-red-100 text-red-700',
+};
 const OUTCOME_COLOR: Record<string, string> = {
   SCHEDULED: 'bg-blue-100 text-blue-700',
   PENDING: 'bg-amber-100 text-amber-700',
@@ -1494,6 +1501,22 @@ function DriveResultsModal({ drive, canEdit, setError, onClose, onChanged, respo
     fetchData();
   };
 
+  // Was previously unreachable from the UI: the backend PUT endpoint has
+  // always existed, but nothing ever called it, so a candidate stayed
+  // SHORTLISTED forever regardless of what actually happened with the
+  // drive. Optimistic local update (so the select doesn't visually snap
+  // back while the request is in flight) with a full refetch on failure.
+  const updateCandidateStatus = async (id: string, status: DriveCandidate['status']) => {
+    const prev = candidates;
+    setCandidates((cs) => cs.map((c) => (c.id === id ? { ...c, status } : c)));
+    try {
+      await api.put(`/api/placements/drive-candidates/${id}`, { status });
+    } catch (err: unknown) {
+      setCandidates(prev);
+      setError(errMsg(err, 'Failed to update candidate status'));
+    }
+  };
+
   const pickCandidate = (studentId: string) => {
     const c = candidates.find((cand) => cand.student.id === studentId);
     setForm({ ...form, studentId, studentName: c ? `${c.student.firstName} ${c.student.lastName}` : form.studentName });
@@ -1564,7 +1587,7 @@ function DriveResultsModal({ drive, canEdit, setError, onClose, onChanged, respo
               <div className="flex items-center gap-2">
                 {r.package != null && <span className="text-muted-foreground text-xs">{fmt(r.package)}</span>}
                 {r.offerLetterUrl && (
-                  <a href={r.offerLetterUrl} target="_blank" rel="noreferrer" className="text-blue-600 text-xs hover:underline flex items-center gap-1">
+                  <a href={fileUrl(r.offerLetterUrl)} target="_blank" rel="noreferrer" className="text-blue-600 text-xs hover:underline flex items-center gap-1">
                     <FileUp className="w-3 h-3" /> Offer
                   </a>
                 )}
@@ -1573,6 +1596,33 @@ function DriveResultsModal({ drive, canEdit, setError, onClose, onChanged, respo
             </div>
           ))}
         </div>
+
+        {candidates.length > 0 && (
+          <div className="space-y-2">
+            <p className="text-sm font-medium flex items-center gap-2"><Users className="w-4 h-4" /> Shortlisted Candidates</p>
+            <div className="max-h-48 overflow-y-auto border rounded-lg divide-y">
+              {candidates.map((c) => (
+                <div key={c.id} className="flex items-center justify-between px-3 py-2 text-sm gap-2">
+                  <div className="min-w-0">
+                    <span className="truncate block">{c.student.firstName} {c.student.lastName} · {c.student.studentCode}</span>
+                    {c.notes && <p className="text-xs text-muted-foreground truncate">{c.notes}</p>}
+                  </div>
+                  {canEdit ? (
+                    <select
+                      className={`text-xs font-medium px-2 py-1 rounded-full border-0 shrink-0 ${CANDIDATE_STATUS_COLOR[c.status] || 'bg-gray-100 text-gray-700'}`}
+                      value={c.status}
+                      onChange={(e) => updateCandidateStatus(c.id, e.target.value as DriveCandidate['status'])}
+                    >
+                      {CANDIDATE_STATUSES.map((s) => <option key={s} value={s}>{s}</option>)}
+                    </select>
+                  ) : (
+                    <span className={`text-xs font-medium px-2 py-0.5 rounded-full shrink-0 ${CANDIDATE_STATUS_COLOR[c.status] || 'bg-gray-100 text-gray-700'}`}>{c.status}</span>
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
 
         {canEdit && (
           <div className="space-y-3 pt-2 border-t">
@@ -2459,7 +2509,7 @@ function PlacementStudentProfileModal({ student: poolStudent, onClose }: {
                         </div>
                         {r.designation && <p className="text-xs text-muted-foreground">{r.designation}{r.package ? ` · ${fmt(r.package)} LPA` : ''}</p>}
                         {r.offerLetterUrl && (
-                          <a href={r.offerLetterUrl} target="_blank" rel="noopener noreferrer" className="text-xs text-blue-600 hover:underline flex items-center gap-1">
+                          <a href={fileUrl(r.offerLetterUrl)} target="_blank" rel="noopener noreferrer" className="text-xs text-blue-600 hover:underline flex items-center gap-1">
                             <ExternalLink className="w-3 h-3" /> View Offer Letter
                           </a>
                         )}
