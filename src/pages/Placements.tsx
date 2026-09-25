@@ -1181,11 +1181,27 @@ function ShortlistModal({ student, drives, setError, onClose }: {
   );
 }
 
+/** ISO datetime -> the "YYYY-MM-DDTHH:mm" a <input type="datetime-local"> value needs, in local time (not UTC — a plain .slice(0,16) on the ISO string would show UTC and silently shift the displayed time). */
+function toDatetimeLocalValue(iso: string): string {
+  const d = new Date(iso);
+  return new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
+}
+
 function AddInterviewModal({ student, drives, setError, onClose, onSaved }: {
   student: PoolStudent; drives: Drive[]; setError: (s: string) => void; onClose: () => void; onSaved: () => void;
 }) {
   const [form, setForm] = useState({ driveId: '', companyName: '', round: '1', interviewerName: '', scheduledAt: '', notes: '' });
   const [saving, setSaving] = useState(false);
+
+  // Picking a drive already tells us when it's happening — prefill the
+  // interview's date/time from it instead of asking the user to retype
+  // something the drive record already has. Still fully editable after
+  // (a specific candidate's slot can run later than the drive's headline
+  // time), and clearing back to "Link to a drive (optional)" clears it too.
+  const selectDrive = (driveId: string) => {
+    const drive = drives.find((d) => d.id === driveId);
+    setForm({ ...form, driveId, scheduledAt: drive ? toDatetimeLocalValue(drive.driveDate) : form.scheduledAt });
+  };
 
   const submit = async () => {
     if (!form.scheduledAt) { setError('Scheduled date/time is required'); return; }
@@ -1219,7 +1235,7 @@ function AddInterviewModal({ student, drives, setError, onClose, onSaved }: {
         </div>
         <p className="text-sm text-muted-foreground">{student.firstName} {student.lastName} · {student.studentCode}</p>
         <div className="space-y-3">
-          <select className="w-full px-3 py-2 border rounded-lg text-sm" value={form.driveId} onChange={(e) => setForm({ ...form, driveId: e.target.value })}>
+          <select className="w-full px-3 py-2 border rounded-lg text-sm" value={form.driveId} onChange={(e) => selectDrive(e.target.value)}>
             <option value="">Link to a drive (optional)</option>
             {drives.map((d) => <option key={d.id} value={d.id}>{d.partner.name} · {d.role}</option>)}
           </select>
@@ -1228,7 +1244,10 @@ function AddInterviewModal({ student, drives, setError, onClose, onSaved }: {
             <input type="number" min="1" className="flex-1 px-3 py-2 border rounded-lg text-sm" placeholder="Round" value={form.round} onChange={(e) => setForm({ ...form, round: e.target.value })} />
             <input className="flex-1 px-3 py-2 border rounded-lg text-sm" placeholder="Interviewer Name" value={form.interviewerName} onChange={(e) => setForm({ ...form, interviewerName: e.target.value })} />
           </div>
-          <input type="datetime-local" className="w-full px-3 py-2 border rounded-lg text-sm" value={form.scheduledAt} onChange={(e) => setForm({ ...form, scheduledAt: e.target.value })} />
+          <div>
+            <label className="text-xs font-medium text-muted-foreground">{form.driveId ? 'Date & Time (from drive — override if this candidate\'s slot differs)' : 'Date & Time'}</label>
+            <input type="datetime-local" className="w-full mt-1 px-3 py-2 border rounded-lg text-sm" value={form.scheduledAt} onChange={(e) => setForm({ ...form, scheduledAt: e.target.value })} />
+          </div>
           <textarea rows={2} className="w-full px-3 py-2 border rounded-lg text-sm" placeholder="Notes (optional)" value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} />
         </div>
         <div className="flex justify-end gap-2">
