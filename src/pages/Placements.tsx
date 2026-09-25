@@ -15,7 +15,7 @@ import {
   CheckCircle2, XCircle, AlertTriangle, MessageSquare, FileUp, ListChecks,
   Briefcase, BarChart2, Search, User, Trophy, Star, Phone, MapPin,
   BookOpen, Award, ChevronDown, ChevronRight, ExternalLink, Percent, IndianRupee, Download,
-  Loader2, Rocket, FileText,
+  Loader2, Rocket, FileText, Pencil, Trash2,
 } from 'lucide-react';
 import {
   ResponsiveContainer, BarChart, Bar, AreaChart, Area, XAxis, YAxis,
@@ -158,6 +158,7 @@ export default function PlacementsPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [showAddDrive, setShowAddDrive] = useState(false);
+  const [editingDrive, setEditingDrive] = useState<Drive | null>(null);
   const [showAddPartner, setShowAddPartner] = useState(false);
   const [showBulkPush, setShowBulkPush] = useState(false);
   const [showAddPt, setShowAddPt] = useState(false);
@@ -301,6 +302,18 @@ export default function PlacementsPage() {
       fetchAll();
     } catch (err: unknown) {
       setError(errMsg(err, 'Failed to update drive status'));
+    }
+  };
+
+  const deleteDrive = async (drive: Drive) => {
+    if (!window.confirm(`Delete the ${drive.partner.name} · ${drive.role} drive? This can't be undone.`)) return;
+    try {
+      await api.delete(`/api/placements/drives/${drive.id}`);
+      fetchAll();
+    } catch (err: unknown) {
+      // Backend refuses when the drive has results/interviews/candidates
+      // attached — surface that reason rather than a generic failure.
+      setError(errMsg(err, 'Failed to delete drive'));
     }
   };
 
@@ -747,13 +760,14 @@ export default function PlacementsPage() {
                 <th className="px-4 py-3">Venue</th>
                 <th className="px-4 py-3">Results</th>
                 <th className="px-4 py-3">Status</th>
+                {canEdit && <th className="px-4 py-3">Actions</th>}
               </tr>
             </thead>
             <tbody className="divide-y">
               {loading ? (
-                <tr><td colSpan={6} className="px-4 py-8 text-center text-muted-foreground">Loading...</td></tr>
+                <tr><td colSpan={canEdit ? 7 : 6} className="px-4 py-8 text-center text-muted-foreground">Loading...</td></tr>
               ) : drives.length === 0 ? (
-                <tr><td colSpan={6} className="px-4 py-8 text-center text-muted-foreground">No drives scheduled</td></tr>
+                <tr><td colSpan={canEdit ? 7 : 6} className="px-4 py-8 text-center text-muted-foreground">No drives scheduled</td></tr>
               ) : drives.map((d) => (
                 <tr key={d.id} className="hover:bg-muted/30">
                   <td className="px-4 py-3 font-medium">{d.partner.name}{d.partner.industry && <p className="text-xs text-muted-foreground">{d.partner.industry}</p>}</td>
@@ -778,6 +792,18 @@ export default function PlacementsPage() {
                       <span className={`text-xs font-medium px-2 py-1 rounded-full ${STATUS_COLOR[d.status]}`}>{d.status}</span>
                     )}
                   </td>
+                  {canEdit && (
+                    <td className="px-4 py-3">
+                      <div className="flex items-center gap-3">
+                        <button onClick={() => setEditingDrive(d)} title="Edit drive" className="text-muted-foreground hover:text-foreground">
+                          <Pencil className="w-3.5 h-3.5" />
+                        </button>
+                        <button onClick={() => deleteDrive(d)} title="Delete drive" className="text-muted-foreground hover:text-red-600">
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    </td>
+                  )}
                 </tr>
               ))}
             </tbody>
@@ -817,6 +843,17 @@ export default function PlacementsPage() {
       )}
       {showAddDrive && (
         <AddDriveModal partners={partners} saving={saving} setSaving={setSaving} onClose={() => setShowAddDrive(false)} onSaved={() => { setShowAddDrive(false); fetchAll(); }} setError={setError} />
+      )}
+      {editingDrive && (
+        <AddDriveModal
+          partners={partners}
+          existing={editingDrive}
+          saving={saving}
+          setSaving={setSaving}
+          onClose={() => setEditingDrive(null)}
+          onSaved={() => { setEditingDrive(null); fetchAll(); }}
+          setError={setError}
+        />
       )}
       {resultsDrive && (
         <DriveResultsModal
@@ -1771,20 +1808,30 @@ function GiveOfferModal({ student, setError, onClose, onSaved }: {
   );
 }
 
-function AddDriveModal({ partners, saving, setSaving, onClose, onSaved, setError }: {
-  partners: Partner[]; saving: boolean; setSaving: (v: boolean) => void; onClose: () => void; onSaved: () => void; setError: (s: string) => void;
+function AddDriveModal({ partners, existing, saving, setSaving, onClose, onSaved, setError }: {
+  partners: Partner[]; existing?: Drive; saving: boolean; setSaving: (v: boolean) => void; onClose: () => void; onSaved: () => void; setError: (s: string) => void;
 }) {
-  const [form, setForm] = useState({ partnerId: '', role: '', driveDate: '', venue: '', jobDescription: '' });
+  const [form, setForm] = useState({
+    partnerId: existing?.partner.id || '',
+    role: existing?.role || '',
+    driveDate: existing ? toDatetimeLocalValue(existing.driveDate) : '',
+    venue: existing?.venue || '',
+    jobDescription: existing?.jobDescription || '',
+  });
 
   const submit = async () => {
     if (!form.partnerId || !form.role || !form.driveDate) { setError('Partner, role, and date/time are required'); return; }
     setSaving(true);
     setError('');
     try {
-      await api.post('/api/placements/drives', form);
+      if (existing) {
+        await api.put(`/api/placements/drives/${existing.id}`, form);
+      } else {
+        await api.post('/api/placements/drives', form);
+      }
       onSaved();
     } catch (err: unknown) {
-      setError(errMsg(err, 'Failed to create drive'));
+      setError(errMsg(err, `Failed to ${existing ? 'update' : 'create'} drive`));
     } finally {
       setSaving(false);
     }
@@ -1794,7 +1841,7 @@ function AddDriveModal({ partners, saving, setSaving, onClose, onSaved, setError
     <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
       <div className="bg-white rounded-xl w-full max-w-md p-6 space-y-4">
         <div className="flex items-center justify-between">
-          <h2 className="font-semibold text-lg">New Placement Drive</h2>
+          <h2 className="font-semibold text-lg">{existing ? 'Edit Placement Drive' : 'New Placement Drive'}</h2>
           <button onClick={onClose}><X className="w-4 h-4" /></button>
         </div>
         <div className="space-y-3">
@@ -1818,7 +1865,7 @@ function AddDriveModal({ partners, saving, setSaving, onClose, onSaved, setError
         </div>
         <div className="flex justify-end gap-2">
           <button onClick={onClose} className="px-4 py-2 text-sm rounded-lg border">Cancel</button>
-          <button onClick={submit} disabled={saving} className="px-4 py-2 text-sm rounded-lg bg-blue-600 text-white disabled:opacity-50">{saving ? 'Saving...' : 'Create'}</button>
+          <button onClick={submit} disabled={saving} className="px-4 py-2 text-sm rounded-lg bg-blue-600 text-white disabled:opacity-50">{saving ? 'Saving...' : existing ? 'Save' : 'Create'}</button>
         </div>
       </div>
     </div>
