@@ -288,6 +288,14 @@ export default function PlacementsPage() {
   };
 
   const updateDriveStatus = async (id: string, status: DriveStatus) => {
+    // Cancelling is the one transition worth a confirm — it's a single
+    // click/scroll away on an inline dropdown with no other guard, and an
+    // accidental Cancel silently drops the drive out of every "SCHEDULED"
+    // list (Map Interview's drive picker, Upcoming Drives, etc.) with no
+    // undo prompt.
+    if (status === 'CANCELLED' && !window.confirm('Cancel this drive? It will stop showing up wherever scheduled drives are listed (e.g. the interview drive picker).')) {
+      return;
+    }
     try {
       await api.put(`/api/placements/drives/${id}`, { status });
       fetchAll();
