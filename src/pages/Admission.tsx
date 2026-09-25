@@ -61,15 +61,18 @@ const TRACK_LABELS: Record<Track, string> = {
   ELITE: 'Elite',
 };
 
+// SPOT still exists as a value (old admissions were saved with it, and the
+// backend fee engine + receipts must keep rendering those correctly) — it's
+// just no longer offered as a choice for new admissions, per "no spot
+// payments" policy.
 type PaymentMethod = 'SPOT' | 'FULL' | 'PART' | 'EMI';
 const PAYMENT_METHODS: { id: PaymentMethod; label: string }[] = [
-  { id: 'SPOT', label: 'Spot (same day, 8% off)' },
   { id: 'FULL', label: 'Full (before batch start, 5% off)' },
   { id: 'PART', label: 'Part Payment' },
   { id: 'EMI', label: 'EMI' },
 ];
 
-interface Course { id: string; name: string }
+interface Course { id: string; name: string; emiMonthLimits?: Record<string, number> | null }
 type DeliveryMode = 'ONLINE' | 'OFFLINE' | 'HYBRID';
 interface SeatBand {
   rawTotal: number | null; held: number; total: number | null; booked: number; available: number | null;
@@ -226,7 +229,7 @@ function NewAdmissionTab({ canEdit, setError }: { canEdit: boolean; setError: (s
   const [scheduleId, setScheduleId] = useState('');
   const [deliveryMode, setDeliveryMode] = useState<'ONLINE' | 'OFFLINE' | ''>('');
   const [couponCode, setCouponCode] = useState('');
-  const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>('SPOT');
+  const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>('FULL');
   const [emiMonths, setEmiMonths] = useState(3);
 
   const [breakdown, setBreakdown] = useState<FeeBreakdown | null>(null);
@@ -1313,10 +1316,13 @@ function CourseFeesTab({ setError }: { setError: (s: string) => void }) {
   const [baseFee, setBaseFee] = useState('');
   const [saving, setSaving] = useState(false);
 
+  const loadCourses = useCallback(() => {
+    api.get('/api/admissions/courses').then((r) => setCourses(r.data.data)).catch(() => setCourses([]));
+  }, []);
   const load = useCallback(() => {
     api.get('/api/admissions/course-fees').then((r) => setFees(r.data.data)).catch((err) => setError(errMsg(err, 'Could not load course fees.')));
   }, [setError]);
-  useEffect(() => { load(); api.get('/api/admissions/courses').then((r) => setCourses(r.data.data)).catch(() => setCourses([])); }, [load]);
+  useEffect(() => { load(); loadCourses(); }, [load, loadCourses]);
 
   const submit = () => {
     if (!courseId || !track || !baseFee) return;
@@ -1384,6 +1390,88 @@ function CourseFeesTab({ setError }: { setError: (s: string) => void }) {
           </table>
         </div>
       )}
+
+      <CourseEmiLimitsPanel courses={courses} onSaved={loadCourses} setError={setError} />
+    </div>
+  );
+}
+
+/**
+ * Per-course EMI month-limit overrides — only needed when a course's cap for
+ * a track differs from the global default set in the Config tab (e.g.
+ * Dataverse's IOP track allows 6 months while every other course's IOP caps
+ * at 5). Leave a track blank to fall back to the global limit.
+ */
+function CourseEmiLimitsPanel({ courses, onSaved, setError }: { courses: Course[]; onSaved: () => void; setError: (s: string) => void }) {
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [draft, setDraft] = useState<Record<string, string>>({});
+  const [saving, setSaving] = useState(false);
+
+  const startEdit = (c: Course) => {
+    setEditingId(c.id);
+    const d: Record<string, string> = {};
+    for (const t of TRACKS) d[t] = c.emiMonthLimits?.[t] != null ? String(c.emiMonthLimits[t]) : '';
+    setDraft(d);
+  };
+
+  const save = (courseId: string) => {
+    const emiMonthLimits: Record<string, number> = {};
+    for (const t of TRACKS) {
+      if (draft[t] !== '' && draft[t] != null) emiMonthLimits[t] = Number(draft[t]);
+    }
+    setSaving(true);
+    api.put(`/api/admissions/courses/${courseId}/emi-limits`, { emiMonthLimits: Object.keys(emiMonthLimits).length ? emiMonthLimits : null })
+      .then(() => { setEditingId(null); onSaved(); })
+      .catch((err) => setError(errMsg(err, 'Could not save EMI limit override.')))
+      .finally(() => setSaving(false));
+  };
+
+  if (courses.length === 0) return null;
+
+  return (
+    <div className="border rounded-xl p-5 space-y-3">
+      <div>
+        <h3 className="font-semibold text-sm">Per-Course EMI Month Limits</h3>
+        <p className="text-xs text-muted-foreground mt-0.5">Only set a track here if this course's EMI cap differs from the global limit in Config. Leave blank to use the global default.</p>
+      </div>
+      <div className="divide-y border rounded-lg">
+        {courses.map((c) => (
+          <div key={c.id} className="px-4 py-3">
+            <div className="flex items-center justify-between">
+              <span className="text-sm font-medium">{c.name}</span>
+              {editingId === c.id ? (
+                <div className="flex gap-2">
+                  <button onClick={() => setEditingId(null)} className="px-3 py-1.5 text-xs rounded-lg border">Cancel</button>
+                  <button onClick={() => save(c.id)} disabled={saving} className="px-3 py-1.5 text-xs rounded-lg bg-blue-600 text-white disabled:opacity-50">{saving ? 'Saving...' : 'Save'}</button>
+                </div>
+              ) : (
+                <button onClick={() => startEdit(c)} className="text-xs text-blue-600 font-medium">Edit</button>
+              )}
+            </div>
+            {editingId === c.id ? (
+              <div className="grid grid-cols-5 gap-2 mt-2">
+                {TRACKS.map((t) => (
+                  <Field key={t} label={TRACK_LABELS[t]}>
+                    <input
+                      type="number"
+                      placeholder="Global"
+                      className={inputCls}
+                      value={draft[t] ?? ''}
+                      onChange={(e) => setDraft({ ...draft, [t]: e.target.value })}
+                    />
+                  </Field>
+                ))}
+              </div>
+            ) : c.emiMonthLimits && Object.keys(c.emiMonthLimits).length > 0 ? (
+              <p className="text-xs text-muted-foreground mt-1">
+                {Object.entries(c.emiMonthLimits).map(([t, m]) => `${TRACK_LABELS[t as Track] ?? t}: max ${m} mo`).join(' · ')}
+              </p>
+            ) : (
+              <p className="text-xs text-muted-foreground mt-1">Using global limits</p>
+            )}
+          </div>
+        ))}
+      </div>
     </div>
   );
 }

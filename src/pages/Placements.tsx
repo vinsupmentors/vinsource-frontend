@@ -31,7 +31,7 @@ interface ScheduleOption { id: string; code?: string | null; timing: string; bat
 
 interface Partner { id: string; name: string; industry?: string | null; _count?: { drives: number }; }
 interface Drive {
-  id: string; role: string; driveDate: string; status: DriveStatus;
+  id: string; role: string; driveDate: string; venue?: string | null; status: DriveStatus;
   partner: { id: string; name: string; industry?: string | null };
   _count?: { results: number; candidates?: number; interviews?: number };
 }
@@ -735,21 +735,23 @@ export default function PlacementsPage() {
               <tr>
                 <th className="px-4 py-3">Partner</th>
                 <th className="px-4 py-3">Role</th>
-                <th className="px-4 py-3">Date</th>
+                <th className="px-4 py-3">Date &amp; Time</th>
+                <th className="px-4 py-3">Venue</th>
                 <th className="px-4 py-3">Results</th>
                 <th className="px-4 py-3">Status</th>
               </tr>
             </thead>
             <tbody className="divide-y">
               {loading ? (
-                <tr><td colSpan={5} className="px-4 py-8 text-center text-muted-foreground">Loading...</td></tr>
+                <tr><td colSpan={6} className="px-4 py-8 text-center text-muted-foreground">Loading...</td></tr>
               ) : drives.length === 0 ? (
-                <tr><td colSpan={5} className="px-4 py-8 text-center text-muted-foreground">No drives scheduled</td></tr>
+                <tr><td colSpan={6} className="px-4 py-8 text-center text-muted-foreground">No drives scheduled</td></tr>
               ) : drives.map((d) => (
                 <tr key={d.id} className="hover:bg-muted/30">
                   <td className="px-4 py-3 font-medium">{d.partner.name}{d.partner.industry && <p className="text-xs text-muted-foreground">{d.partner.industry}</p>}</td>
                   <td className="px-4 py-3">{d.role}</td>
-                  <td className="px-4 py-3 text-muted-foreground">{new Date(d.driveDate).toLocaleDateString()}</td>
+                  <td className="px-4 py-3 text-muted-foreground">{new Date(d.driveDate).toLocaleString('en-IN', { dateStyle: 'medium', timeStyle: 'short' })}</td>
+                  <td className="px-4 py-3 text-muted-foreground">{d.venue || '—'}</td>
                   <td className="px-4 py-3">
                     <button onClick={() => setResultsDrive(d)} className="text-blue-600 hover:underline text-sm font-medium">
                       {d._count?.results ?? 0} {canEdit ? '· Manage' : ''}
@@ -1555,7 +1557,10 @@ function DriveResultsModal({ drive, canEdit, setError, onClose, onChanged, respo
         <div className="flex items-center justify-between">
           <div>
             <h2 className="font-semibold text-lg">Drive Results</h2>
-            <p className="text-xs text-muted-foreground">{drive.partner.name} · {drive.role}</p>
+            <p className="text-xs text-muted-foreground">
+              {drive.partner.name} · {drive.role} · {new Date(drive.driveDate).toLocaleString('en-IN', { dateStyle: 'medium', timeStyle: 'short' })}
+              {drive.venue ? ` · ${drive.venue}` : ''}
+            </p>
           </div>
           <button onClick={onClose}><X className="w-4 h-4" /></button>
         </div>
@@ -1735,10 +1740,10 @@ function GiveOfferModal({ student, setError, onClose, onSaved }: {
 function AddDriveModal({ partners, saving, setSaving, onClose, onSaved, setError }: {
   partners: Partner[]; saving: boolean; setSaving: (v: boolean) => void; onClose: () => void; onSaved: () => void; setError: (s: string) => void;
 }) {
-  const [form, setForm] = useState({ partnerId: '', role: '', driveDate: '' });
+  const [form, setForm] = useState({ partnerId: '', role: '', driveDate: '', venue: '' });
 
   const submit = async () => {
-    if (!form.partnerId || !form.role || !form.driveDate) { setError('Partner, role, and date are required'); return; }
+    if (!form.partnerId || !form.role || !form.driveDate) { setError('Partner, role, and date/time are required'); return; }
     setSaving(true);
     setError('');
     try {
@@ -1764,7 +1769,14 @@ function AddDriveModal({ partners, saving, setSaving, onClose, onSaved, setError
             {partners.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
           </select>
           <input className="w-full px-3 py-2 border rounded-lg text-sm" placeholder="Role *" value={form.role} onChange={(e) => setForm({ ...form, role: e.target.value })} />
-          <input type="date" className="w-full px-3 py-2 border rounded-lg text-sm" value={form.driveDate} onChange={(e) => setForm({ ...form, driveDate: e.target.value })} />
+          <div>
+            <label className="text-xs font-medium text-muted-foreground">Date &amp; Time *</label>
+            <input type="datetime-local" className="w-full px-3 py-2 border rounded-lg text-sm mt-1" value={form.driveDate} onChange={(e) => setForm({ ...form, driveDate: e.target.value })} />
+          </div>
+          <div>
+            <label className="text-xs font-medium text-muted-foreground">Venue</label>
+            <input className="w-full px-3 py-2 border rounded-lg text-sm mt-1" placeholder="Office address, or Online / meeting link" value={form.venue} onChange={(e) => setForm({ ...form, venue: e.target.value })} />
+          </div>
         </div>
         <div className="flex justify-end gap-2">
           <button onClick={onClose} className="px-4 py-2 text-sm rounded-lg border">Cancel</button>
