@@ -129,6 +129,7 @@ const ENROLLMENT_STATUSES: EnrollmentStatus[] = ['ACTIVE', 'COMPLETED', 'DROPPED
 type ModuleLite = { id: string; title: string; order: number; courseId: string };
 type Project = {
   id: string; moduleId: string; title: string; description?: string | null; resourceUrl: string; createdAt: string;
+  isCapstone: boolean;
   module: ModuleLite;
   createdBy?: { id: string; firstName: string; lastName: string } | null;
   _count?: { releases: number };
@@ -3384,7 +3385,12 @@ function ProjectsPanel({ modules, canEdit, setError }: {
                   {items.map((p) => (
                     <div key={p.id} className="flex items-center justify-between px-4 py-3">
                       <div>
-                        <p className="font-medium text-sm">{p.title}</p>
+                        <p className="font-medium text-sm">
+                          {p.title}
+                          {p.isCapstone && (
+                            <span className="ml-2 text-[10px] font-semibold text-blue-700 bg-blue-50 px-1.5 py-0.5 rounded align-middle">🎓 CAPSTONE</span>
+                          )}
+                        </p>
                         <p className="text-xs text-muted-foreground">
                           {p._count?.releases ?? 0} release{(p._count?.releases ?? 0) === 1 ? '' : 's'}
                         </p>
@@ -3423,6 +3429,7 @@ function AddProjectModal({ modules, existing, onClose, setError, onSaved }: {
   const [moduleId, setModuleId] = useState(existing?.moduleId || modules[0]?.id || '');
   const [title, setTitle] = useState(existing?.title || '');
   const [description, setDescription] = useState(existing?.description || '');
+  const [isCapstone, setIsCapstone] = useState(existing?.isCapstone ?? false);
   const [file, setFile] = useState<File | null>(null);
   const [saving, setSaving] = useState(false);
 
@@ -3435,6 +3442,7 @@ function AddProjectModal({ modules, existing, onClose, setError, onSaved }: {
       fd.append('moduleId', moduleId);
       fd.append('title', title.trim());
       fd.append('description', description.trim());
+      fd.append('isCapstone', String(isCapstone));
       if (file) fd.append('resource', file);
       if (existing) {
         await api.put(`/api/production/projects/${existing.id}`, fd, { headers: { 'Content-Type': 'multipart/form-data' } });
@@ -3469,6 +3477,15 @@ function AddProjectModal({ modules, existing, onClose, setError, onSaved }: {
             {existing ? 'Leave blank to keep the current file.' : 'Up to 50 MB. Use a ZIP to bundle starter files or multiple assets.'}
           </p>
         </div>
+        <label className="flex items-start gap-2 border rounded-lg px-3 py-2.5 cursor-pointer">
+          <input type="checkbox" checked={isCapstone} onChange={(e) => setIsCapstone(e.target.checked)} className="mt-0.5" />
+          <span>
+            <span className="text-sm font-medium block">This is the Capstone project</span>
+            <span className="text-[11px] text-muted-foreground">
+              Required for students in this schedule to show "Ready for Placement" in the Placement Pool. Once released, a student must submit it and have it marked Reviewed before they clear this check.
+            </span>
+          </span>
+        </label>
       </div>
       <ModalFooter onClose={onClose} onSubmit={submit} saving={saving} label={existing ? 'Save' : 'Create'} />
     </Modal>
