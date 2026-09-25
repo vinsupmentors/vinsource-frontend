@@ -117,7 +117,8 @@ interface FeeBreakdown {
   couponDiscount: number; netCourseFee: number; paymentMethod: PaymentMethod;
   paymentDiscountPct?: number; paymentDiscountAmount?: number; finalPayable?: number;
   registrationFee?: number; orientationBalance?: number;
-  interestRatePct?: number; interestAmount?: number; emiTotal?: number; downPaymentPct?: number; downPayment?: number;
+  downPaymentPct?: number; downPayment?: number; financedAmount?: number;
+  interestRatePct?: number; interestAmount?: number; emiTotal?: number;
   emiBalance?: number; emiMonths?: number; monthlyInstallments?: number[];
 }
 interface Admission {
@@ -525,6 +526,9 @@ function NewAdmissionTab({ canEdit, setError }: { canEdit: boolean; setError: (s
                   <Row label="Total Coupon Discount" value={`− ${money(breakdown.couponDiscount)}`} />
                 )}
                 <Row label="Net Course Fee" value={money(breakdown.netCourseFee)} bold />
+                {breakdown.downPayment != null && (
+                  <Row label={`Down Payment (${breakdown.downPaymentPct}%, now)`} value={money(breakdown.downPayment)} bold highlight />
+                )}
                 {breakdown.paymentDiscountAmount != null && (
                   <Row label={`${paymentMethod === 'SPOT' ? 'Spot' : 'Full'} Discount (${breakdown.paymentDiscountPct}%)`} value={`− ${money(breakdown.paymentDiscountAmount)}`} />
                 )}
@@ -537,9 +541,9 @@ function NewAdmissionTab({ canEdit, setError }: { canEdit: boolean; setError: (s
                 )}
                 {breakdown.interestAmount != null && (
                   <>
-                    <Row label={`Interest (${breakdown.interestRatePct}%)`} value={money(breakdown.interestAmount)} />
+                    <Row label="Balance to Finance" value={money(breakdown.financedAmount)} />
+                    <Row label={`Interest (${breakdown.interestRatePct}%, on the balance)`} value={money(breakdown.interestAmount)} />
                     <Row label="EMI Total" value={money(breakdown.emiTotal)} />
-                    <Row label={`Down Payment (${breakdown.downPaymentPct}%, now)`} value={money(breakdown.downPayment)} bold highlight />
                     <Row label="EMI Balance" value={money(breakdown.emiBalance)} />
                     {breakdown.monthlyInstallments && (
                       <div className="pt-1 text-xs text-muted-foreground">
