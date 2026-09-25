@@ -72,7 +72,7 @@ const EMI_TENURE_OPTIONS = [1, 2, 3, 4, 5, 6, 7, 8];
 
 type PaymentMethod = 'SPOT' | 'FULL' | 'PART' | 'EMI';
 const PAYMENT_METHODS: { id: PaymentMethod; label: string }[] = [
-  { id: 'FULL', label: 'Full (before batch start, 5% off)' },
+  { id: 'FULL', label: 'Full Payment' },
   { id: 'PART', label: 'Part Payment' },
   { id: 'EMI', label: 'EMI' },
 ];
@@ -108,7 +108,8 @@ function timingLabel(s: { timing: string; startTime?: string | null; endTime?: s
 }
 interface BatchGroup { id: string; code: string; status: string; startDate: string }
 interface FeeBreakdown {
-  baseFee: number; couponCode: string | null; couponDiscount: number; netCourseFee: number; paymentMethod: PaymentMethod;
+  baseFee: number; couponCodes: string[]; couponBreakdown: { couponId: string; code: string; discount: number }[];
+  couponDiscount: number; netCourseFee: number; paymentMethod: PaymentMethod;
   paymentDiscountPct?: number; paymentDiscountAmount?: number; finalPayable?: number;
   registrationFee?: number; orientationBalance?: number;
   interestRatePct?: number; interestAmount?: number; emiTotal?: number; downPaymentPct?: number; downPayment?: number;
@@ -121,7 +122,10 @@ interface Admission {
   lead: { name: string; phone: string; email: string | null };
   course: { id: string; name: string } | null; track: string | null;
   schedule: { id: string; code: string | null; batch: { code: string } } | null;
+  // Legacy single-coupon field — only ever set when exactly one coupon was
+  // applied. couponUsages covers 0/1/many uniformly; prefer it for display.
   coupon: { code: string } | null;
+  couponUsages?: { coupon: { code: string } }[];
   createdBy: { firstName: string; lastName: string } | null;
 }
 interface EmployeeLite { id: string; firstName: string; lastName: string; employeeCode: string }
@@ -233,7 +237,8 @@ function NewAdmissionTab({ canEdit, setError }: { canEdit: boolean; setError: (s
   const [track, setTrack] = useState<Track | ''>('');
   const [scheduleId, setScheduleId] = useState('');
   const [deliveryMode, setDeliveryMode] = useState<'ONLINE' | 'OFFLINE' | ''>('');
-  const [couponCode, setCouponCode] = useState('');
+  const [couponCodes, setCouponCodes] = useState<string[]>([]);
+  const [couponInput, setCouponInput] = useState('');
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>('FULL');
   const [emiMonths, setEmiMonths] = useState(3);
 
@@ -248,6 +253,17 @@ function NewAdmissionTab({ canEdit, setError }: { canEdit: boolean; setError: (s
   const [refreshMine, setRefreshMine] = useState(0);
 
   const selectedSchedule = schedules.find((s) => s.id === scheduleId) || null;
+
+  const MAX_COUPONS = 3;
+  const addCoupon = () => {
+    const code = couponInput.trim().toUpperCase();
+    if (!code) return;
+    if (couponCodes.includes(code)) { setCouponInput(''); return; }
+    if (couponCodes.length >= MAX_COUPONS) return;
+    setCouponCodes((prev) => [...prev, code]);
+    setCouponInput('');
+  };
+  const removeCoupon = (code: string) => setCouponCodes((prev) => prev.filter((c) => c !== code));
 
   useEffect(() => {
     api.get('/api/admissions/courses').then((r) => setCourses(r.data.data)).catch(() => setCourses([]));
@@ -268,7 +284,7 @@ function NewAdmissionTab({ canEdit, setError }: { canEdit: boolean; setError: (s
     setCalcError('');
     api.post('/api/admissions/calculate-fee', {
       courseId, track, scheduleId: scheduleId || undefined,
-      couponCode: couponCode || undefined, paymentMethod,
+      couponCodes: couponCodes.length ? couponCodes : undefined, paymentMethod,
       emiMonths: paymentMethod === 'EMI' ? emiMonths : undefined,
     })
       .then((r) => {
@@ -278,7 +294,7 @@ function NewAdmissionTab({ canEdit, setError }: { canEdit: boolean; setError: (s
       })
       .catch((err) => { setBreakdown(null); setCalcError(errMsg(err, 'Could not calculate fee.')); })
       .finally(() => setCalculating(false));
-  }, [courseId, track, scheduleId, couponCode, paymentMethod, emiMonths]);
+  }, [courseId, track, scheduleId, couponCodes, paymentMethod, emiMonths]);
 
   useEffect(() => { calculate(); }, [calculate]);
 
@@ -292,14 +308,14 @@ function NewAdmissionTab({ canEdit, setError }: { canEdit: boolean; setError: (s
     api.post('/api/admissions', {
       newLead: { name, phone, email: email || undefined, city: city || undefined, degree: degree || undefined, college: college || undefined, passedOutYear: passedOutYear || undefined, currentStatus: currentStatus || undefined },
       courseId, track, scheduleId, deliveryMode: needsDeliveryMode ? deliveryMode : undefined,
-      couponCode: couponCode || undefined, paymentMethod,
+      couponCodes: couponCodes.length ? couponCodes : undefined, paymentMethod,
       emiMonths: paymentMethod === 'EMI' ? emiMonths : undefined,
       payment: { amount: Number(paymentAmount || 0), mode: paymentMode },
     })
       .then((r) => {
         setSuccess(r.data.data);
         setName(''); setPhone(''); setEmail(''); setCity(''); setDegree(''); setCollege(''); setPassedOutYear(''); setCurrentStatus('');
-        setCourseId(''); setTrack(''); setScheduleId(''); setDeliveryMode(''); setCouponCode(''); setPaymentMethod('SPOT'); setBreakdown(null); setPaymentAmount('');
+        setCourseId(''); setTrack(''); setScheduleId(''); setDeliveryMode(''); setCouponCodes([]); setCouponInput(''); setPaymentMethod('FULL'); setBreakdown(null); setPaymentAmount('');
         setRefreshMine((n) => n + 1);
       })
       .catch((err) => setError(errMsg(err, 'Could not create the admission.')))
@@ -417,8 +433,31 @@ function NewAdmissionTab({ canEdit, setError }: { canEdit: boolean; setError: (s
         <div className="lg:col-span-2 border rounded-xl p-5 space-y-4">
           <h3 className="font-semibold text-sm">Payment</h3>
           <div className="grid grid-cols-2 gap-3">
-            <Field label="Coupon Code">
-              <input className={inputCls} value={couponCode} onChange={(e) => setCouponCode(e.target.value.toUpperCase())} placeholder="Optional" />
+            <Field label={`Coupon Codes (up to ${MAX_COUPONS})`}>
+              <div className="space-y-1.5">
+                {couponCodes.length > 0 && (
+                  <div className="flex flex-wrap gap-1.5">
+                    {couponCodes.map((code) => (
+                      <span key={code} className="inline-flex items-center gap-1 bg-blue-50 text-blue-700 text-xs font-medium px-2 py-1 rounded-full">
+                        {code}
+                        <button type="button" onClick={() => removeCoupon(code)} className="hover:text-blue-900">
+                          <X className="w-3 h-3" />
+                        </button>
+                      </span>
+                    ))}
+                  </div>
+                )}
+                {couponCodes.length < MAX_COUPONS && (
+                  <input
+                    className={inputCls}
+                    value={couponInput}
+                    onChange={(e) => setCouponInput(e.target.value.toUpperCase())}
+                    onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); addCoupon(); } }}
+                    onBlur={addCoupon}
+                    placeholder="Optional — press Enter to add"
+                  />
+                )}
+              </div>
             </Field>
             <Field label="Payment Method *">
               <select className={inputCls} value={paymentMethod} onChange={(e) => setPaymentMethod(e.target.value as PaymentMethod)}>
@@ -459,7 +498,12 @@ function NewAdmissionTab({ canEdit, setError }: { canEdit: boolean; setError: (s
             {breakdown && (
               <div className="text-sm space-y-1.5">
                 <Row label="Base Fee" value={money(breakdown.baseFee)} />
-                {breakdown.couponDiscount > 0 && <Row label={`Coupon (${breakdown.couponCode})`} value={`− ${money(breakdown.couponDiscount)}`} />}
+                {breakdown.couponBreakdown?.map((c) => (
+                  <Row key={c.couponId} label={`Coupon (${c.code})`} value={`− ${money(c.discount)}`} />
+                ))}
+                {breakdown.couponBreakdown?.length > 1 && (
+                  <Row label="Total Coupon Discount" value={`− ${money(breakdown.couponDiscount)}`} />
+                )}
                 <Row label="Net Course Fee" value={money(breakdown.netCourseFee)} bold />
                 {breakdown.paymentDiscountAmount != null && (
                   <Row label={`${paymentMethod === 'SPOT' ? 'Spot' : 'Full'} Discount (${breakdown.paymentDiscountPct}%)`} value={`− ${money(breakdown.paymentDiscountAmount)}`} />
