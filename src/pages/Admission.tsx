@@ -130,7 +130,7 @@ interface Coupon {
   status: 'ACTIVE' | 'INACTIVE'; validFrom: string; validUntil: string; maxUsage: number | null;
   course: { name: string } | null; restrictedToEmployee: EmployeeLite | null; _count?: { usages: number };
 }
-interface CourseFee { id: string; course: { name: string }; track: string; baseFee: number; effectiveDate: string; isActive: boolean }
+interface CourseFee { id: string; course: { id: string; name: string }; track: string; baseFee: number; effectiveDate: string; isActive: boolean }
 interface SeatHoldRequestItem {
   id: string; scheduleId: string; deliveryMode: DeliveryMode | null; seatsRequested: number; reason: string | null;
   status: 'PENDING' | 'APPROVED' | 'REJECTED'; responseNote: string | null; createdAt: string; respondedAt: string | null;
@@ -1316,6 +1316,12 @@ function CourseFeesTab({ setError }: { setError: (s: string) => void }) {
   const [fees, setFees] = useState<CourseFee[] | null>(null);
   const [courses, setCourses] = useState<Course[]>([]);
   const [showAdd, setShowAdd] = useState(false);
+  // Set when the modal was opened via "Edit" on an existing row — prefills
+  // the form and tweaks the copy, but still POSTs a new fee row underneath:
+  // CourseTrackFee is append-only (never edited in place) so every fee
+  // change stays in the audit trail and past admissions' snapshots stay
+  // honest. "Editing" here really means "supersede as of today."
+  const [editingFee, setEditingFee] = useState<CourseFee | null>(null);
   const [courseId, setCourseId] = useState('');
   const [track, setTrack] = useState<Track | ''>('');
   const [baseFee, setBaseFee] = useState('');
@@ -1329,31 +1335,53 @@ function CourseFeesTab({ setError }: { setError: (s: string) => void }) {
   }, [setError]);
   useEffect(() => { load(); loadCourses(); }, [load, loadCourses]);
 
+  const openAdd = () => { setEditingFee(null); setCourseId(''); setTrack(''); setBaseFee(''); setShowAdd(true); };
+  const openEdit = (f: CourseFee) => {
+    setEditingFee(f);
+    setCourseId(f.course.id);
+    setTrack(f.track as Track);
+    setBaseFee(String(f.baseFee));
+    setShowAdd(true);
+  };
+  const closeModal = () => { setShowAdd(false); setEditingFee(null); };
+
   const submit = () => {
     if (!courseId || !track || !baseFee) return;
     setSaving(true);
     api.post('/api/admissions/course-fees', { courseId, track, baseFee: Number(baseFee) })
-      .then(() => { setShowAdd(false); setCourseId(''); setTrack(''); setBaseFee(''); load(); })
+      .then(() => { closeModal(); load(); })
       .catch((err) => setError(errMsg(err, 'Could not save fee.')))
       .finally(() => setSaving(false));
   };
 
+  const deactivate = (f: CourseFee) => {
+    if (!window.confirm(`Retire this fee (${f.course.name} · ${f.track} · ${money(f.baseFee)})? It'll stop showing here and stop applying to new admissions — existing admissions already using it are unaffected.`)) return;
+    api.delete(`/api/admissions/course-fees/${f.id}`)
+      .then(() => load())
+      .catch((err) => setError(errMsg(err, 'Could not retire fee.')));
+  };
+
   return (
     <div className="space-y-4">
-      <button onClick={() => setShowAdd(true)} className="px-4 py-2 text-sm rounded-lg bg-blue-600 text-white inline-flex items-center gap-1.5">
+      <button onClick={openAdd} className="px-4 py-2 text-sm rounded-lg bg-blue-600 text-white inline-flex items-center gap-1.5">
         <PlusCircle className="w-4 h-4" /> New Course Fee
       </button>
       {showAdd && (
-        <Modal title="New Course Fee" onClose={() => setShowAdd(false)}>
+        <Modal title={editingFee ? 'Update Course Fee' : 'New Course Fee'} onClose={closeModal}>
+          {editingFee && (
+            <p className="text-xs text-muted-foreground -mt-1">
+              Fee history is never overwritten — saving adds a new fee effective today for this course/track. The old one ({money(editingFee.baseFee)}) stays on record for past admissions.
+            </p>
+          )}
           <div className="grid grid-cols-2 gap-3">
             <Field label="Course *">
-              <select className={inputCls} value={courseId} onChange={(e) => setCourseId(e.target.value)}>
+              <select className={inputCls} value={courseId} onChange={(e) => setCourseId(e.target.value)} disabled={!!editingFee}>
                 <option value="">Select course</option>
                 {courses.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
               </select>
             </Field>
             <Field label="Track *">
-              <select className={inputCls} value={track} onChange={(e) => setTrack(e.target.value as Track)}>
+              <select className={inputCls} value={track} onChange={(e) => setTrack(e.target.value as Track)} disabled={!!editingFee}>
                 <option value="">Select track</option>
                 {TRACKS.map((t) => <option key={t} value={t}>{TRACK_LABELS[t]}</option>)}
               </select>
@@ -1361,7 +1389,7 @@ function CourseFeesTab({ setError }: { setError: (s: string) => void }) {
             <Field label="Base Fee (₹) *"><input type="number" className={inputCls} value={baseFee} onChange={(e) => setBaseFee(e.target.value)} /></Field>
           </div>
           <div className="flex justify-end gap-2 pt-2">
-            <button onClick={() => setShowAdd(false)} className="px-4 py-2 text-sm rounded-lg border">Cancel</button>
+            <button onClick={closeModal} className="px-4 py-2 text-sm rounded-lg border">Cancel</button>
             <button onClick={submit} disabled={saving} className="px-4 py-2 text-sm rounded-lg bg-blue-600 text-white disabled:opacity-50">{saving ? 'Saving...' : 'Save'}</button>
           </div>
         </Modal>
@@ -1380,6 +1408,7 @@ function CourseFeesTab({ setError }: { setError: (s: string) => void }) {
                 <th className="text-left px-4 py-2">Track</th>
                 <th className="text-left px-4 py-2">Base Fee</th>
                 <th className="text-left px-4 py-2">Effective From</th>
+                <th className="text-left px-4 py-2">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y">
@@ -1389,6 +1418,12 @@ function CourseFeesTab({ setError }: { setError: (s: string) => void }) {
                   <td className="px-4 py-2.5">{f.track}</td>
                   <td className="px-4 py-2.5 font-medium">{money(f.baseFee)}</td>
                   <td className="px-4 py-2.5 text-xs text-muted-foreground">{formatDate(f.effectiveDate)}</td>
+                  <td className="px-4 py-2.5">
+                    <div className="flex items-center gap-3">
+                      <button onClick={() => openEdit(f)} className="text-xs text-blue-600 font-medium">Edit</button>
+                      <button onClick={() => deactivate(f)} className="text-xs text-red-600 font-medium">Retire</button>
+                    </div>
+                  </td>
                 </tr>
               ))}
             </tbody>
