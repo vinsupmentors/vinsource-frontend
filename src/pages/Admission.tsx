@@ -246,6 +246,10 @@ function NewAdmissionTab({ canEdit, setError }: { canEdit: boolean; setError: (s
   const [couponInput, setCouponInput] = useState('');
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>('FULL');
   const [emiMonths, setEmiMonths] = useState(3);
+  // PART only — Sales enters whatever registration amount suits the
+  // student instead of a fixed number; left blank, the backend falls back
+  // to the admin-configured default under Admission > Config.
+  const [registrationFeeInput, setRegistrationFeeInput] = useState('');
 
   const [breakdown, setBreakdown] = useState<FeeBreakdown | null>(null);
   const [calculating, setCalculating] = useState(false);
@@ -291,6 +295,7 @@ function NewAdmissionTab({ canEdit, setError }: { canEdit: boolean; setError: (s
       courseId, track, scheduleId: scheduleId || undefined,
       couponCodes: couponCodes.length ? couponCodes : undefined, paymentMethod,
       emiMonths: paymentMethod === 'EMI' ? emiMonths : undefined,
+      registrationFee: paymentMethod === 'PART' && registrationFeeInput ? Number(registrationFeeInput) : undefined,
     })
       .then((r) => {
         setBreakdown(r.data.data);
@@ -299,7 +304,7 @@ function NewAdmissionTab({ canEdit, setError }: { canEdit: boolean; setError: (s
       })
       .catch((err) => { setBreakdown(null); setCalcError(errMsg(err, 'Could not calculate fee.')); })
       .finally(() => setCalculating(false));
-  }, [courseId, track, scheduleId, couponCodes, paymentMethod, emiMonths]);
+  }, [courseId, track, scheduleId, couponCodes, paymentMethod, emiMonths, registrationFeeInput]);
 
   useEffect(() => { calculate(); }, [calculate]);
 
@@ -315,12 +320,13 @@ function NewAdmissionTab({ canEdit, setError }: { canEdit: boolean; setError: (s
       courseId, track, scheduleId, deliveryMode: needsDeliveryMode ? deliveryMode : undefined,
       couponCodes: couponCodes.length ? couponCodes : undefined, paymentMethod,
       emiMonths: paymentMethod === 'EMI' ? emiMonths : undefined,
+      registrationFee: paymentMethod === 'PART' && registrationFeeInput ? Number(registrationFeeInput) : undefined,
       payment: { amount: Number(paymentAmount || 0), mode: paymentMode },
     })
       .then((r) => {
         setSuccess(r.data.data);
         setName(''); setPhone(''); setEmail(''); setCity(''); setDegree(''); setCollege(''); setPassedOutYear(''); setCurrentStatus('');
-        setCourseId(''); setTrack(''); setScheduleId(''); setDeliveryMode(''); setCouponCodes([]); setCouponInput(''); setPaymentMethod('FULL'); setBreakdown(null); setPaymentAmount('');
+        setCourseId(''); setTrack(''); setScheduleId(''); setDeliveryMode(''); setCouponCodes([]); setCouponInput(''); setPaymentMethod('FULL'); setBreakdown(null); setPaymentAmount(''); setRegistrationFeeInput('');
         setRefreshMine((n) => n + 1);
       })
       .catch((err) => setError(errMsg(err, 'Could not create the admission.')))
@@ -472,6 +478,15 @@ function NewAdmissionTab({ canEdit, setError }: { canEdit: boolean; setError: (s
             {paymentMethod === 'EMI' && (
               <Field label="EMI Duration (months)">
                 <input type="number" min={1} className={inputCls} value={emiMonths} onChange={(e) => setEmiMonths(Number(e.target.value))} />
+              </Field>
+            )}
+            {paymentMethod === 'PART' && (
+              <Field label={`Registration Fee (₹)${breakdown?.netCourseFee ? ` — up to ${money(breakdown.netCourseFee)}` : ''}`}>
+                <input
+                  type="number" min={1} className={inputCls} value={registrationFeeInput}
+                  onChange={(e) => setRegistrationFeeInput(e.target.value)}
+                  placeholder="Default — as per Config"
+                />
               </Field>
             )}
           </div>
