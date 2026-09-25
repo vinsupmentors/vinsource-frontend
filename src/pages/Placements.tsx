@@ -31,7 +31,7 @@ interface ScheduleOption { id: string; code?: string | null; timing: string; bat
 
 interface Partner { id: string; name: string; industry?: string | null; _count?: { drives: number }; }
 interface Drive {
-  id: string; role: string; driveDate: string; venue?: string | null; status: DriveStatus;
+  id: string; role: string; driveDate: string; venue?: string | null; jobDescription?: string | null; status: DriveStatus;
   partner: { id: string; name: string; industry?: string | null };
   _count?: { results: number; candidates?: number; interviews?: number };
 }
@@ -842,7 +842,7 @@ export default function PlacementsPage() {
       {interviewStudent && (
         <AddInterviewModal
           student={interviewStudent}
-          drives={drives}
+          drives={drives.filter((d) => d.status !== 'CANCELLED')}
           setError={setError}
           onClose={() => setInterviewStudent(null)}
           onSaved={() => { refreshStudentInterviews(interviewStudent.id); setExpandedStudentId(interviewStudent.id); }}
@@ -1592,6 +1592,13 @@ function DriveResultsModal({ drive, canEdit, setError, onClose, onChanged, respo
           <button onClick={onClose}><X className="w-4 h-4" /></button>
         </div>
 
+        {drive.jobDescription && (
+          <details className="border rounded-lg px-3 py-2">
+            <summary className="text-xs font-medium text-muted-foreground cursor-pointer select-none">Job Description</summary>
+            <p className="text-sm mt-2 whitespace-pre-wrap">{drive.jobDescription}</p>
+          </details>
+        )}
+
         <div className="max-h-56 overflow-y-auto border rounded-lg divide-y">
           {loading ? (
             <p className="text-sm text-muted-foreground p-3">Loading...</p>
@@ -1767,7 +1774,7 @@ function GiveOfferModal({ student, setError, onClose, onSaved }: {
 function AddDriveModal({ partners, saving, setSaving, onClose, onSaved, setError }: {
   partners: Partner[]; saving: boolean; setSaving: (v: boolean) => void; onClose: () => void; onSaved: () => void; setError: (s: string) => void;
 }) {
-  const [form, setForm] = useState({ partnerId: '', role: '', driveDate: '', venue: '' });
+  const [form, setForm] = useState({ partnerId: '', role: '', driveDate: '', venue: '', jobDescription: '' });
 
   const submit = async () => {
     if (!form.partnerId || !form.role || !form.driveDate) { setError('Partner, role, and date/time are required'); return; }
@@ -1803,6 +1810,10 @@ function AddDriveModal({ partners, saving, setSaving, onClose, onSaved, setError
           <div>
             <label className="text-xs font-medium text-muted-foreground">Venue</label>
             <input className="w-full px-3 py-2 border rounded-lg text-sm mt-1" placeholder="Office address, or Online / meeting link" value={form.venue} onChange={(e) => setForm({ ...form, venue: e.target.value })} />
+          </div>
+          <div>
+            <label className="text-xs font-medium text-muted-foreground">Job Description</label>
+            <textarea rows={5} className="w-full px-3 py-2 border rounded-lg text-sm mt-1" placeholder="Paste the role's JD — responsibilities, requirements, etc." value={form.jobDescription} onChange={(e) => setForm({ ...form, jobDescription: e.target.value })} />
           </div>
         </div>
         <div className="flex justify-end gap-2">
