@@ -486,14 +486,13 @@ function NewAdmissionTab({ canEdit, setError }: { canEdit: boolean; setError: (s
                 <input
                   type="number" min={1} className={inputCls} value={registrationFeeInput}
                   onChange={(e) => setRegistrationFeeInput(e.target.value)}
-                  placeholder="Default — as per Config"
                 />
               </Field>
             )}
           </div>
           <div className="grid grid-cols-2 gap-3">
-            <Field label="Amount Collected Now">
-              <input type="number" className={inputCls} value={paymentAmount} onChange={(e) => setPaymentAmount(e.target.value)} />
+            <Field label="Amount Collected Now (from Fee Breakdown)">
+              <input type="number" disabled className={`${inputCls} bg-gray-50 text-muted-foreground cursor-not-allowed`} value={paymentAmount} readOnly />
             </Field>
             <Field label="Payment Mode">
               <select className={inputCls} value={paymentMode} onChange={(e) => setPaymentMode(e.target.value)}>
