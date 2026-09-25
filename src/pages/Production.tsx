@@ -49,7 +49,8 @@ type DeliveryMode = 'ONLINE' | 'OFFLINE' | 'HYBRID';
 type TrainerAssignment = { id: string; trainerId: string; trainer: EmployeeLite };
 type BatchCourseSchedule = {
   id: string; code?: string | null; batchId: string; courseId: string; timing: BatchTiming; dayPattern: DayPattern;
-  mode: DeliveryMode; startDate: string; endDate?: string | null; capacity?: number | null; status: BatchStatus;
+  mode: DeliveryMode; startDate: string; endDate?: string | null; capacity?: number | null;
+  onlineCapacity?: number | null; offlineCapacity?: number | null; status: BatchStatus;
   course: { id: string; name: string }; trainers: TrainerAssignment[]; _count?: { enrollments: number };
 };
 type Batch = {
@@ -1199,14 +1200,22 @@ function EditScheduleModal({ schedule, onClose, setError, onSaved }: {
     startDate: schedule.startDate ? schedule.startDate.slice(0, 10) : '',
     endDate: schedule.endDate ? schedule.endDate.slice(0, 10) : '',
     capacity: schedule.capacity != null ? String(schedule.capacity) : '',
+    onlineCapacity: schedule.onlineCapacity != null ? String(schedule.onlineCapacity) : '',
+    offlineCapacity: schedule.offlineCapacity != null ? String(schedule.offlineCapacity) : '',
   });
   const [saving, setSaving] = useState(false);
+  const isHybrid = form.mode === 'HYBRID';
 
   const submit = async () => {
     setSaving(true);
     setError('');
     try {
-      await api.put(`/api/production/schedules/${schedule.id}`, form);
+      await api.put(`/api/production/schedules/${schedule.id}`, {
+        ...form,
+        capacity: !isHybrid ? form.capacity : undefined,
+        onlineCapacity: isHybrid ? form.onlineCapacity : undefined,
+        offlineCapacity: isHybrid ? form.offlineCapacity : undefined,
+      });
       onSaved();
     } catch (err) { setError(errMsg(err, 'Failed to update sub-batch')); } finally { setSaving(false); }
   };
@@ -1229,7 +1238,14 @@ function EditScheduleModal({ schedule, onClose, setError, onSaved }: {
           <input type="date" className="w-full px-3 py-2 border rounded-lg text-sm" value={form.startDate} onChange={(e) => setForm({ ...form, startDate: e.target.value })} placeholder="Start date" />
           <input type="date" className="w-full px-3 py-2 border rounded-lg text-sm" value={form.endDate} onChange={(e) => setForm({ ...form, endDate: e.target.value })} placeholder="End date" />
         </div>
-        <input type="number" className="w-full px-3 py-2 border rounded-lg text-sm" placeholder="Capacity" value={form.capacity} onChange={(e) => setForm({ ...form, capacity: e.target.value })} />
+        {isHybrid ? (
+          <div className="flex gap-2">
+            <input type="number" min={0} className="w-1/2 px-3 py-2 border rounded-lg text-sm" placeholder="Offline Capacity" value={form.offlineCapacity} onChange={(e) => setForm({ ...form, offlineCapacity: e.target.value })} />
+            <input type="number" min={0} className="w-1/2 px-3 py-2 border rounded-lg text-sm" placeholder="Online Capacity" value={form.onlineCapacity} onChange={(e) => setForm({ ...form, onlineCapacity: e.target.value })} />
+          </div>
+        ) : (
+          <input type="number" min={0} className="w-full px-3 py-2 border rounded-lg text-sm" placeholder="Capacity" value={form.capacity} onChange={(e) => setForm({ ...form, capacity: e.target.value })} />
+        )}
         <div>
           <label className="text-xs font-medium text-muted-foreground">Status</label>
           <select className="w-full mt-1 px-3 py-2 border rounded-lg text-sm" value={form.status} onChange={(e) => setForm({ ...form, status: e.target.value as BatchStatus })}>

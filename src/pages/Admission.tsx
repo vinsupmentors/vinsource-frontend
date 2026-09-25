@@ -6,7 +6,7 @@ import { useAuth } from '@/hooks/useAuth';
 import {
   UserPlus, ClipboardList, CalendarClock, Tags, Wallet, Settings2, X, Loader2,
   Search, CheckCircle2, PlusCircle, Monitor, Building2, Grid3x3,
-  Ticket, Lock, Check, XCircle,
+  Ticket, Lock, Check, XCircle, Pencil,
 } from 'lucide-react';
 
 function errMsg(err: unknown, fallback: string) {
@@ -91,6 +91,11 @@ interface Schedule {
   batch: { id: string; code: string };
   seats: SeatInfo;
 }
+const DAY_PATTERN_OPTIONS: { value: 'MON_SAT' | 'SAT_SUN' | 'SUNDAY_ONLY'; label: string }[] = [
+  { value: 'MON_SAT', label: 'Mon–Sat' },
+  { value: 'SAT_SUN', label: 'Sat–Sun' },
+  { value: 'SUNDAY_ONLY', label: 'Sunday Only' },
+];
 
 /** "09:30" -> "9:30 AM" */
 function formatTime(hhmm?: string | null) {
@@ -713,6 +718,7 @@ function BatchesTab({ canAdmin, canEdit, setError }: { canAdmin: boolean; canEdi
   const [showCreate, setShowCreate] = useState(false);
   const [holdFor, setHoldFor] = useState<Schedule | null>(null);
   const [requestFor, setRequestFor] = useState<Schedule | null>(null);
+  const [editFor, setEditFor] = useState<Schedule | null>(null);
 
   const load = useCallback(() => {
     api.get('/api/admissions/batches/upcoming', { params: { includeFull: 'true' } })
@@ -731,6 +737,7 @@ function BatchesTab({ canAdmin, canEdit, setError }: { canAdmin: boolean; canEdi
       {showCreate && <CreateBatchModal onClose={() => setShowCreate(false)} onSaved={() => { setShowCreate(false); load(); }} setError={setError} />}
       {holdFor && <HoldSeatsModal schedule={holdFor} onClose={() => setHoldFor(null)} onSaved={() => { setHoldFor(null); load(); }} setError={setError} />}
       {requestFor && <RequestSeatModal schedule={requestFor} onClose={() => setRequestFor(null)} onSaved={() => setRequestFor(null)} setError={setError} />}
+      {editFor && <EditBatchScheduleModal schedule={editFor} onClose={() => setEditFor(null)} onSaved={() => { setEditFor(null); load(); }} setError={setError} />}
 
       {schedules === null ? (
         <div className="flex justify-center py-8"><Loader2 className="w-5 h-5 animate-spin text-blue-600" /></div>
@@ -784,7 +791,12 @@ function BatchesTab({ canAdmin, canEdit, setError }: { canAdmin: boolean; canEdi
                   </p>
                 )}
 
-                <div className="flex gap-2 pt-1">
+                <div className="flex gap-2 pt-1 flex-wrap">
+                  {canAdmin && (
+                    <button onClick={() => setEditFor(s)} className="text-xs px-2.5 py-1.5 rounded-lg border inline-flex items-center gap-1 hover:bg-white/60">
+                      <Pencil className="w-3 h-3" /> Edit
+                    </button>
+                  )}
                   {canAdmin && (
                     <button onClick={() => setHoldFor(s)} className="text-xs px-2.5 py-1.5 rounded-lg border inline-flex items-center gap-1 hover:bg-white/60">
                       <Lock className="w-3 h-3" /> Manage Hold
@@ -898,6 +910,73 @@ function RequestSeatModal({ schedule, onClose, onSaved, setError }: { schedule: 
       <div className="flex justify-end gap-2 pt-2">
         <button onClick={onClose} className="px-4 py-2 text-sm rounded-lg border">Cancel</button>
         <button onClick={submit} disabled={!canSubmit || saving} className="px-4 py-2 text-sm rounded-lg bg-blue-600 text-white disabled:opacity-50">{saving ? 'Sending...' : 'Send Request'}</button>
+      </div>
+    </Modal>
+  );
+}
+
+/** Admin edits an existing batch schedule's timing, days, start date, and seat capacity. */
+function EditBatchScheduleModal({ schedule, onClose, onSaved, setError }: {
+  schedule: Schedule; onClose: () => void; onSaved: () => void; setError: (s: string) => void;
+}) {
+  const [startTime, setStartTime] = useState(schedule.startTime || '');
+  const [endTime, setEndTime] = useState(schedule.endTime || '');
+  const [dayPattern, setDayPattern] = useState<'MON_SAT' | 'SAT_SUN' | 'SUNDAY_ONLY'>((schedule.dayPattern as 'MON_SAT' | 'SAT_SUN' | 'SUNDAY_ONLY') || 'MON_SAT');
+  const [startDate, setStartDate] = useState(schedule.startDate ? schedule.startDate.slice(0, 10) : '');
+  const [capacity, setCapacity] = useState(schedule.seats.rawTotal != null ? String(schedule.seats.rawTotal) : '');
+  const [onlineCapacity, setOnlineCapacity] = useState(schedule.seats.online?.rawTotal != null ? String(schedule.seats.online.rawTotal) : '');
+  const [offlineCapacity, setOfflineCapacity] = useState(schedule.seats.offline?.rawTotal != null ? String(schedule.seats.offline.rawTotal) : '');
+  const [saving, setSaving] = useState(false);
+  const isHybrid = schedule.mode === 'HYBRID';
+
+  const canSubmit = startTime && endTime;
+
+  const submit = () => {
+    if (!canSubmit) return;
+    setSaving(true);
+    api.put(`/api/admissions/batches/${schedule.id}`, {
+      startTime, endTime, dayPattern, startDate,
+      capacity: !isHybrid ? (capacity === '' ? '' : Number(capacity)) : undefined,
+      onlineCapacity: isHybrid ? (onlineCapacity === '' ? '' : Number(onlineCapacity)) : undefined,
+      offlineCapacity: isHybrid ? (offlineCapacity === '' ? '' : Number(offlineCapacity)) : undefined,
+    })
+      .then(onSaved)
+      .catch((err) => setError(errMsg(err, 'Could not update the batch.')))
+      .finally(() => setSaving(false));
+  };
+
+  return (
+    <Modal title={`Edit Batch — ${schedule.batch.code}${schedule.code ? ` / ${schedule.code}` : ''}`} onClose={onClose}>
+      <p className="text-xs text-muted-foreground">{schedule.course.name} · {MODE_LABELS[schedule.mode]}. Delivery mode can't be changed here once seats are booked — create a new batch for that instead.</p>
+      <div className="grid grid-cols-2 gap-3">
+        <Field label="Start Time *"><input type="time" className={inputCls} value={startTime} onChange={(e) => setStartTime(e.target.value)} /></Field>
+        <Field label="End Time *"><input type="time" className={inputCls} value={endTime} onChange={(e) => setEndTime(e.target.value)} /></Field>
+        <Field label="Days">
+          <select className={inputCls} value={dayPattern} onChange={(e) => setDayPattern(e.target.value as typeof dayPattern)}>
+            {DAY_PATTERN_OPTIONS.map((d) => <option key={d.value} value={d.value}>{d.label}</option>)}
+          </select>
+        </Field>
+        <Field label="Start Date"><input type="date" className={inputCls} value={startDate} onChange={(e) => setStartDate(e.target.value)} /></Field>
+      </div>
+
+      {isHybrid ? (
+        <div className="grid grid-cols-2 gap-3">
+          <Field label={`Offline Seats (${schedule.seats.offline?.booked ?? 0} booked)`}>
+            <input type="number" min={schedule.seats.offline?.booked ?? 0} className={inputCls} value={offlineCapacity} onChange={(e) => setOfflineCapacity(e.target.value)} placeholder="Unlimited" />
+          </Field>
+          <Field label={`Online Seats (${schedule.seats.online?.booked ?? 0} booked)`}>
+            <input type="number" min={schedule.seats.online?.booked ?? 0} className={inputCls} value={onlineCapacity} onChange={(e) => setOnlineCapacity(e.target.value)} placeholder="Unlimited" />
+          </Field>
+        </div>
+      ) : (
+        <Field label={`${schedule.mode === 'ONLINE' ? 'Online' : 'Offline'} Seats (${schedule.seats.booked} booked)`}>
+          <input type="number" min={schedule.seats.booked} className={inputCls} value={capacity} onChange={(e) => setCapacity(e.target.value)} placeholder="Unlimited" />
+        </Field>
+      )}
+
+      <div className="flex justify-end gap-2 pt-2">
+        <button onClick={onClose} className="px-4 py-2 text-sm rounded-lg border">Cancel</button>
+        <button onClick={submit} disabled={!canSubmit || saving} className="px-4 py-2 text-sm rounded-lg bg-blue-600 text-white disabled:opacity-50">{saving ? 'Saving...' : 'Save'}</button>
       </div>
     </Modal>
   );
