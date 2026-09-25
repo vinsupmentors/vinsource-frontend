@@ -311,8 +311,25 @@ export default function PlacementsPage() {
       await api.delete(`/api/placements/drives/${drive.id}`);
       fetchAll();
     } catch (err: unknown) {
-      // Backend refuses when the drive has results/interviews/candidates
-      // attached — surface that reason rather than a generic failure.
+      const e = err as { response?: { status?: number; data?: { message?: string } } };
+      // Backend refuses (400) when the drive has results/interviews/
+      // candidates attached — offer a force option rather than just
+      // surfacing the block. Force keeps result/interview history (just
+      // detaches it from the drive) and only drops the shortlist entries,
+      // which have no meaning once the drive is gone.
+      if (e.response?.status === 400) {
+        const proceed = window.confirm(
+          `${e.response.data?.message || 'This drive has history attached.'}\n\nForce delete anyway? Shortlisted candidates will be removed from this drive. Any results/interviews already recorded will be kept, just detached from this drive.`
+        );
+        if (!proceed) return;
+        try {
+          await api.delete(`/api/placements/drives/${drive.id}?force=true`);
+          fetchAll();
+        } catch (err2: unknown) {
+          setError(errMsg(err2, 'Failed to delete drive'));
+        }
+        return;
+      }
       setError(errMsg(err, 'Failed to delete drive'));
     }
   };
