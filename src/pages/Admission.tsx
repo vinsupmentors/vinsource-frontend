@@ -65,6 +65,11 @@ const TRACK_LABELS: Record<Track, string> = {
 // backend fee engine + receipts must keep rendering those correctly) — it's
 // just no longer offered as a choice for new admissions, per "no spot
 // payments" policy.
+// Covers every tenure any track's EMI month-limit could allow today
+// (ELITE tops out at 6) with a little headroom — a blank cell just means
+// that tenure isn't offered.
+const EMI_TENURE_OPTIONS = [1, 2, 3, 4, 5, 6, 7, 8];
+
 type PaymentMethod = 'SPOT' | 'FULL' | 'PART' | 'EMI';
 const PAYMENT_METHODS: { id: PaymentMethod; label: string }[] = [
   { id: 'FULL', label: 'Full (before batch start, 5% off)' },
@@ -135,7 +140,7 @@ interface SeatHoldRequestItem {
 }
 interface AdmissionConfig {
   spotDiscountPct: number; fullDiscountPct: number; registrationFee: number;
-  emiInterest3To4MonthPct: number; emiInterest5PlusMonthPct: number; downPaymentPct: number;
+  emiInterestByMonth: Record<string, number>; downPaymentPct: number;
   portalApprovalMinPaidPct: number; trackEmiMonthLimits: Record<string, number>;
 }
 
@@ -1506,10 +1511,29 @@ function ConfigTab({ setError }: { setError: (s: string) => void }) {
         <Field label="Spot Discount %"><input type="number" className={inputCls} value={config.spotDiscountPct} onChange={(e) => set('spotDiscountPct', Number(e.target.value))} /></Field>
         <Field label="Full Payment Discount %"><input type="number" className={inputCls} value={config.fullDiscountPct} onChange={(e) => set('fullDiscountPct', Number(e.target.value))} /></Field>
         <Field label="Registration Fee (₹)"><input type="number" className={inputCls} value={config.registrationFee} onChange={(e) => set('registrationFee', Number(e.target.value))} /></Field>
-        <Field label="Down Payment %"><input type="number" className={inputCls} value={config.downPaymentPct} onChange={(e) => set('downPaymentPct', Number(e.target.value))} /></Field>
-        <Field label="EMI Interest 3–4 months %"><input type="number" className={inputCls} value={config.emiInterest3To4MonthPct} onChange={(e) => set('emiInterest3To4MonthPct', Number(e.target.value))} /></Field>
-        <Field label="EMI Interest 5+ months %"><input type="number" className={inputCls} value={config.emiInterest5PlusMonthPct} onChange={(e) => set('emiInterest5PlusMonthPct', Number(e.target.value))} /></Field>
+        <Field label="Down Payment % (charged upfront; interest below applies only to the remaining balance)"><input type="number" className={inputCls} value={config.downPaymentPct} onChange={(e) => set('downPaymentPct', Number(e.target.value))} /></Field>
         <Field label="Portal Approval — Min Paid % (non-EMI)"><input type="number" className={inputCls} value={config.portalApprovalMinPaidPct} onChange={(e) => set('portalApprovalMinPaidPct', Number(e.target.value))} /></Field>
+      </div>
+
+      <h4 className="font-semibold text-xs pt-2">EMI Interest Rate by Tenure</h4>
+      <p className="text-[11px] text-muted-foreground -mt-2">Charged on the financed balance only (course fee minus the down payment above) — not the full course fee. Leave a tenure blank if it isn't offered.</p>
+      <div className="grid grid-cols-3 gap-3">
+        {EMI_TENURE_OPTIONS.map((m) => (
+          <Field key={m} label={`${m} month${m === 1 ? '' : 's'}`}>
+            <input
+              type="number"
+              className={inputCls}
+              placeholder="—"
+              value={config.emiInterestByMonth[String(m)] ?? ''}
+              onChange={(e) => {
+                const next = { ...config.emiInterestByMonth };
+                if (e.target.value === '') delete next[String(m)];
+                else next[String(m)] = Number(e.target.value);
+                set('emiInterestByMonth', next);
+              }}
+            />
+          </Field>
+        ))}
       </div>
 
       <h4 className="font-semibold text-xs pt-2">EMI Month Limit per Track</h4>
