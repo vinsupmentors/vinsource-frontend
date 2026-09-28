@@ -1268,7 +1268,13 @@ function AddInterviewModal({ student, drives, setError, onClose, onSaved }: {
         companyName: form.companyName || undefined,
         round: form.round,
         interviewerName: form.interviewerName || undefined,
-        scheduledAt: form.scheduledAt,
+        // The <input type="datetime-local"> value is a naive "no timezone"
+        // string — new Date() here resolves it using the BROWSER's local
+        // time (India, for every user of this portal) into a real instant
+        // before it leaves the client. Sending the naive string as-is let
+        // the backend's own server timezone (UTC, not IST) reinterpret it,
+        // silently shifting every scheduled time by 5.5 hours.
+        scheduledAt: new Date(form.scheduledAt).toISOString(),
         notes: form.notes || undefined,
       });
       onSaved();
@@ -1841,10 +1847,16 @@ function AddDriveModal({ partners, existing, saving, setSaving, onClose, onSaved
     setSaving(true);
     setError('');
     try {
+      // See the matching comment in AddInterviewModal.submit — the
+      // datetime-local value has no timezone of its own, so it must be
+      // resolved to a real instant using the BROWSER's local time (IST)
+      // before it's sent, rather than letting the backend's UTC server
+      // clock reinterpret the naive string and shift it by 5.5 hours.
+      const payload = { ...form, driveDate: new Date(form.driveDate).toISOString() };
       if (existing) {
-        await api.put(`/api/placements/drives/${existing.id}`, form);
+        await api.put(`/api/placements/drives/${existing.id}`, payload);
       } else {
-        await api.post('/api/placements/drives', form);
+        await api.post('/api/placements/drives', payload);
       }
       onSaved();
     } catch (err: unknown) {

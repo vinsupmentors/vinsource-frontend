@@ -1928,7 +1928,10 @@ function PlacementContentReviewPanel({ session }: { session: MySoftskillSession 
     setBusyId(projectId);
     try {
       await api.post(`/api/trainer-portal/softskill-sessions/${session.id}/placement-content/release-project`, {
-        projectId, deadline: deadlines[projectId] || undefined,
+        // Naive datetime-local value has no timezone — resolve it using the
+        // browser's local time (IST) before it leaves the client, same fix
+        // as the other deadline/scheduling inputs in this file.
+        projectId, deadline: deadlines[projectId] ? new Date(deadlines[projectId]).toISOString() : undefined,
       });
       load();
     } catch (e) {
@@ -1942,7 +1945,7 @@ function PlacementContentReviewPanel({ session }: { session: MySoftskillSession 
     setBusyId(testId);
     try {
       await api.post(`/api/trainer-portal/softskill-sessions/${session.id}/placement-content/activate-test`, {
-        testId, deadline: deadlines[testId] || undefined,
+        testId, deadline: deadlines[testId] ? new Date(deadlines[testId]).toISOString() : undefined,
       });
       load();
     } catch (e) {
