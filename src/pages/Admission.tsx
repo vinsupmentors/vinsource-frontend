@@ -540,8 +540,8 @@ function NewAdmissionTab({ canEdit, setError }: { canEdit: boolean; setError: (s
                 )}
                 {breakdown.interestAmount != null && (
                   <>
-                    <Row label="Balance to Finance" value={money(breakdown.financedAmount)} />
-                    <Row label={`Interest (${breakdown.interestRatePct}%, on the balance)`} value={money(breakdown.interestAmount)} />
+                    <Row label="Balance" value={money(breakdown.financedAmount)} />
+                    <Row label="Documentation Charges" value={money(breakdown.interestAmount)} />
                     <Row label="EMI Total" value={money(breakdown.emiTotal)} />
                     <Row label="EMI Balance" value={money(breakdown.emiBalance)} />
                     {breakdown.monthlyInstallments && (
