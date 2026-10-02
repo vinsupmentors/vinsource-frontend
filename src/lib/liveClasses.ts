@@ -54,8 +54,30 @@ export interface ScheduleOption {
   timing: string;
   startTime: string | null;
   endTime: string | null;
+  dayPattern: 'MON_SAT' | 'SAT_SUN' | 'SUNDAY_ONLY' | 'CUSTOM';
+  customWeekdays: number | null;
+  startDate: string;
+  endDate: string | null;
   batch: { id: string; code: string };
   course: { id: string; name: string };
+}
+
+const DAY_PATTERN_LABELS: Record<ScheduleOption['dayPattern'], string> = {
+  MON_SAT: 'Mon–Sat',
+  SAT_SUN: 'Sat–Sun',
+  SUNDAY_ONLY: 'Sunday only',
+  CUSTOM: 'Custom days',
+};
+const WEEKDAY_LABELS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+
+/** Human-readable summary of which days a schedule actually runs on — used
+ * in the Bulk Create modal so the person picking a date range can see what
+ * they're about to generate before submitting. */
+export function dayPatternLabel(s: Pick<ScheduleOption, 'dayPattern' | 'customWeekdays'>): string {
+  if (s.dayPattern !== 'CUSTOM') return DAY_PATTERN_LABELS[s.dayPattern];
+  if (!s.customWeekdays) return 'Custom days (none set)';
+  const days = WEEKDAY_LABELS.filter((_, i) => (s.customWeekdays! & (1 << i)) !== 0);
+  return days.length ? days.join(', ') : 'Custom days (none set)';
 }
 
 export const STATUS_BADGE: Record<LiveClassStatus, string> = {

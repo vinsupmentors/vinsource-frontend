@@ -6,12 +6,12 @@ import {
   LiveClass, ScheduleOption, LiveClassDashboard, STATUS_BADGE,
   LiveClassAttendanceResponse, ATTENDANCE_BADGE, LiveClassAnalytics,
   LiveClassRecordingRecord, LiveClassPlaybackUrl, RECORDING_BADGE, formatDuration,
-  formatTimeRange, formatClassDate, errMsg,
+  formatTimeRange, formatClassDate, errMsg, dayPatternLabel,
 } from '@/lib/liveClasses';
 import {
   Video, PlayCircle, CalendarClock, CheckCircle2, X, Loader2, PlusCircle,
   Users, Radio, Clock, GraduationCap, ClipboardCheck, RefreshCw, BarChart3,
-  MessageSquare, TrendingUp, XCircle, Film,
+  MessageSquare, TrendingUp, XCircle, Film, CalendarPlus,
 } from 'lucide-react';
 import {
   ResponsiveContainer, AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip,
@@ -65,6 +65,7 @@ export default function LiveClassesPage() {
 
   const [error, setError] = useState('');
   const [showCreate, setShowCreate] = useState(false);
+  const [showBulkCreate, setShowBulkCreate] = useState(false);
   const [refreshKey, setRefreshKey] = useState(0);
 
   return (
@@ -75,9 +76,14 @@ export default function LiveClassesPage() {
           <p className="text-muted-foreground text-sm">Virtual classrooms, scheduling, and class history for Production's batches.</p>
         </div>
         {canEdit && (
-          <button onClick={() => setShowCreate(true)} className="px-4 py-2 text-sm rounded-lg bg-blue-600 text-white inline-flex items-center gap-1.5">
-            <PlusCircle className="w-4 h-4" /> Create Class
-          </button>
+          <div className="flex gap-2">
+            <button onClick={() => setShowBulkCreate(true)} className="px-4 py-2 text-sm rounded-lg border inline-flex items-center gap-1.5 hover:bg-muted/40">
+              <CalendarPlus className="w-4 h-4" /> Bulk Create
+            </button>
+            <button onClick={() => setShowCreate(true)} className="px-4 py-2 text-sm rounded-lg bg-blue-600 text-white inline-flex items-center gap-1.5">
+              <PlusCircle className="w-4 h-4" /> Create Class
+            </button>
+          </div>
         )}
       </div>
 
@@ -103,6 +109,13 @@ export default function LiveClassesPage() {
         <CreateClassModal
           onClose={() => setShowCreate(false)}
           onSaved={() => { setShowCreate(false); setRefreshKey((n) => n + 1); setTab('upcoming'); }}
+          setError={setError}
+        />
+      )}
+      {showBulkCreate && (
+        <BulkCreateClassModal
+          onClose={() => setShowBulkCreate(false)}
+          onSaved={() => { setShowBulkCreate(false); setRefreshKey((n) => n + 1); setTab('upcoming'); }}
           setError={setError}
         />
       )}
@@ -576,6 +589,109 @@ function CreateClassModal({ onClose, onSaved, setError }: { onClose: () => void;
         <button onClick={onClose} className="px-4 py-2 text-sm rounded-lg border">Cancel</button>
         <button onClick={submit} disabled={!canSubmit || saving} className="px-4 py-2 text-sm rounded-lg bg-blue-600 text-white disabled:opacity-50">{saving ? 'Creating...' : 'Create Class'}</button>
       </div>
+    </Modal>
+  );
+}
+
+// ── Bulk Create modal — one sub-batch, a timing, a date range -> one class ──
+// per day the sub-batch actually runs on, instead of adding them one at a time.
+interface BulkCreateResult { createdCount: number; skippedCount: number; skippedDates: string[]; notRunningCount: number }
+
+function BulkCreateClassModal({ onClose, onSaved, setError }: { onClose: () => void; onSaved: () => void; setError: (s: string) => void }) {
+  const [schedules, setSchedules] = useState<ScheduleOption[]>([]);
+  const [scheduleId, setScheduleId] = useState('');
+  const [title, setTitle] = useState('');
+  const [topic, setTopic] = useState('');
+  const [description, setDescription] = useState('');
+  const [startDate, setStartDate] = useState('');
+  const [endDate, setEndDate] = useState('');
+  const [startTime, setStartTime] = useState('');
+  const [endTime, setEndTime] = useState('');
+  const [saving, setSaving] = useState(false);
+  const [result, setResult] = useState<BulkCreateResult | null>(null);
+
+  useEffect(() => {
+    api.get('/api/live-classes/schedules').then((r) => setSchedules(r.data.data)).catch(() => setSchedules([]));
+  }, []);
+
+  const selected = schedules.find((s) => s.id === scheduleId) || null;
+
+  // Prefill start/end time and a sensible date range from the picked
+  // sub-batch as soon as it's chosen — the sub-batch's own startTime/endTime
+  // and startDate/endDate are almost always exactly what's wanted here.
+  useEffect(() => {
+    if (!selected) return;
+    if (selected.startTime && !startTime) setStartTime(selected.startTime);
+    if (selected.endTime && !endTime) setEndTime(selected.endTime);
+    if (!startDate) setStartDate(selected.startDate.slice(0, 10));
+    if (!endDate && selected.endDate) setEndDate(selected.endDate.slice(0, 10));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [scheduleId]);
+
+  const canSubmit = scheduleId && title.trim() && startDate && endDate && startTime && endTime && endDate >= startDate;
+
+  const submit = () => {
+    if (!canSubmit) return;
+    setSaving(true);
+    setResult(null);
+    api.post('/api/live-classes/bulk', {
+      scheduleId, title: title.trim(), topic: topic || undefined, description: description || undefined,
+      startDate, endDate, startTime, endTime,
+    })
+      .then((r) => setResult(r.data.data))
+      .catch((err) => setError(errMsg(err, 'Could not bulk-create the classes.')))
+      .finally(() => setSaving(false));
+  };
+
+  return (
+    <Modal title="Bulk Create Live Classes" onClose={onClose}>
+      {result ? (
+        <div className="space-y-3">
+          <div className="bg-green-50 border border-green-200 rounded-lg p-4 text-sm text-green-800">
+            Created <strong>{result.createdCount}</strong> class{result.createdCount === 1 ? '' : 'es'}.
+          </div>
+          {result.skippedCount > 0 && (
+            <p className="text-xs text-muted-foreground">
+              Skipped {result.skippedCount} date{result.skippedCount === 1 ? '' : 's'} that already had a class on this batch: {result.skippedDates.join(', ')}
+            </p>
+          )}
+          {result.notRunningCount > 0 && (
+            <p className="text-xs text-muted-foreground">{result.notRunningCount} day{result.notRunningCount === 1 ? '' : 's'} in the range were skipped because the batch doesn't run that day.</p>
+          )}
+          <div className="flex justify-end pt-2">
+            <button onClick={onSaved} className="px-4 py-2 text-sm rounded-lg bg-blue-600 text-white">Done</button>
+          </div>
+        </div>
+      ) : (
+        <>
+          <Field label="Batch / Course *">
+            <select className={inputCls} value={scheduleId} onChange={(e) => setScheduleId(e.target.value)}>
+              <option value="">Select a batch & course</option>
+              {schedules.map((s) => (
+                <option key={s.id} value={s.id}>
+                  {s.batch.code} — {s.course.name}{s.startTime ? ` (${s.startTime}–${s.endTime})` : ''}
+                </option>
+              ))}
+            </select>
+            {schedules.length === 0 && <p className="text-xs text-muted-foreground mt-1">No batches assigned to you yet — a Live Classes admin needs to assign you as a trainer, or grant Admin-level access.</p>}
+            {selected && <p className="text-xs text-muted-foreground mt-1">Runs: {dayPatternLabel(selected)} — a class is only created on days the batch actually runs.</p>}
+          </Field>
+          <Field label="Class Title *"><input className={inputCls} value={title} onChange={(e) => setTitle(e.target.value)} placeholder="e.g. Data Cleaning with Pandas" /></Field>
+          <Field label="Topic"><input className={inputCls} value={topic} onChange={(e) => setTopic(e.target.value)} placeholder="Optional — applied to every class created" /></Field>
+          <Field label="Description"><textarea className={inputCls} rows={2} value={description} onChange={(e) => setDescription(e.target.value)} placeholder="Optional" /></Field>
+          <div className="grid grid-cols-2 gap-3">
+            <Field label="Start Date *"><input type="date" className={inputCls} value={startDate} onChange={(e) => setStartDate(e.target.value)} /></Field>
+            <Field label="End Date *"><input type="date" className={inputCls} value={endDate} onChange={(e) => setEndDate(e.target.value)} /></Field>
+            <Field label="Start Time *"><input type="time" className={inputCls} value={startTime} onChange={(e) => setStartTime(e.target.value)} /></Field>
+            <Field label="End Time *"><input type="time" className={inputCls} value={endTime} onChange={(e) => setEndTime(e.target.value)} /></Field>
+          </div>
+          {endDate && startDate && endDate < startDate && <p className="text-xs text-red-600">End date can't be before start date.</p>}
+          <div className="flex justify-end gap-2 pt-2">
+            <button onClick={onClose} className="px-4 py-2 text-sm rounded-lg border">Cancel</button>
+            <button onClick={submit} disabled={!canSubmit || saving} className="px-4 py-2 text-sm rounded-lg bg-blue-600 text-white disabled:opacity-50">{saving ? 'Creating...' : 'Create Classes'}</button>
+          </div>
+        </>
+      )}
     </Modal>
   );
 }
