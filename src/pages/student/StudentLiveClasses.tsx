@@ -4,7 +4,7 @@ import api from '@/lib/api';
 import {
   LiveClass, LiveClassDashboard, STATUS_BADGE, ATTENDANCE_BADGE, LiveClassAttendanceResponse,
   LiveClassRecordingRecord, LiveClassPlaybackUrl, RECORDING_BADGE, formatDuration,
-  formatTimeRange, formatClassDate, errMsg,
+  formatTimeRange, formatClassDate, errMsg, trainerNames,
 } from '@/lib/liveClasses';
 import { Radio, Clock, CalendarClock, CheckCircle2, Loader2, X, Film, PlayCircle } from 'lucide-react';
 
@@ -84,7 +84,7 @@ function LiveNowBanner({ setError, onJoin }: { setError: (s: string) => void; on
           <div>
             <span className="inline-flex items-center gap-1 text-xs font-bold text-red-700 mb-1"><Radio className="w-3 h-3 animate-pulse" /> LIVE NOW</span>
             <p className="font-semibold text-sm">{c.schedule.course.name} — {c.title}</p>
-            <p className="text-xs text-muted-foreground">{formatTimeRange(c.startTime, c.endTime)} · Trainer: {c.createdBy ? `${c.createdBy.firstName} ${c.createdBy.lastName}` : '—'}</p>
+            <p className="text-xs text-muted-foreground">{formatTimeRange(c.startTime, c.endTime)} · Trainer: {trainerNames(c)}</p>
           </div>
           <button onClick={() => onJoin(c.id)} className="px-4 py-2 text-sm rounded-lg bg-red-600 text-white font-medium">Join Class</button>
         </div>
@@ -123,7 +123,7 @@ function ClassList({ view, setError }: { view: Tab; setError: (s: string) => voi
             <span className={`text-xs font-medium px-2 py-0.5 rounded-full whitespace-nowrap ${STATUS_BADGE[c.status]}`}>{c.status}</span>
           </div>
           <p className="text-sm">{c.title}{c.topic ? <span className="text-muted-foreground"> — {c.topic}</span> : null}</p>
-          <p className="text-xs text-muted-foreground">Trainer: {c.createdBy ? `${c.createdBy.firstName} ${c.createdBy.lastName}` : '—'}</p>
+          <p className="text-xs text-muted-foreground">Trainer: {trainerNames(c)}</p>
           <p className="text-xs text-muted-foreground flex items-center gap-1"><Clock className="w-3 h-3" /> {formatClassDate(c.scheduledDate)} · {formatTimeRange(c.startTime, c.endTime)}</p>
           {c.status === 'CANCELLED' && c.cancelReason && <p className="text-xs text-red-600">Cancelled: {c.cancelReason}</p>}
 

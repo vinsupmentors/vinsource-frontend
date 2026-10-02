@@ -6,7 +6,7 @@ import {
   LiveClass, ScheduleOption, LiveClassDashboard, STATUS_BADGE,
   LiveClassAttendanceResponse, ATTENDANCE_BADGE, LiveClassAnalytics,
   LiveClassRecordingRecord, LiveClassPlaybackUrl, RECORDING_BADGE, formatDuration,
-  formatTimeRange, formatClassDate, errMsg, dayPatternLabel,
+  formatTimeRange, formatClassDate, errMsg, dayPatternLabel, trainerNames,
 } from '@/lib/liveClasses';
 import {
   Video, PlayCircle, CalendarClock, CheckCircle2, X, Loader2, PlusCircle,
@@ -176,7 +176,7 @@ function DashboardTab({ setError, refreshKey }: { setError: (s: string) => void;
                 </div>
                 <p className="font-semibold text-sm">{c.schedule.course.name} · {c.schedule.batch.code}</p>
                 <p className="text-xs text-muted-foreground">{c.title}{c.topic ? ` — ${c.topic}` : ''}</p>
-                <p className="text-xs text-muted-foreground">Trainer: {c.createdBy ? `${c.createdBy.firstName} ${c.createdBy.lastName}` : '—'} · {formatTimeRange(c.startTime, c.endTime)}</p>
+                <p className="text-xs text-muted-foreground">Trainer: {trainerNames(c)} · {formatTimeRange(c.startTime, c.endTime)}</p>
                 <button onClick={() => navigate(`/live-classes/${c.id}/room`)} className="w-full mt-1 px-3 py-2 text-sm rounded-lg bg-red-600 text-white font-medium">
                   Join Class
                 </button>
@@ -341,7 +341,7 @@ function ClassListTab({ view, canEdit, setError, refreshKey }: { view: 'today' |
             <span className={`text-xs font-medium px-2 py-0.5 rounded-full whitespace-nowrap ${STATUS_BADGE[c.status]}`}>{c.status}</span>
           </div>
           <p className="text-sm">{c.title}{c.topic ? <span className="text-muted-foreground"> — {c.topic}</span> : null}</p>
-          <p className="text-xs text-muted-foreground">Trainer: {c.createdBy ? `${c.createdBy.firstName} ${c.createdBy.lastName}` : '—'}</p>
+          <p className="text-xs text-muted-foreground">Trainer: {trainerNames(c)}</p>
           <p className="text-xs text-muted-foreground flex items-center gap-1"><Clock className="w-3 h-3" /> {formatClassDate(c.scheduledDate)} · {formatTimeRange(c.startTime, c.endTime)}</p>
           <p className="text-xs text-muted-foreground flex items-center gap-1"><GraduationCap className="w-3 h-3" /> {c.schedule._count?.enrollments ?? 0} students enrolled</p>
           {c.status === 'CANCELLED' && c.cancelReason && <p className="text-xs text-red-600">Reason: {c.cancelReason}</p>}
@@ -537,6 +537,7 @@ function AttendanceModal({ liveClass, onClose, setError }: { liveClass: LiveClas
 // ── Create Class modal ─────────────────────────────────────────────────────────
 function CreateClassModal({ onClose, onSaved, setError }: { onClose: () => void; onSaved: () => void; setError: (s: string) => void }) {
   const [schedules, setSchedules] = useState<ScheduleOption[]>([]);
+  const [batchId, setBatchId] = useState('');
   const [scheduleId, setScheduleId] = useState('');
   const [title, setTitle] = useState('');
   const [topic, setTopic] = useState('');
@@ -549,6 +550,12 @@ function CreateClassModal({ onClose, onSaved, setError }: { onClose: () => void;
   useEffect(() => {
     api.get('/api/live-classes/schedules').then((r) => setSchedules(r.data.data)).catch(() => setSchedules([]));
   }, []);
+
+  // Batch first, then sub-batch — flattening every batch/course into one
+  // long list made it hard to find the right sub-batch once a batch had
+  // several running at once, so pick the batch, then filter down to it.
+  const batches = Array.from(new Map(schedules.map((s) => [s.batch.id, s.batch])).values());
+  const batchSchedules = schedules.filter((s) => s.batch.id === batchId);
 
   const canSubmit = scheduleId && title.trim() && scheduledDate && startTime && endTime;
 
@@ -566,16 +573,24 @@ function CreateClassModal({ onClose, onSaved, setError }: { onClose: () => void;
 
   return (
     <Modal title="Create Live Class" onClose={onClose}>
-      <Field label="Batch / Course *">
-        <select className={inputCls} value={scheduleId} onChange={(e) => setScheduleId(e.target.value)}>
-          <option value="">Select a batch & course</option>
-          {schedules.map((s) => (
-            <option key={s.id} value={s.id}>
-              {s.batch.code}{s.code ? ` / ${s.code}` : ''} — {s.course.name}{s.startTime ? ` (${s.startTime}–${s.endTime})` : ''}
-            </option>
+      <Field label="Batch *">
+        <select className={inputCls} value={batchId} onChange={(e) => { setBatchId(e.target.value); setScheduleId(''); }}>
+          <option value="">Select a batch</option>
+          {batches.map((b) => (
+            <option key={b.id} value={b.id}>{b.code}</option>
           ))}
         </select>
         {schedules.length === 0 && <p className="text-xs text-muted-foreground mt-1">No batches assigned to you yet — a Live Classes admin needs to assign you as a trainer, or grant Admin-level access.</p>}
+      </Field>
+      <Field label="Sub-batch / Course *">
+        <select className={inputCls} value={scheduleId} onChange={(e) => setScheduleId(e.target.value)} disabled={!batchId}>
+          <option value="">{batchId ? 'Select a sub-batch & course' : 'Pick a batch first'}</option>
+          {batchSchedules.map((s) => (
+            <option key={s.id} value={s.id}>
+              {s.code ? `${s.code} — ` : ''}{s.course.name}{s.startTime ? ` (${s.startTime}–${s.endTime})` : ''}
+            </option>
+          ))}
+        </select>
       </Field>
       <Field label="Class Title *"><input className={inputCls} value={title} onChange={(e) => setTitle(e.target.value)} placeholder="e.g. Data Cleaning with Pandas" /></Field>
       <Field label="Topic"><input className={inputCls} value={topic} onChange={(e) => setTopic(e.target.value)} placeholder="Optional" /></Field>
@@ -599,6 +614,7 @@ interface BulkCreateResult { createdCount: number; skippedCount: number; skipped
 
 function BulkCreateClassModal({ onClose, onSaved, setError }: { onClose: () => void; onSaved: () => void; setError: (s: string) => void }) {
   const [schedules, setSchedules] = useState<ScheduleOption[]>([]);
+  const [batchId, setBatchId] = useState('');
   const [scheduleId, setScheduleId] = useState('');
   const [title, setTitle] = useState('');
   const [topic, setTopic] = useState('');
@@ -613,6 +629,11 @@ function BulkCreateClassModal({ onClose, onSaved, setError }: { onClose: () => v
   useEffect(() => {
     api.get('/api/live-classes/schedules').then((r) => setSchedules(r.data.data)).catch(() => setSchedules([]));
   }, []);
+
+  // Batch first, then sub-batch — same two-step picker as Create Class, so
+  // the long flat list of every sub-batch doesn't have to be scanned by eye.
+  const batches = Array.from(new Map(schedules.map((s) => [s.batch.id, s.batch])).values());
+  const batchSchedules = schedules.filter((s) => s.batch.id === batchId);
 
   const selected = schedules.find((s) => s.id === scheduleId) || null;
 
@@ -664,16 +685,24 @@ function BulkCreateClassModal({ onClose, onSaved, setError }: { onClose: () => v
         </div>
       ) : (
         <>
-          <Field label="Batch / Course *">
-            <select className={inputCls} value={scheduleId} onChange={(e) => setScheduleId(e.target.value)}>
-              <option value="">Select a batch & course</option>
-              {schedules.map((s) => (
-                <option key={s.id} value={s.id}>
-                  {s.batch.code}{s.code ? ` / ${s.code}` : ''} — {s.course.name}{s.startTime ? ` (${s.startTime}–${s.endTime})` : ''}
-                </option>
+          <Field label="Batch *">
+            <select className={inputCls} value={batchId} onChange={(e) => { setBatchId(e.target.value); setScheduleId(''); }}>
+              <option value="">Select a batch</option>
+              {batches.map((b) => (
+                <option key={b.id} value={b.id}>{b.code}</option>
               ))}
             </select>
             {schedules.length === 0 && <p className="text-xs text-muted-foreground mt-1">No batches assigned to you yet — a Live Classes admin needs to assign you as a trainer, or grant Admin-level access.</p>}
+          </Field>
+          <Field label="Sub-batch / Course *">
+            <select className={inputCls} value={scheduleId} onChange={(e) => setScheduleId(e.target.value)} disabled={!batchId}>
+              <option value="">{batchId ? 'Select a sub-batch & course' : 'Pick a batch first'}</option>
+              {batchSchedules.map((s) => (
+                <option key={s.id} value={s.id}>
+                  {s.code ? `${s.code} — ` : ''}{s.course.name}{s.startTime ? ` (${s.startTime}–${s.endTime})` : ''}
+                </option>
+              ))}
+            </select>
             {selected && <p className="text-xs text-muted-foreground mt-1">Runs: {dayPatternLabel(selected)} — a class is only created on days the batch actually runs.</p>}
           </Field>
           <Field label="Class Title *"><input className={inputCls} value={title} onChange={(e) => setTitle(e.target.value)} placeholder="e.g. Data Cleaning with Pandas" /></Field>

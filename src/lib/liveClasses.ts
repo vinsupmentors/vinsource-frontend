@@ -17,6 +17,10 @@ export interface LiveClassScheduleInfo {
   batch: { id: string; code: string };
   course: { id: string; name: string };
   _count?: { enrollments: number };
+  // Trainer(s) actually assigned to this sub-batch in Production — the ones
+  // who'll teach the class, as opposed to LiveClass.createdBy (whoever
+  // scheduled it, which for bulk-created classes is often a manager/admin).
+  trainers?: { trainer: { id: string; firstName: string; lastName: string } }[];
 }
 
 export interface LiveClass {
@@ -200,6 +204,15 @@ export function formatTimeRange(startTime: string, endTime: string): string {
 export function formatClassDate(iso?: string | null): string {
   if (!iso) return '—';
   return new Date(iso).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' });
+}
+
+/** Who taught/will teach this class — the schedule's assigned Production
+ * trainer(s), not whoever clicked "Create". Falls back to createdBy only
+ * when the sub-batch has no trainer assigned yet. */
+export function trainerNames(c: { schedule?: LiveClassScheduleInfo; createdBy?: { firstName: string; lastName: string } | null }): string {
+  const assigned = c.schedule?.trainers?.map((t) => `${t.trainer.firstName} ${t.trainer.lastName}`) || [];
+  if (assigned.length) return assigned.join(', ');
+  return c.createdBy ? `${c.createdBy.firstName} ${c.createdBy.lastName}` : '—';
 }
 
 export function errMsg(err: unknown, fallback: string): string {
