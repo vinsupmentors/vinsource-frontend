@@ -571,7 +571,7 @@ function CreateClassModal({ onClose, onSaved, setError }: { onClose: () => void;
           <option value="">Select a batch & course</option>
           {schedules.map((s) => (
             <option key={s.id} value={s.id}>
-              {s.batch.code} — {s.course.name}{s.startTime ? ` (${s.startTime}–${s.endTime})` : ''}
+              {s.batch.code}{s.code ? ` / ${s.code}` : ''} — {s.course.name}{s.startTime ? ` (${s.startTime}–${s.endTime})` : ''}
             </option>
           ))}
         </select>
@@ -669,7 +669,7 @@ function BulkCreateClassModal({ onClose, onSaved, setError }: { onClose: () => v
               <option value="">Select a batch & course</option>
               {schedules.map((s) => (
                 <option key={s.id} value={s.id}>
-                  {s.batch.code} — {s.course.name}{s.startTime ? ` (${s.startTime}–${s.endTime})` : ''}
+                  {s.batch.code}{s.code ? ` / ${s.code}` : ''} — {s.course.name}{s.startTime ? ` (${s.startTime}–${s.endTime})` : ''}
                 </option>
               ))}
             </select>
