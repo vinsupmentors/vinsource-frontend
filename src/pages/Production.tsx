@@ -43,7 +43,7 @@ type AcademyCourse = {
 
 type BatchStatus = 'UPCOMING' | 'ONGOING' | 'COMPLETED' | 'CANCELLED';
 type BatchTiming = 'MORNING' | 'AFTERNOON' | 'EVENING';
-type DayPattern = 'MON_SAT' | 'SAT_SUN' | 'SUNDAY_ONLY';
+type DayPattern = 'MON_SAT' | 'MON_FRI' | 'SAT_SUN' | 'SUNDAY_ONLY';
 type DeliveryMode = 'ONLINE' | 'OFFLINE' | 'HYBRID';
 
 type TrainerAssignment = { id: string; trainerId: string; trainer: EmployeeLite };
@@ -105,7 +105,7 @@ const BATCH_STATUS_COLOR: Record<BatchStatus, string> = {
 };
 const TIMINGS: BatchTiming[] = ['MORNING', 'AFTERNOON', 'EVENING'];
 const DAY_PATTERNS: { value: DayPattern; label: string }[] = [
-  { value: 'MON_SAT', label: 'Mon – Sat' }, { value: 'SAT_SUN', label: 'Sat – Sun' }, { value: 'SUNDAY_ONLY', label: 'Sunday only' },
+  { value: 'MON_SAT', label: 'Mon – Sat' }, { value: 'MON_FRI', label: 'Mon – Fri' }, { value: 'SAT_SUN', label: 'Sat – Sun' }, { value: 'SUNDAY_ONLY', label: 'Sunday only' },
 ];
 const MODES: DeliveryMode[] = ['ONLINE', 'OFFLINE', 'HYBRID'];
 const TRACKS: StudentTrack[] = ['JRP', 'IOP', 'PAP', 'PT'];

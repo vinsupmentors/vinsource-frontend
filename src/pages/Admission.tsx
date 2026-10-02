@@ -91,8 +91,9 @@ interface Schedule {
   batch: { id: string; code: string };
   seats: SeatInfo;
 }
-const DAY_PATTERN_OPTIONS: { value: 'MON_SAT' | 'SAT_SUN' | 'SUNDAY_ONLY'; label: string }[] = [
+const DAY_PATTERN_OPTIONS: { value: 'MON_SAT' | 'MON_FRI' | 'SAT_SUN' | 'SUNDAY_ONLY'; label: string }[] = [
   { value: 'MON_SAT', label: 'Mon–Sat' },
+  { value: 'MON_FRI', label: 'Mon–Fri' },
   { value: 'SAT_SUN', label: 'Sat–Sun' },
   { value: 'SUNDAY_ONLY', label: 'Sunday Only' },
 ];
@@ -939,7 +940,7 @@ function EditBatchScheduleModal({ schedule, onClose, onSaved, setError }: {
 }) {
   const [startTime, setStartTime] = useState(schedule.startTime || '');
   const [endTime, setEndTime] = useState(schedule.endTime || '');
-  const [dayPattern, setDayPattern] = useState<'MON_SAT' | 'SAT_SUN' | 'SUNDAY_ONLY'>((schedule.dayPattern as 'MON_SAT' | 'SAT_SUN' | 'SUNDAY_ONLY') || 'MON_SAT');
+  const [dayPattern, setDayPattern] = useState<'MON_SAT' | 'MON_FRI' | 'SAT_SUN' | 'SUNDAY_ONLY'>((schedule.dayPattern as 'MON_SAT' | 'MON_FRI' | 'SAT_SUN' | 'SUNDAY_ONLY') || 'MON_SAT');
   const [startDate, setStartDate] = useState(schedule.startDate ? schedule.startDate.slice(0, 10) : '');
   const [capacity, setCapacity] = useState(schedule.seats.rawTotal != null ? String(schedule.seats.rawTotal) : '');
   const [onlineCapacity, setOnlineCapacity] = useState(schedule.seats.online?.rawTotal != null ? String(schedule.seats.online.rawTotal) : '');
@@ -1120,7 +1121,7 @@ function CreateBatchModal({ onClose, onSaved, setError }: { onClose: () => void;
   const [courseId, setCourseId] = useState('');
   const [startTime, setStartTime] = useState('');
   const [endTime, setEndTime] = useState('');
-  const [dayPattern, setDayPattern] = useState<'MON_SAT' | 'SAT_SUN' | 'SUNDAY_ONLY'>('MON_SAT');
+  const [dayPattern, setDayPattern] = useState<'MON_SAT' | 'MON_FRI' | 'SAT_SUN' | 'SUNDAY_ONLY'>('MON_SAT');
   const [mode, setMode] = useState<DeliveryMode>('OFFLINE');
   const [capacity, setCapacity] = useState('');
   const [onlineCapacity, setOnlineCapacity] = useState('');
@@ -1181,6 +1182,7 @@ function CreateBatchModal({ onClose, onSaved, setError }: { onClose: () => void;
         <Field label="Days">
           <select className={inputCls} value={dayPattern} onChange={(e) => setDayPattern(e.target.value as typeof dayPattern)}>
             <option value="MON_SAT">Mon–Sat</option>
+            <option value="MON_FRI">Mon–Fri</option>
             <option value="SAT_SUN">Sat–Sun</option>
             <option value="SUNDAY_ONLY">Sunday Only</option>
           </select>

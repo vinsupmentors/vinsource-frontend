@@ -54,7 +54,7 @@ export interface ScheduleOption {
   timing: string;
   startTime: string | null;
   endTime: string | null;
-  dayPattern: 'MON_SAT' | 'SAT_SUN' | 'SUNDAY_ONLY' | 'CUSTOM';
+  dayPattern: 'MON_SAT' | 'MON_FRI' | 'SAT_SUN' | 'SUNDAY_ONLY' | 'CUSTOM';
   customWeekdays: number | null;
   startDate: string;
   endDate: string | null;
@@ -64,6 +64,7 @@ export interface ScheduleOption {
 
 const DAY_PATTERN_LABELS: Record<ScheduleOption['dayPattern'], string> = {
   MON_SAT: 'Mon–Sat',
+  MON_FRI: 'Mon–Fri',
   SAT_SUN: 'Sat–Sun',
   SUNDAY_ONLY: 'Sunday only',
   CUSTOM: 'Custom days',

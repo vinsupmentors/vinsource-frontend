@@ -112,6 +112,7 @@ function errMsg(err: unknown, fallback: string) {
 // created here with "every day but Sunday" ticked is indistinguishable from
 // one created the old way.
 const MON_SAT_SEL = [false, true, true, true, true, true, true];
+const MON_FRI_SEL = [false, true, true, true, true, true, false];
 const SAT_SUN_SEL = [true, false, false, false, false, false, true];
 const SUNDAY_ONLY_SEL = [true, false, false, false, false, false, false];
 
@@ -121,6 +122,7 @@ function patternToSelection(dayPattern: string, customWeekdays: number | null): 
     return Array.from({ length: 7 }, (_, i) => (mask & (1 << i)) !== 0);
   }
   if (dayPattern === 'MON_SAT') return MON_SAT_SEL;
+  if (dayPattern === 'MON_FRI') return MON_FRI_SEL;
   if (dayPattern === 'SAT_SUN') return SAT_SUN_SEL;
   if (dayPattern === 'SUNDAY_ONLY') return SUNDAY_ONLY_SEL;
   return [false, false, false, false, false, false, false];
@@ -129,6 +131,7 @@ function patternToSelection(dayPattern: string, customWeekdays: number | null): 
 function selectionToPattern(selection: boolean[]): { dayPattern: string; customWeekdays: number | null } {
   const eq = (a: boolean[]) => a.every((v, i) => v === selection[i]);
   if (eq(MON_SAT_SEL)) return { dayPattern: 'MON_SAT', customWeekdays: null };
+  if (eq(MON_FRI_SEL)) return { dayPattern: 'MON_FRI', customWeekdays: null };
   if (eq(SAT_SUN_SEL)) return { dayPattern: 'SAT_SUN', customWeekdays: null };
   if (eq(SUNDAY_ONLY_SEL)) return { dayPattern: 'SUNDAY_ONLY', customWeekdays: null };
   let mask = 0;
