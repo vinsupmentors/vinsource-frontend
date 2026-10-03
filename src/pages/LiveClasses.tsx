@@ -3,7 +3,7 @@ import { useNavigate, useSearchParams } from 'react-router-dom';
 import api from '@/lib/api';
 import { useModuleAccess } from '@/hooks/useModuleAccess';
 import {
-  LiveClass, ScheduleOption, LiveClassDashboard, STATUS_BADGE,
+  LiveClass, ScheduleOption, LiveClassDashboard, STATUS_BADGE, LiveClassSummaryRow,
   LiveClassAttendanceResponse, ATTENDANCE_BADGE, LiveClassAnalytics,
   LiveClassRecordingRecord, LiveClassPlaybackUrl, RECORDING_BADGE, formatDuration,
   formatTimeRange, formatClassDate, errMsg, dayPatternLabel, trainerNames,
@@ -11,7 +11,7 @@ import {
 import {
   Video, PlayCircle, CalendarClock, CheckCircle2, X, Loader2, PlusCircle,
   Users, Radio, Clock, GraduationCap, ClipboardCheck, RefreshCw, BarChart3,
-  MessageSquare, TrendingUp, XCircle, Film, CalendarPlus,
+  MessageSquare, TrendingUp, XCircle, Film, CalendarPlus, Table2,
 } from 'lucide-react';
 import {
   ResponsiveContainer, AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip,
@@ -40,13 +40,14 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
 }
 const inputCls = 'w-full border rounded-lg px-3 py-2 text-sm';
 
-type Tab = 'dashboard' | 'today' | 'upcoming' | 'completed' | 'analytics';
-const VALID_TABS: Tab[] = ['dashboard', 'today', 'upcoming', 'completed', 'analytics'];
+type Tab = 'dashboard' | 'today' | 'upcoming' | 'completed' | 'summary' | 'analytics';
+const VALID_TABS: Tab[] = ['dashboard', 'today', 'upcoming', 'completed', 'summary', 'analytics'];
 const TABS: { id: Tab; label: string; icon: React.ComponentType<{ className?: string }> }[] = [
   { id: 'dashboard', label: 'Dashboard', icon: Video },
   { id: 'today', label: "Today's Classes", icon: PlayCircle },
   { id: 'upcoming', label: 'Upcoming Classes', icon: CalendarClock },
   { id: 'completed', label: 'Completed Classes', icon: CheckCircle2 },
+  { id: 'summary', label: 'Summary', icon: Table2 },
   { id: 'analytics', label: 'Analytics', icon: BarChart3 },
 ];
 
@@ -124,6 +125,7 @@ export default function LiveClassesPage() {
       {tab === 'today' && <ClassListTab view="today" canEdit={canEdit} setError={setError} refreshKey={refreshKey} />}
       {tab === 'upcoming' && <ClassListTab view="upcoming" canEdit={canEdit} setError={setError} refreshKey={refreshKey} />}
       {tab === 'completed' && <ClassListTab view="completed" canEdit={canEdit} setError={setError} refreshKey={refreshKey} />}
+      {tab === 'summary' && <SummaryTab setError={setError} refreshKey={refreshKey} />}
       {tab === 'analytics' && <AnalyticsTab setError={setError} />}
     </div>
   );
@@ -297,12 +299,19 @@ function ClassListTab({ view, canEdit, setError, refreshKey }: { view: 'today' |
   const [classes, setClasses] = useState<LiveClass[] | null>(null);
   const [attendanceFor, setAttendanceFor] = useState<LiveClass | null>(null);
   const [recordingsFor, setRecordingsFor] = useState<LiveClass | null>(null);
+  const [filterBatch, setFilterBatch] = useState('');
+  const [filterCourse, setFilterCourse] = useState('');
+  const [filterSession, setFilterSession] = useState('');
   const navigate = useNavigate();
 
   const load = useCallback(() => {
     api.get('/api/live-classes', { params: { view } }).then((r) => setClasses(r.data.data)).catch((err) => setError(errMsg(err, 'Could not load classes.')));
   }, [view, setError]);
   useEffect(() => { load(); }, [load, refreshKey]);
+  // Filter dropdowns reset whenever the tab's underlying view changes, so
+  // switching from Upcoming to Completed doesn't carry over a stale filter
+  // that silently hides everything.
+  useEffect(() => { setFilterBatch(''); setFilterCourse(''); setFilterSession(''); }, [view]);
 
   const start = (id: string) => {
     api.post(`/api/live-classes/${id}/start`)
@@ -329,9 +338,46 @@ function ClassListTab({ view, canEdit, setError, refreshKey }: { view: 'today' |
     );
   }
 
+  // Filter options are derived from what's actually loaded for this tab,
+  // rather than a separate lookup — keeps them automatically scoped to
+  // whatever this person can already see (their own batches, if not admin).
+  const batchOptions = Array.from(new Set(classes.map((c) => c.schedule.batch.code))).sort();
+  const courseOptions = Array.from(new Set(classes.map((c) => c.schedule.course.name))).sort();
+  const sessionOptions = Array.from(new Set(classes.map((c) => formatTimeRange(c.startTime, c.endTime)))).sort();
+
+  const filtered = classes.filter((c) =>
+    (!filterBatch || c.schedule.batch.code === filterBatch) &&
+    (!filterCourse || c.schedule.course.name === filterCourse) &&
+    (!filterSession || formatTimeRange(c.startTime, c.endTime) === filterSession)
+  );
+
   return (
-    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-      {classes.map((c) => (
+    <div className="space-y-4">
+      <div className="flex flex-wrap items-center gap-2">
+        <select className="border rounded-lg px-3 py-1.5 text-sm" value={filterBatch} onChange={(e) => setFilterBatch(e.target.value)}>
+          <option value="">All Batches</option>
+          {batchOptions.map((b) => <option key={b} value={b}>{b}</option>)}
+        </select>
+        <select className="border rounded-lg px-3 py-1.5 text-sm" value={filterCourse} onChange={(e) => setFilterCourse(e.target.value)}>
+          <option value="">All Courses</option>
+          {courseOptions.map((c) => <option key={c} value={c}>{c}</option>)}
+        </select>
+        <select className="border rounded-lg px-3 py-1.5 text-sm" value={filterSession} onChange={(e) => setFilterSession(e.target.value)}>
+          <option value="">All Sessions</option>
+          {sessionOptions.map((s) => <option key={s} value={s}>{s}</option>)}
+        </select>
+        {(filterBatch || filterCourse || filterSession) && (
+          <button onClick={() => { setFilterBatch(''); setFilterCourse(''); setFilterSession(''); }} className="text-xs text-muted-foreground underline">
+            Clear filters
+          </button>
+        )}
+      </div>
+
+      {filtered.length === 0 ? (
+        <p className="text-sm text-muted-foreground text-center py-8 border rounded-xl">No classes match the selected filters.</p>
+      ) : (
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+      {filtered.map((c) => (
         <div key={c.id} className="border rounded-xl p-4 space-y-2">
           <div className="flex items-start justify-between gap-2">
             <div>
@@ -372,8 +418,66 @@ function ClassListTab({ view, canEdit, setError, refreshKey }: { view: 'today' |
           </div>
         </div>
       ))}
+      </div>
+      )}
       {attendanceFor && <AttendanceModal liveClass={attendanceFor} onClose={() => setAttendanceFor(null)} setError={setError} />}
       {recordingsFor && <RecordingsModal liveClass={recordingsFor} onClose={() => setRecordingsFor(null)} setError={setError} />}
+    </div>
+  );
+}
+
+// ── Summary — one row per sub-batch (Batch, Sub-batch, Schedule From, Date
+// Till, Total running days, classes created so far) ─────────────────────────
+function SummaryTab({ setError, refreshKey }: { setError: (s: string) => void; refreshKey: number }) {
+  const [rows, setRows] = useState<LiveClassSummaryRow[] | null>(null);
+  const [filterBatch, setFilterBatch] = useState('');
+
+  useEffect(() => {
+    api.get('/api/live-classes/summary').then((r) => setRows(r.data.data)).catch((err) => setError(errMsg(err, 'Could not load the summary.')));
+  }, [refreshKey, setError]);
+
+  if (rows === null) return <div className="flex justify-center py-8"><Loader2 className="w-5 h-5 animate-spin text-blue-600" /></div>;
+  if (rows.length === 0) return <p className="text-sm text-muted-foreground text-center py-8 border rounded-xl">No sub-batches to summarize yet.</p>;
+
+  const batchOptions = Array.from(new Set(rows.map((r) => r.batch.code))).sort();
+  const filtered = filterBatch ? rows.filter((r) => r.batch.code === filterBatch) : rows;
+
+  return (
+    <div className="space-y-3">
+      <div className="flex items-center gap-2">
+        <select className="border rounded-lg px-3 py-1.5 text-sm" value={filterBatch} onChange={(e) => setFilterBatch(e.target.value)}>
+          <option value="">All Batches</option>
+          {batchOptions.map((b) => <option key={b} value={b}>{b}</option>)}
+        </select>
+      </div>
+      <div className="border rounded-xl overflow-x-auto">
+        <table className="w-full text-sm">
+          <thead className="bg-muted/40 text-xs text-muted-foreground">
+            <tr>
+              <th className="text-left font-medium px-3 py-2">Batch</th>
+              <th className="text-left font-medium px-3 py-2">Sub-batch</th>
+              <th className="text-left font-medium px-3 py-2">Course</th>
+              <th className="text-left font-medium px-3 py-2">Schedule From</th>
+              <th className="text-left font-medium px-3 py-2">Date Till</th>
+              <th className="text-right font-medium px-3 py-2">Total Days</th>
+              <th className="text-right font-medium px-3 py-2">Classes Scheduled</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y">
+            {filtered.map((r) => (
+              <tr key={r.scheduleId}>
+                <td className="px-3 py-2 font-medium">{r.batch.code}</td>
+                <td className="px-3 py-2">{r.code || '—'}</td>
+                <td className="px-3 py-2">{r.course.name}</td>
+                <td className="px-3 py-2">{formatClassDate(r.startDate)}</td>
+                <td className="px-3 py-2">{r.endDate ? formatClassDate(r.endDate) : 'Ongoing'}</td>
+                <td className="px-3 py-2 text-right">{r.totalRunningDays ?? '—'}</td>
+                <td className="px-3 py-2 text-right">{r.classesScheduledCount}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
     </div>
   );
 }

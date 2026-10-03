@@ -66,6 +66,22 @@ export interface ScheduleOption {
   course: { id: string; name: string };
 }
 
+/** One row per sub-batch, for the Summary tab — returned by GET /api/live-classes/summary. */
+export interface LiveClassSummaryRow {
+  scheduleId: string;
+  code: string | null;
+  batch: { id: string; code: string };
+  course: { id: string; name: string };
+  timing: string;
+  startTime: string | null;
+  endTime: string | null;
+  startDate: string;
+  endDate: string | null;
+  status: string;
+  totalRunningDays: number | null;
+  classesScheduledCount: number;
+}
+
 const DAY_PATTERN_LABELS: Record<ScheduleOption['dayPattern'], string> = {
   MON_SAT: 'Mon–Sat',
   MON_FRI: 'Mon–Fri',
