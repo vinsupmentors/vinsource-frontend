@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
+import * as XLSX from 'xlsx';
 import api from '@/lib/api';
 import { useModuleAccess } from '@/hooks/useModuleAccess';
 import {
@@ -11,7 +12,7 @@ import {
 import {
   Video, PlayCircle, CalendarClock, CheckCircle2, X, Loader2, PlusCircle,
   Users, Radio, Clock, GraduationCap, ClipboardCheck, RefreshCw, BarChart3,
-  MessageSquare, TrendingUp, XCircle, Film, CalendarPlus, Table2,
+  MessageSquare, TrendingUp, XCircle, Film, CalendarPlus, Table2, Upload, Download,
 } from 'lucide-react';
 import {
   ResponsiveContainer, AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip,
@@ -67,6 +68,7 @@ export default function LiveClassesPage() {
   const [error, setError] = useState('');
   const [showCreate, setShowCreate] = useState(false);
   const [showBulkCreate, setShowBulkCreate] = useState(false);
+  const [showBulkUpload, setShowBulkUpload] = useState(false);
   const [refreshKey, setRefreshKey] = useState(0);
 
   return (
@@ -78,6 +80,9 @@ export default function LiveClassesPage() {
         </div>
         {canEdit && (
           <div className="flex gap-2">
+            <button onClick={() => setShowBulkUpload(true)} className="px-4 py-2 text-sm rounded-lg border inline-flex items-center gap-1.5 hover:bg-muted/40">
+              <Upload className="w-4 h-4" /> Bulk Upload (Excel)
+            </button>
             <button onClick={() => setShowBulkCreate(true)} className="px-4 py-2 text-sm rounded-lg border inline-flex items-center gap-1.5 hover:bg-muted/40">
               <CalendarPlus className="w-4 h-4" /> Bulk Create
             </button>
@@ -117,6 +122,13 @@ export default function LiveClassesPage() {
         <BulkCreateClassModal
           onClose={() => setShowBulkCreate(false)}
           onSaved={() => { setShowBulkCreate(false); setRefreshKey((n) => n + 1); setTab('upcoming'); }}
+          setError={setError}
+        />
+      )}
+      {showBulkUpload && (
+        <BulkUploadClassesModal
+          onClose={() => setShowBulkUpload(false)}
+          onSaved={() => { setShowBulkUpload(false); setRefreshKey((n) => n + 1); setTab('upcoming'); }}
           setError={setError}
         />
       )}
@@ -302,16 +314,18 @@ function ClassListTab({ view, canEdit, setError, refreshKey }: { view: 'today' |
   const [filterBatch, setFilterBatch] = useState('');
   const [filterCourse, setFilterCourse] = useState('');
   const [filterSession, setFilterSession] = useState('');
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [bulkCancelling, setBulkCancelling] = useState(false);
   const navigate = useNavigate();
 
   const load = useCallback(() => {
     api.get('/api/live-classes', { params: { view } }).then((r) => setClasses(r.data.data)).catch((err) => setError(errMsg(err, 'Could not load classes.')));
   }, [view, setError]);
   useEffect(() => { load(); }, [load, refreshKey]);
-  // Filter dropdowns reset whenever the tab's underlying view changes, so
-  // switching from Upcoming to Completed doesn't carry over a stale filter
-  // that silently hides everything.
-  useEffect(() => { setFilterBatch(''); setFilterCourse(''); setFilterSession(''); }, [view]);
+  // Filter dropdowns (and any in-progress multi-select) reset whenever the
+  // tab's underlying view changes, so switching from Upcoming to Completed
+  // doesn't carry over a stale filter or selection that no longer applies.
+  useEffect(() => { setFilterBatch(''); setFilterCourse(''); setFilterSession(''); setSelectedIds(new Set()); }, [view]);
 
   const start = (id: string) => {
     api.post(`/api/live-classes/${id}/start`)
@@ -325,6 +339,31 @@ function ClassListTab({ view, canEdit, setError, refreshKey }: { view: 'today' |
     api.post(`/api/live-classes/${c.id}/cancel`, { reason: reason || undefined })
       .then(load)
       .catch((err) => setError(errMsg(err, 'Could not cancel the class.')));
+  };
+
+  const toggleSelect = (id: string) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  };
+
+  const cancelSelected = () => {
+    if (!selectedIds.size) return;
+    const reason = window.prompt(`Cancel ${selectedIds.size} selected class${selectedIds.size === 1 ? '' : 'es'}? Reason (optional):`);
+    if (reason === null) return;
+    setBulkCancelling(true);
+    api.post('/api/live-classes/cancel-bulk', { ids: Array.from(selectedIds), reason: reason || undefined })
+      .then((r) => {
+        const results = r.data.data.results as { id: string; status: 'cancelled' | 'error'; message?: string }[];
+        const failed = results.filter((x) => x.status === 'error');
+        if (failed.length) setError(`${results.length - failed.length} cancelled, ${failed.length} could not be cancelled (${failed[0].message}${failed.length > 1 ? ', ...' : ''}).`);
+        setSelectedIds(new Set());
+        load();
+      })
+      .catch((err) => setError(errMsg(err, 'Could not cancel the selected classes.')))
+      .finally(() => setBulkCancelling(false));
   };
 
   if (classes === null) return <div className="flex justify-center py-8"><Loader2 className="w-5 h-5 animate-spin text-blue-600" /></div>;
@@ -350,6 +389,8 @@ function ClassListTab({ view, canEdit, setError, refreshKey }: { view: 'today' |
     (!filterCourse || c.schedule.course.name === filterCourse) &&
     (!filterSession || formatTimeRange(c.startTime, c.endTime) === filterSession)
   );
+  const cancelableIds = filtered.filter((c) => c.status === 'SCHEDULED').map((c) => c.id);
+  const allCancelableSelected = cancelableIds.length > 0 && cancelableIds.every((id) => selectedIds.has(id));
 
   return (
     <div className="space-y-4">
@@ -371,18 +412,45 @@ function ClassListTab({ view, canEdit, setError, refreshKey }: { view: 'today' |
             Clear filters
           </button>
         )}
+        {canEdit && cancelableIds.length > 0 && (
+          <label className="flex items-center gap-1.5 text-xs text-muted-foreground ml-auto cursor-pointer">
+            <input
+              type="checkbox"
+              checked={allCancelableSelected}
+              onChange={() => setSelectedIds(allCancelableSelected ? new Set() : new Set(cancelableIds))}
+            />
+            Select all scheduled
+          </label>
+        )}
       </div>
+
+      {canEdit && selectedIds.size > 0 && (
+        <div className="flex items-center justify-between bg-red-50 border border-red-200 rounded-lg px-4 py-2">
+          <span className="text-sm text-red-800">{selectedIds.size} class{selectedIds.size === 1 ? '' : 'es'} selected</span>
+          <div className="flex gap-2">
+            <button onClick={() => setSelectedIds(new Set())} className="px-3 py-1.5 text-xs rounded-lg border">Clear</button>
+            <button onClick={cancelSelected} disabled={bulkCancelling} className="px-3 py-1.5 text-xs rounded-lg bg-red-600 text-white font-medium disabled:opacity-50">
+              {bulkCancelling ? 'Cancelling...' : 'Cancel Selected'}
+            </button>
+          </div>
+        </div>
+      )}
 
       {filtered.length === 0 ? (
         <p className="text-sm text-muted-foreground text-center py-8 border rounded-xl">No classes match the selected filters.</p>
       ) : (
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
       {filtered.map((c) => (
-        <div key={c.id} className="border rounded-xl p-4 space-y-2">
+        <div key={c.id} className={`border rounded-xl p-4 space-y-2 ${selectedIds.has(c.id) ? 'ring-2 ring-red-300' : ''}`}>
           <div className="flex items-start justify-between gap-2">
-            <div>
-              <p className="font-semibold text-sm">{c.schedule.course.name}</p>
-              <p className="text-xs text-muted-foreground">{c.schedule.batch.code}</p>
+            <div className="flex items-start gap-2">
+              {canEdit && c.status === 'SCHEDULED' && (
+                <input type="checkbox" className="mt-1" checked={selectedIds.has(c.id)} onChange={() => toggleSelect(c.id)} />
+              )}
+              <div>
+                <p className="font-semibold text-sm">{c.schedule.course.name}</p>
+                <p className="text-xs text-muted-foreground">{c.schedule.batch.code}</p>
+              </div>
             </div>
             <span className={`text-xs font-medium px-2 py-0.5 rounded-full whitespace-nowrap ${STATUS_BADGE[c.status]}`}>{c.status}</span>
           </div>
@@ -825,6 +893,146 @@ function BulkCreateClassModal({ onClose, onSaved, setError }: { onClose: () => v
           </div>
         </>
       )}
+    </Modal>
+  );
+}
+
+// ── Bulk Upload via Excel — one row per class, each with its own date/time;
+// unlike Bulk Create's single sub-batch + day-pattern fill, this is for a
+// mixed batch of classes (different sub-batches, one-off dates, makeup
+// classes) laid out in a spreadsheet. Parsed client-side with the same
+// xlsx library/pattern as Sales' lead bulk upload. ─────────────────────────
+type BulkUploadRow = Record<string, string>;
+type BulkUploadResult = { row: number; status: 'created' | 'error'; message?: string; classId?: string };
+
+function uploadField(row: BulkUploadRow, ...aliases: string[]): string {
+  const normalized: Record<string, string> = {};
+  for (const key of Object.keys(row)) normalized[key.trim().toLowerCase().replace(/\s+/g, '')] = String(row[key] ?? '').trim();
+  for (const alias of aliases) {
+    const v = normalized[alias];
+    if (v) return v;
+  }
+  return '';
+}
+
+function BulkUploadClassesModal({ onClose, onSaved, setError }: { onClose: () => void; onSaved: () => void; setError: (s: string) => void }) {
+  const [rows, setRows] = useState<BulkUploadRow[]>([]);
+  const [fileName, setFileName] = useState('');
+  const [uploading, setUploading] = useState(false);
+  const [results, setResults] = useState<BulkUploadResult[] | null>(null);
+
+  const downloadTemplate = () => {
+    const ws = XLSX.utils.json_to_sheet([
+      { subBatchCode: 'B17-DA-MOR', title: 'Data Cleaning with Pandas', topic: 'Pandas', description: '', date: '2026-10-10', startTime: '09:30', endTime: '13:30' },
+      { subBatchCode: 'B17-DA-MOR', title: 'EDA Basics', topic: '', description: '', date: '2026-10-11', startTime: '09:30', endTime: '13:30' },
+    ]);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Classes');
+    XLSX.writeFile(wb, 'live_classes_bulk_upload_template.xlsx');
+  };
+
+  const onFile = (file: File) => {
+    setFileName(file.name);
+    setResults(null);
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      try {
+        const data = e.target?.result;
+        const wb = XLSX.read(data, { type: 'binary' });
+        const sheet = wb.Sheets[wb.SheetNames[0]];
+        const json = XLSX.utils.sheet_to_json<BulkUploadRow>(sheet, { defval: '' });
+        setRows(json);
+      } catch {
+        setError('Could not parse the file. Please use the template format.');
+      }
+    };
+    reader.readAsBinaryString(file);
+  };
+
+  const submit = async () => {
+    if (!rows.length) { setError('Choose a file with class rows first'); return; }
+    setUploading(true);
+    setError('');
+    try {
+      const res = await api.post('/api/live-classes/bulk-upload', { classes: rows });
+      setResults(res.data.data.results);
+      onSaved();
+    } catch (err) {
+      setError(errMsg(err, 'Bulk upload failed'));
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  const createdCount = results?.filter((r) => r.status === 'created').length ?? 0;
+  const errorCount = results ? results.length - createdCount : 0;
+
+  return (
+    <Modal title="Bulk Upload Classes (Excel)" onClose={onClose}>
+      <p className="text-xs text-muted-foreground">
+        Columns: <code>subBatchCode, title, topic, description, date, startTime, endTime</code>. One row per class —
+        each can be a different sub-batch and date, so this is also how to schedule one-off makeup classes.
+        <code>subBatchCode</code> must match a sub-batch code exactly (shown in Create Class's dropdown). Rows with a
+        date that already has a class on that sub-batch are skipped and reported, so it's safe to re-upload the same file.
+      </p>
+      <button onClick={downloadTemplate} className="text-xs px-3 py-2 border rounded-lg hover:bg-muted/50 flex items-center gap-1">
+        <Download className="w-3 h-3" /> Download template
+      </button>
+      <input
+        type="file"
+        accept=".xlsx,.xls,.csv"
+        onChange={(e) => { const f = e.target.files?.[0]; if (f) onFile(f); }}
+        className="w-full text-sm border rounded-lg px-3 py-2"
+      />
+      {fileName && !results && <p className="text-xs text-muted-foreground">{fileName} — {rows.length} row{rows.length === 1 ? '' : 's'} parsed.</p>}
+
+      {rows.length > 0 && !results && (
+        <div className="border rounded-lg max-h-44 overflow-auto">
+          <table className="w-full text-[11px]">
+            <thead className="bg-muted/40 text-left sticky top-0">
+              <tr>{['Sub-batch', 'Title', 'Date', 'Time'].map((h) => <th key={h} className="px-2 py-1 whitespace-nowrap">{h}</th>)}</tr>
+            </thead>
+            <tbody className="divide-y">
+              {rows.slice(0, 10).map((r, i) => (
+                <tr key={i}>
+                  <td className="px-2 py-1 whitespace-nowrap">{uploadField(r, 'subbatchcode', 'subbatch', 'code') || <span className="text-red-500">missing</span>}</td>
+                  <td className="px-2 py-1 whitespace-nowrap">{uploadField(r, 'title', 'classtitle') || '—'}</td>
+                  <td className="px-2 py-1 whitespace-nowrap">{uploadField(r, 'date', 'scheduleddate', 'classdate') || '—'}</td>
+                  <td className="px-2 py-1 whitespace-nowrap">{uploadField(r, 'starttime', 'start')}–{uploadField(r, 'endtime', 'end')}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          {rows.length > 10 && <p className="text-[10px] text-muted-foreground px-2 py-1">...and {rows.length - 10} more row(s)</p>}
+        </div>
+      )}
+
+      {results && (
+        <div className="space-y-2">
+          <p className="text-sm font-medium">
+            <span className="text-green-600">{createdCount} created</span>
+            {errorCount > 0 && <span className="text-red-600"> · {errorCount} skipped</span>}
+          </p>
+          {errorCount > 0 && (
+            <div className="border rounded-lg max-h-40 overflow-auto divide-y">
+              {results.filter((r) => r.status === 'error').map((r) => (
+                <div key={r.row} className="px-2 py-1.5 text-xs">
+                  <span className="font-medium">Row {r.row}:</span> {r.message}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      <div className="flex justify-end gap-2 pt-2">
+        <button onClick={onClose} className="px-4 py-2 text-sm rounded-lg border">{results ? 'Close' : 'Cancel'}</button>
+        {!results && (
+          <button onClick={submit} disabled={uploading || !rows.length} className="px-4 py-2 text-sm rounded-lg bg-blue-600 text-white disabled:opacity-50">
+            {uploading ? 'Uploading...' : `Upload ${rows.length || ''} Class${rows.length === 1 ? '' : 'es'}`}
+          </button>
+        )}
+      </div>
     </Modal>
   );
 }
