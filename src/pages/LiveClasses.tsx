@@ -528,7 +528,8 @@ function SummaryTab({ setError, refreshKey }: { setError: (s: string) => void; r
               <th className="text-left font-medium px-3 py-2">Schedule From</th>
               <th className="text-left font-medium px-3 py-2">Date Till</th>
               <th className="text-right font-medium px-3 py-2">Total Days</th>
-              <th className="text-right font-medium px-3 py-2">Classes Scheduled</th>
+              <th className="text-right font-medium px-3 py-2">Live Classes Created</th>
+              <th className="text-right font-medium px-3 py-2">Created For (Days)</th>
             </tr>
           </thead>
           <tbody className="divide-y">
@@ -541,6 +542,7 @@ function SummaryTab({ setError, refreshKey }: { setError: (s: string) => void; r
                 <td className="px-3 py-2">{r.endDate ? formatClassDate(r.endDate) : 'Ongoing'}</td>
                 <td className="px-3 py-2 text-right">{r.totalRunningDays ?? '—'}</td>
                 <td className="px-3 py-2 text-right">{r.classesScheduledCount}</td>
+                <td className="px-3 py-2 text-right">{r.daysCreated}{r.totalRunningDays ? ` / ${r.totalRunningDays}` : ''}</td>
               </tr>
             ))}
           </tbody>

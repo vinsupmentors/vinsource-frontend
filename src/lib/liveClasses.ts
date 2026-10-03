@@ -80,6 +80,7 @@ export interface LiveClassSummaryRow {
   status: string;
   totalRunningDays: number | null;
   classesScheduledCount: number;
+  daysCreated: number;
 }
 
 const DAY_PATTERN_LABELS: Record<ScheduleOption['dayPattern'], string> = {
