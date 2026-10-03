@@ -905,7 +905,7 @@ function BulkCreateClassModal({ onClose, onSaved, setError }: { onClose: () => v
 // classes) laid out in a spreadsheet. Parsed client-side with the same
 // xlsx library/pattern as Sales' lead bulk upload. ─────────────────────────
 type BulkUploadRow = Record<string, string>;
-type BulkUploadResult = { row: number; status: 'created' | 'error'; message?: string; classId?: string };
+type BulkUploadResult = { row: number; status: 'created' | 'error'; message?: string; classId?: string; date?: string };
 
 function uploadField(row: BulkUploadRow, ...aliases: string[]): string {
   const normalized: Record<string, string> = {};
@@ -925,8 +925,9 @@ function BulkUploadClassesModal({ onClose, onSaved, setError }: { onClose: () =>
 
   const downloadTemplate = () => {
     const ws = XLSX.utils.json_to_sheet([
-      { subBatchCode: 'B17-DA-MOR', title: 'Data Cleaning with Pandas', topic: 'Pandas', description: '', date: '2026-10-10', startTime: '09:30', endTime: '13:30' },
-      { subBatchCode: 'B17-DA-MOR', title: 'EDA Basics', topic: '', description: '', date: '2026-10-11', startTime: '09:30', endTime: '13:30' },
+      { subBatchCode: 'B17-DA-MOR', title: 'Data Cleaning with Pandas', topic: 'Pandas', description: '', date: '2026-10-10', startDate: '', endDate: '', startTime: '09:30', endTime: '13:30' },
+      { subBatchCode: 'B17-DA-MOR', title: 'EDA Basics', topic: '', description: '', date: '2026-10-11', startDate: '', endDate: '', startTime: '09:30', endTime: '13:30' },
+      { subBatchCode: 'B17-DA-MOR', title: 'Regular Session', topic: '', description: '', date: '', startDate: '2026-10-13', endDate: '2026-10-24', startTime: '09:30', endTime: '13:30' },
     ]);
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, 'Classes');
@@ -940,9 +941,17 @@ function BulkUploadClassesModal({ onClose, onSaved, setError }: { onClose: () =>
     reader.onload = (e) => {
       try {
         const data = e.target?.result;
-        const wb = XLSX.read(data, { type: 'binary' });
+        // cellDates + dateNF: a date-formatted Excel cell (which is what you
+        // get when you type a real date and Excel auto-formats the column,
+        // as opposed to typing "2026-10-10" into a plain-text cell) comes
+        // back from the sheet as a numeric day-serial (e.g. 46298) unless
+        // told otherwise — that serial then fails to parse as a date
+        // server-side and the row is silently skipped. This forces every
+        // date cell to come through as the same "yyyy-mm-dd" string the
+        // backend expects either way.
+        const wb = XLSX.read(data, { type: 'binary', cellDates: true });
         const sheet = wb.Sheets[wb.SheetNames[0]];
-        const json = XLSX.utils.sheet_to_json<BulkUploadRow>(sheet, { defval: '' });
+        const json = XLSX.utils.sheet_to_json<BulkUploadRow>(sheet, { defval: '', raw: false, dateNF: 'yyyy-mm-dd' });
         setRows(json);
       } catch {
         setError('Could not parse the file. Please use the template format.');
@@ -972,10 +981,12 @@ function BulkUploadClassesModal({ onClose, onSaved, setError }: { onClose: () =>
   return (
     <Modal title="Bulk Upload Classes (Excel)" onClose={onClose}>
       <p className="text-xs text-muted-foreground">
-        Columns: <code>subBatchCode, title, topic, description, date, startTime, endTime</code>. One row per class —
-        each can be a different sub-batch and date, so this is also how to schedule one-off makeup classes.
-        <code>subBatchCode</code> must match a sub-batch code exactly (shown in Create Class's dropdown). Rows with a
-        date that already has a class on that sub-batch are skipped and reported, so it's safe to re-upload the same file.
+        Columns: <code>subBatchCode, title, topic, description, date, startDate, endDate, startTime, endTime</code>.
+        Each row needs either a single <code>date</code> (one class), or <code>startDate</code> + <code>endDate</code>
+        (fills every day the sub-batch runs on in that range, same as Bulk Create — leave <code>date</code> blank for
+        this). Rows can mix both styles and different sub-batches, so this also covers one-off makeup classes.
+        <code>subBatchCode</code> must match a sub-batch code exactly (shown in Create Class's dropdown). A date that
+        already has a class on that sub-batch is skipped and reported, so it's safe to re-upload the same file.
       </p>
       <button onClick={downloadTemplate} className="text-xs px-3 py-2 border rounded-lg hover:bg-muted/50 flex items-center gap-1">
         <Download className="w-3 h-3" /> Download template
@@ -999,7 +1010,12 @@ function BulkUploadClassesModal({ onClose, onSaved, setError }: { onClose: () =>
                 <tr key={i}>
                   <td className="px-2 py-1 whitespace-nowrap">{uploadField(r, 'subbatchcode', 'subbatch', 'code') || <span className="text-red-500">missing</span>}</td>
                   <td className="px-2 py-1 whitespace-nowrap">{uploadField(r, 'title', 'classtitle') || '—'}</td>
-                  <td className="px-2 py-1 whitespace-nowrap">{uploadField(r, 'date', 'scheduleddate', 'classdate') || '—'}</td>
+                  <td className="px-2 py-1 whitespace-nowrap">
+                    {uploadField(r, 'date', 'scheduleddate', 'classdate') ||
+                      (uploadField(r, 'startdate', 'start date', 'from') && uploadField(r, 'enddate', 'end date', 'till', 'to')
+                        ? `${uploadField(r, 'startdate', 'start date', 'from')} → ${uploadField(r, 'enddate', 'end date', 'till', 'to')}`
+                        : '—')}
+                  </td>
                   <td className="px-2 py-1 whitespace-nowrap">{uploadField(r, 'starttime', 'start')}–{uploadField(r, 'endtime', 'end')}</td>
                 </tr>
               ))}
@@ -1017,9 +1033,9 @@ function BulkUploadClassesModal({ onClose, onSaved, setError }: { onClose: () =>
           </p>
           {errorCount > 0 && (
             <div className="border rounded-lg max-h-40 overflow-auto divide-y">
-              {results.filter((r) => r.status === 'error').map((r) => (
-                <div key={r.row} className="px-2 py-1.5 text-xs">
-                  <span className="font-medium">Row {r.row}:</span> {r.message}
+              {results.filter((r) => r.status === 'error').map((r, i) => (
+                <div key={`${r.row}-${r.date || i}`} className="px-2 py-1.5 text-xs">
+                  <span className="font-medium">Row {r.row}{r.date ? ` (${r.date})` : ''}:</span> {r.message}
                 </div>
               ))}
             </div>

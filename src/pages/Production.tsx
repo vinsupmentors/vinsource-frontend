@@ -51,6 +51,7 @@ type BatchCourseSchedule = {
   id: string; code?: string | null; batchId: string; courseId: string; timing: BatchTiming; dayPattern: DayPattern;
   mode: DeliveryMode; startDate: string; endDate?: string | null; capacity?: number | null;
   onlineCapacity?: number | null; offlineCapacity?: number | null; status: BatchStatus;
+  startTime?: string | null; endTime?: string | null;
   course: { id: string; name: string }; trainers: TrainerAssignment[]; _count?: { enrollments: number };
 };
 type Batch = {
@@ -982,7 +983,7 @@ function AddScheduleModal({ batchId, employees, onClose, setError, onSaved }: {
   const [students, setStudents] = useState<Student[]>([]);
   const [form, setForm] = useState({
     courseId: '', timing: 'MORNING' as BatchTiming, dayPattern: 'MON_SAT' as DayPattern, mode: 'OFFLINE' as DeliveryMode,
-    startDate: '', endDate: '', capacity: '',
+    startDate: '', endDate: '', capacity: '', startTime: '', endTime: '',
   });
   const [trainerIds, setTrainerIds] = useState<string[]>([]);
   const [studentIds, setStudentIds] = useState<string[]>([]);
@@ -1006,6 +1007,8 @@ function AddScheduleModal({ batchId, employees, onClose, setError, onSaved }: {
         ...form,
         endDate: form.endDate || undefined,
         capacity: form.capacity || undefined,
+        startTime: form.startTime || undefined,
+        endTime: form.endTime || undefined,
         trainerIds,
         studentIds,
       });
@@ -1038,6 +1041,13 @@ function AddScheduleModal({ batchId, employees, onClose, setError, onSaved }: {
             <div className="flex gap-2">
               <input type="date" className="w-full px-3 py-2 border rounded-lg text-sm" value={form.startDate} onChange={(e) => setForm({ ...form, startDate: e.target.value })} placeholder="Start date" />
               <input type="date" className="w-full px-3 py-2 border rounded-lg text-sm" value={form.endDate} onChange={(e) => setForm({ ...form, endDate: e.target.value })} placeholder="End date" />
+            </div>
+            <div>
+              <p className="text-xs text-muted-foreground mb-1">Exact class time — shown in Live Classes and the Admission fee breakdown; leave blank if only the Morning/Afternoon/Evening slot above matters.</p>
+              <div className="flex gap-2">
+                <input type="time" className="w-full px-3 py-2 border rounded-lg text-sm" value={form.startTime} onChange={(e) => setForm({ ...form, startTime: e.target.value })} placeholder="Start time" />
+                <input type="time" className="w-full px-3 py-2 border rounded-lg text-sm" value={form.endTime} onChange={(e) => setForm({ ...form, endTime: e.target.value })} placeholder="End time" />
+              </div>
             </div>
             <input type="number" className="w-full px-3 py-2 border rounded-lg text-sm" placeholder="Capacity" value={form.capacity} onChange={(e) => setForm({ ...form, capacity: e.target.value })} />
           </div>
@@ -1202,6 +1212,8 @@ function EditScheduleModal({ schedule, onClose, setError, onSaved }: {
     capacity: schedule.capacity != null ? String(schedule.capacity) : '',
     onlineCapacity: schedule.onlineCapacity != null ? String(schedule.onlineCapacity) : '',
     offlineCapacity: schedule.offlineCapacity != null ? String(schedule.offlineCapacity) : '',
+    startTime: schedule.startTime || '',
+    endTime: schedule.endTime || '',
   });
   const [saving, setSaving] = useState(false);
   const isHybrid = form.mode === 'HYBRID';
@@ -1237,6 +1249,13 @@ function EditScheduleModal({ schedule, onClose, setError, onSaved }: {
         <div className="flex gap-2">
           <input type="date" className="w-full px-3 py-2 border rounded-lg text-sm" value={form.startDate} onChange={(e) => setForm({ ...form, startDate: e.target.value })} placeholder="Start date" />
           <input type="date" className="w-full px-3 py-2 border rounded-lg text-sm" value={form.endDate} onChange={(e) => setForm({ ...form, endDate: e.target.value })} placeholder="End date" />
+        </div>
+        <div>
+          <p className="text-xs text-muted-foreground mb-1">Exact class time — shown in Live Classes and the Admission fee breakdown; leave blank to only use the Morning/Afternoon/Evening slot above.</p>
+          <div className="flex gap-2">
+            <input type="time" className="w-full px-3 py-2 border rounded-lg text-sm" value={form.startTime} onChange={(e) => setForm({ ...form, startTime: e.target.value })} placeholder="Start time" />
+            <input type="time" className="w-full px-3 py-2 border rounded-lg text-sm" value={form.endTime} onChange={(e) => setForm({ ...form, endTime: e.target.value })} placeholder="End time" />
+          </div>
         </div>
         {isHybrid ? (
           <div className="flex gap-2">
