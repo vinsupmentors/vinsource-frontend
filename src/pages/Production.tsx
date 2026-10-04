@@ -10,7 +10,7 @@ import {
   Lock, Plus, X, Users, BookOpen, CalendarRange, ChevronDown, ChevronRight,
   GraduationCap, PlayCircle, CalendarClock, Search, Upload, Pencil, ChevronLeft, Download, Trash2, UserPlus,
   FileText, ClipboardList, ListChecks, Star, Type as TypeIcon, CheckSquare, BarChart3, Mail, NotebookPen,
-  BadgeCheck, CheckCircle2, XCircle, QrCode, ExternalLink, Loader2, ShieldAlert, Rocket,
+  BadgeCheck, CheckCircle2, XCircle, QrCode, ExternalLink, Loader2, ShieldAlert, Rocket, Smartphone,
 } from 'lucide-react';
 
 // Files uploaded by the backend (project submissions, student photos/aadhar) come back as
@@ -196,8 +196,8 @@ function errMsg(err: unknown, fallback: string) {
   return e.response?.data?.message || fallback;
 }
 
-type Tab = 'courses' | 'batches' | 'students' | 'content' | 'placement-training' | 'portfolios' | 'reports' | 'deletion-requests';
-const VALID_TABS: Tab[] = ['courses', 'batches', 'students', 'content', 'placement-training', 'portfolios', 'reports', 'deletion-requests'];
+type Tab = 'courses' | 'batches' | 'students' | 'content' | 'placement-training' | 'portfolios' | 'reports' | 'deletion-requests' | 'device-requests';
+const VALID_TABS: Tab[] = ['courses', 'batches', 'students', 'content', 'placement-training', 'portfolios', 'reports', 'deletion-requests', 'device-requests'];
 const TABS: { id: Tab; label: string; icon: React.ComponentType<{ className?: string }> }[] = [
   { id: 'courses', label: 'Courses', icon: BookOpen },
   { id: 'batches', label: 'Batches & Schedules', icon: CalendarRange },
@@ -211,6 +211,9 @@ const TABS: { id: Tab; label: string; icon: React.ComponentType<{ className?: st
 // not part of the base TABS array so other roles never even see it exists.
 const DELETION_REQUESTS_TAB: { id: Tab; label: string; icon: React.ComponentType<{ className?: string }> } =
   { id: 'deletion-requests', label: 'Deletion Requests', icon: ShieldAlert };
+// Same audience: approving a student's switch to a new login device.
+const DEVICE_REQUESTS_TAB: { id: Tab; label: string; icon: React.ComponentType<{ className?: string }> } =
+  { id: 'device-requests', label: 'Device Requests', icon: Smartphone };
 
 export default function ProductionPage() {
   const { modules, loaded, hasModule } = useModuleAccess();
@@ -220,7 +223,7 @@ export default function ProductionPage() {
   // Who can approve/reject student deletion requests — kept in sync with the
   // requireRole(...) list on the approve-delete/cancel-delete-request routes.
   const canApproveDeletions = role === 'ADMIN' || role === 'SUPER_ADMIN' || role === 'MANAGER';
-  const visibleTabs = canApproveDeletions ? [...TABS, DELETION_REQUESTS_TAB] : TABS;
+  const visibleTabs = canApproveDeletions ? [...TABS, DELETION_REQUESTS_TAB, DEVICE_REQUESTS_TAB] : TABS;
 
   const [searchParams, setSearchParams] = useSearchParams();
   const tabFromUrl = searchParams.get('tab') as Tab | null;
@@ -363,6 +366,8 @@ export default function ProductionPage() {
         <ReportsTab canEdit={canEdit} setError={setError} />
       ) : tab === 'deletion-requests' ? (
         <DeletionRequestsTab setError={setError} />
+      ) : tab === 'device-requests' ? (
+        <DeviceRequestsTab setError={setError} />
       ) : (
         <StudentsTab
           canEdit={canEdit}
@@ -1945,6 +1950,126 @@ type DeletionLogEntry = {
   approvedAt: string; approvedBy?: { id: string; firstName: string; lastName: string; employeeCode?: string } | null;
   forced: boolean; attendanceCount: number; testAttemptCount: number; placementResultCount: number;
 };
+
+// ── DEVICE REQUESTS TAB ──────────────────────────────────────────────────────
+// A student account is locked to one login device. A sign-in from any other
+// device is refused and shows up here; approving re-points the account at the
+// new device (and signs the old one out), rejecting leaves it untouched.
+type DeviceRequest = {
+  id: string; newDeviceLabel?: string | null; ipAddress?: string | null; status: 'PENDING' | 'APPROVED' | 'REJECTED';
+  requestedAt: string; reviewedAt?: string | null; reviewNote?: string | null;
+  user: {
+    id: string; email: string; boundDeviceLabel?: string | null; boundDeviceAt?: string | null;
+    student?: { id: string; studentCode: string; firstName: string; lastName: string; phone?: string | null } | null;
+  };
+};
+
+function shortDevice(ua?: string | null) {
+  if (!ua) return 'Unknown device';
+  const browser = /Edg\//.test(ua) ? 'Edge' : /OPR\//.test(ua) ? 'Opera' : /Chrome\//.test(ua) ? 'Chrome' : /Firefox\//.test(ua) ? 'Firefox' : /Safari\//.test(ua) ? 'Safari' : 'Browser';
+  const os = /Android/.test(ua) ? 'Android' : /iPhone|iPad|iOS/.test(ua) ? 'iOS' : /Windows/.test(ua) ? 'Windows' : /Mac OS X|Macintosh/.test(ua) ? 'macOS' : /Linux/.test(ua) ? 'Linux' : 'Unknown OS';
+  return `${browser} on ${os}`;
+}
+
+function DeviceRequestsTab({ setError }: { setError: (s: string) => void }) {
+  const [pending, setPending] = useState<DeviceRequest[]>([]);
+  const [history, setHistory] = useState<DeviceRequest[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [busyId, setBusyId] = useState<string | null>(null);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    setError('');
+    try {
+      const res = await api.get('/api/student-devices');
+      setPending(res.data.data.pending);
+      setHistory(res.data.data.history);
+    } catch (err) {
+      setError(errMsg(err, 'Failed to load device requests'));
+    } finally {
+      setLoading(false);
+    }
+  }, [setError]);
+
+  useEffect(() => { load(); }, [load]);
+
+  const act = async (r: DeviceRequest, action: 'approve' | 'reject') => {
+    const who = r.user.student ? `${r.user.student.firstName} ${r.user.student.lastName}` : r.user.email;
+    const msg = action === 'approve'
+      ? `Move ${who}'s login to the new device (${shortDevice(r.newDeviceLabel)})?\n\nThe device they're using now will be signed out immediately.`
+      : `Reject ${who}'s request to use a new device?`;
+    if (!window.confirm(msg)) return;
+    setBusyId(r.id);
+    try {
+      await api.post(`/api/student-devices/${r.id}/${action}`);
+      load();
+    } catch (err) { setError(errMsg(err, `Could not ${action} the request`)); }
+    finally { setBusyId(null); }
+  };
+
+  if (loading) return <div className="text-center text-muted-foreground py-8">Loading...</div>;
+
+  return (
+    <div className="space-y-6">
+      <div className="space-y-3">
+        <p className="text-xs text-muted-foreground">
+          Each student account can only be used on one device. When a student tries to sign in from a different one, they are
+          blocked, told why, and a request appears here. Approving moves the account to the new device and signs the old one out.
+        </p>
+        {pending.length === 0 ? (
+          <div className="text-center text-muted-foreground py-6 text-sm">No pending device requests.</div>
+        ) : (
+          pending.map((r) => (
+            <div key={r.id} className="bg-card border rounded-xl p-4 space-y-2">
+              <div className="flex items-center justify-between flex-wrap gap-2">
+                <div>
+                  <p className="font-medium">
+                    {r.user.student ? `${r.user.student.firstName} ${r.user.student.lastName}` : r.user.email}
+                    {r.user.student && <span className="text-xs text-muted-foreground"> ({r.user.student.studentCode})</span>}
+                  </p>
+                  <p className="text-xs text-muted-foreground">{r.user.email}{r.user.student?.phone ? ` · ${r.user.student.phone}` : ''}</p>
+                </div>
+                <span className="text-xs px-2 py-1 rounded-full bg-amber-100 text-amber-700">Pending approval</span>
+              </div>
+              <div className="text-xs text-muted-foreground space-y-0.5">
+                <p>Registered device: <span className="text-foreground">{shortDevice(r.user.boundDeviceLabel)}</span>{r.user.boundDeviceAt ? ` (since ${formatDateTime(r.user.boundDeviceAt)})` : ''}</p>
+                <p>Trying to sign in from: <span className="text-foreground">{shortDevice(r.newDeviceLabel)}</span>{r.ipAddress ? ` · IP ${r.ipAddress}` : ''}</p>
+                <p>Requested {formatDateTime(r.requestedAt)}</p>
+              </div>
+              <div className="flex items-center gap-2 pt-1">
+                <button onClick={() => act(r, 'approve')} disabled={busyId === r.id} className="text-xs px-3 py-1.5 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50 flex items-center gap-1">
+                  <CheckCircle2 className="w-3 h-3" /> Approve &amp; switch device
+                </button>
+                <button onClick={() => act(r, 'reject')} disabled={busyId === r.id} className="text-xs px-3 py-1.5 border rounded-lg hover:bg-muted/50 disabled:opacity-50 flex items-center gap-1">
+                  <XCircle className="w-3 h-3" /> Reject
+                </button>
+              </div>
+            </div>
+          ))
+        )}
+      </div>
+
+      {history.length > 0 && (
+        <div className="space-y-2">
+          <h3 className="text-sm font-semibold">Recent decisions</h3>
+          <div className="border rounded-xl divide-y">
+            {history.map((r) => (
+              <div key={r.id} className="px-3 py-2 flex items-center justify-between gap-3 text-xs">
+                <span>
+                  <span className="font-medium">{r.user.student ? `${r.user.student.firstName} ${r.user.student.lastName}` : r.user.email}</span>
+                  <span className="text-muted-foreground"> → {shortDevice(r.newDeviceLabel)}{r.reviewNote ? ` · ${r.reviewNote}` : ''}</span>
+                </span>
+                <span className={r.status === 'APPROVED' ? 'text-green-700' : 'text-red-700'}>
+                  {r.status === 'APPROVED' ? 'Approved' : 'Rejected'}{r.reviewedAt ? ` · ${formatDateTime(r.reviewedAt)}` : ''}
+                </span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
 
 function DeletionRequestsTab({ setError }: { setError: (s: string) => void }) {
   const [students, setStudents] = useState<Student[]>([]);

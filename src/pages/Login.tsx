@@ -14,6 +14,13 @@ export default function Login() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [showPw, setShowPw] = useState(false);
+  // Set by lib/api.ts when a student was signed out because their account
+  // moved to another device — read once, then cleared.
+  const [notice] = useState(() => {
+    const n = sessionStorage.getItem('hrms_login_notice');
+    if (n) sessionStorage.removeItem('hrms_login_notice');
+    return n;
+  });
 
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
@@ -43,6 +50,11 @@ export default function Login() {
         {/* Card */}
         <div className="bg-card rounded-2xl shadow-xl border p-8">
           <form onSubmit={handleSubmit} className="space-y-5">
+            {notice && !error && (
+              <div className="bg-amber-50 border border-amber-200 rounded-lg px-4 py-3 text-sm text-amber-800">
+                {notice}
+              </div>
+            )}
             {error && (
               <div className="bg-red-50 dark:bg-red-950/30 border border-red-200 dark:border-red-800 rounded-lg px-4 py-3 text-sm text-red-600 dark:text-red-400">
                 {error}

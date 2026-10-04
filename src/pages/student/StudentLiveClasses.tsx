@@ -1,6 +1,7 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import api from '@/lib/api';
+import RecordingVideoPlayer from '@/components/ProtectedVideoPlayer';
 import {
   LiveClass, LiveClassDashboard, STATUS_BADGE, ATTENDANCE_BADGE, LiveClassAttendanceResponse,
   LiveClassRecordingRecord, LiveClassPlaybackUrl, RECORDING_BADGE, formatDuration,
@@ -212,37 +213,6 @@ function RecordingsModal({ liveClass, onClose, setError }: { liveClass: LiveClas
   );
 }
 
-// ── Recording playback — native controls (play/pause/seek/volume/fullscreen)
-// plus explicit speed buttons, since browsers don't consistently expose fast
-// playback speeds (2x/4x) in their built-in controls UI. ─────────────────────
-const PLAYBACK_RATES = [1, 1.5, 2, 4];
-function RecordingVideoPlayer({ url }: { url: string }) {
-  const videoRef = useRef<HTMLVideoElement>(null);
-  const [rate, setRate] = useState(1);
-
-  const setPlaybackRate = (r: number) => {
-    setRate(r);
-    if (videoRef.current) videoRef.current.playbackRate = r;
-  };
-
-  return (
-    <div className="space-y-2">
-      <video ref={videoRef} src={url} controls autoPlay className="w-full rounded-lg bg-black max-h-[50vh]" />
-      <div className="flex items-center gap-1.5">
-        <span className="text-xs text-muted-foreground mr-1">Speed:</span>
-        {PLAYBACK_RATES.map((r) => (
-          <button
-            key={r}
-            onClick={() => setPlaybackRate(r)}
-            className={`px-2.5 py-1 text-xs rounded-md border font-medium ${rate === r ? 'bg-blue-600 text-white border-blue-600' : 'hover:bg-muted'}`}
-          >
-            {r}x
-          </button>
-        ))}
-      </div>
-    </div>
-  );
-}
 
 /** Own attendance status for one completed class — fetched lazily per-card
  * (GET /:id/attendance self-scopes to the caller's own row for a student). */
