@@ -784,7 +784,7 @@ function CreateClassModal({ onClose, onSaved, setError }: { onClose: () => void;
 
 // ── Bulk Create modal — one sub-batch, a timing, a date range -> one class ──
 // per day the sub-batch actually runs on, instead of adding them one at a time.
-interface BulkCreateResult { createdCount: number; skippedCount: number; skippedDates: string[]; notRunningCount: number }
+interface BulkCreateResult { createdCount: number; skippedCount: number; skippedDates: string[]; notRunningCount: number; endDate?: string }
 
 function BulkCreateClassModal({ onClose, onSaved, setError }: { onClose: () => void; onSaved: () => void; setError: (s: string) => void }) {
   const [schedules, setSchedules] = useState<ScheduleOption[]>([]);
@@ -794,7 +794,9 @@ function BulkCreateClassModal({ onClose, onSaved, setError }: { onClose: () => v
   const [topic, setTopic] = useState('');
   const [description, setDescription] = useState('');
   const [startDate, setStartDate] = useState('');
+  const [rangeMode, setRangeMode] = useState<'endDate' | 'numDays'>('endDate');
   const [endDate, setEndDate] = useState('');
+  const [numDays, setNumDays] = useState('');
   const [startTime, setStartTime] = useState('');
   const [endTime, setEndTime] = useState('');
   const [saving, setSaving] = useState(false);
@@ -823,7 +825,10 @@ function BulkCreateClassModal({ onClose, onSaved, setError }: { onClose: () => v
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [scheduleId]);
 
-  const canSubmit = scheduleId && title.trim() && startDate && endDate && startTime && endTime && endDate >= startDate;
+  const canSubmit = Boolean(
+    scheduleId && title.trim() && startDate && startTime && endTime &&
+    (rangeMode === 'endDate' ? endDate && endDate >= startDate : numDays && Number(numDays) >= 1)
+  );
 
   const submit = () => {
     if (!canSubmit) return;
@@ -831,7 +836,9 @@ function BulkCreateClassModal({ onClose, onSaved, setError }: { onClose: () => v
     setResult(null);
     api.post('/api/live-classes/bulk', {
       scheduleId, title: title.trim(), topic: topic || undefined, description: description || undefined,
-      startDate, endDate, startTime, endTime,
+      startDate, startTime, endTime,
+      endDate: rangeMode === 'endDate' ? endDate : undefined,
+      numDays: rangeMode === 'numDays' ? Number(numDays) : undefined,
     })
       .then((r) => setResult(r.data.data))
       .catch((err) => setError(errMsg(err, 'Could not bulk-create the classes.')))
@@ -844,6 +851,7 @@ function BulkCreateClassModal({ onClose, onSaved, setError }: { onClose: () => v
         <div className="space-y-3">
           <div className="bg-green-50 border border-green-200 rounded-lg p-4 text-sm text-green-800">
             Created <strong>{result.createdCount}</strong> class{result.createdCount === 1 ? '' : 'es'}.
+            {result.endDate && <> Last class: <strong>{formatClassDate(result.endDate)}</strong>.</>}
           </div>
           {result.skippedCount > 0 && (
             <p className="text-xs text-muted-foreground">
@@ -882,13 +890,39 @@ function BulkCreateClassModal({ onClose, onSaved, setError }: { onClose: () => v
           <Field label="Class Title *"><input className={inputCls} value={title} onChange={(e) => setTitle(e.target.value)} placeholder="e.g. Data Cleaning with Pandas" /></Field>
           <Field label="Topic"><input className={inputCls} value={topic} onChange={(e) => setTopic(e.target.value)} placeholder="Optional — applied to every class created" /></Field>
           <Field label="Description"><textarea className={inputCls} rows={2} value={description} onChange={(e) => setDescription(e.target.value)} placeholder="Optional" /></Field>
+          <Field label="Start Date *"><input type="date" className={inputCls} value={startDate} onChange={(e) => setStartDate(e.target.value)} /></Field>
+
+          <div>
+            <span className="text-xs font-medium text-muted-foreground">Range *</span>
+            <div className="flex gap-3 mt-1 mb-2">
+              <label className="flex items-center gap-1.5 text-xs cursor-pointer">
+                <input type="radio" checked={rangeMode === 'endDate'} onChange={() => setRangeMode('endDate')} /> End date
+              </label>
+              <label className="flex items-center gap-1.5 text-xs cursor-pointer">
+                <input type="radio" checked={rangeMode === 'numDays'} onChange={() => setRangeMode('numDays')} /> Number of running days
+              </label>
+            </div>
+            {rangeMode === 'endDate' ? (
+              <input type="date" className={inputCls} value={endDate} onChange={(e) => setEndDate(e.target.value)} />
+            ) : (
+              <div>
+                <input
+                  type="number" min={1} max={300} className={inputCls} value={numDays}
+                  onChange={(e) => setNumDays(e.target.value)} placeholder="e.g. 25"
+                />
+                <p className="text-xs text-muted-foreground mt-1">
+                  Counts only the days {selected ? dayPatternLabel(selected).toLowerCase() : 'this sub-batch'} runs on —
+                  skips off days automatically, so 25 means 25 actual classes, not 25 calendar days.
+                </p>
+              </div>
+            )}
+          </div>
+
           <div className="grid grid-cols-2 gap-3">
-            <Field label="Start Date *"><input type="date" className={inputCls} value={startDate} onChange={(e) => setStartDate(e.target.value)} /></Field>
-            <Field label="End Date *"><input type="date" className={inputCls} value={endDate} onChange={(e) => setEndDate(e.target.value)} /></Field>
             <Field label="Start Time *"><input type="time" className={inputCls} value={startTime} onChange={(e) => setStartTime(e.target.value)} /></Field>
             <Field label="End Time *"><input type="time" className={inputCls} value={endTime} onChange={(e) => setEndTime(e.target.value)} /></Field>
           </div>
-          {endDate && startDate && endDate < startDate && <p className="text-xs text-red-600">End date can't be before start date.</p>}
+          {rangeMode === 'endDate' && endDate && startDate && endDate < startDate && <p className="text-xs text-red-600">End date can't be before start date.</p>}
           <div className="flex justify-end gap-2 pt-2">
             <button onClick={onClose} className="px-4 py-2 text-sm rounded-lg border">Cancel</button>
             <button onClick={submit} disabled={!canSubmit || saving} className="px-4 py-2 text-sm rounded-lg bg-blue-600 text-white disabled:opacity-50">{saving ? 'Creating...' : 'Create Classes'}</button>
@@ -925,9 +959,10 @@ function BulkUploadClassesModal({ onClose, onSaved, setError }: { onClose: () =>
 
   const downloadTemplate = () => {
     const ws = XLSX.utils.json_to_sheet([
-      { subBatchCode: 'B17-DA-MOR', title: 'Data Cleaning with Pandas', topic: 'Pandas', description: '', date: '2026-10-10', startDate: '', endDate: '', startTime: '09:30', endTime: '13:30' },
-      { subBatchCode: 'B17-DA-MOR', title: 'EDA Basics', topic: '', description: '', date: '2026-10-11', startDate: '', endDate: '', startTime: '09:30', endTime: '13:30' },
-      { subBatchCode: 'B17-DA-MOR', title: 'Regular Session', topic: '', description: '', date: '', startDate: '2026-10-13', endDate: '2026-10-24', startTime: '09:30', endTime: '13:30' },
+      { subBatchCode: 'B17-DA-MOR', title: 'Data Cleaning with Pandas', topic: 'Pandas', description: '', date: '2026-10-10', startDate: '', endDate: '', numDays: '', startTime: '09:30', endTime: '13:30' },
+      { subBatchCode: 'B17-DA-MOR', title: 'EDA Basics', topic: '', description: '', date: '2026-10-11', startDate: '', endDate: '', numDays: '', startTime: '09:30', endTime: '13:30' },
+      { subBatchCode: 'B17-DA-MOR', title: 'Regular Session', topic: '', description: '', date: '', startDate: '2026-10-13', endDate: '2026-10-24', numDays: '', startTime: '09:30', endTime: '13:30' },
+      { subBatchCode: 'B17-DA-MOR', title: 'Regular Session', topic: '', description: '', date: '', startDate: '2026-11-02', endDate: '', numDays: '25', startTime: '09:30', endTime: '13:30' },
     ]);
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, 'Classes');
@@ -981,12 +1016,14 @@ function BulkUploadClassesModal({ onClose, onSaved, setError }: { onClose: () =>
   return (
     <Modal title="Bulk Upload Classes (Excel)" onClose={onClose}>
       <p className="text-xs text-muted-foreground">
-        Columns: <code>subBatchCode, title, topic, description, date, startDate, endDate, startTime, endTime</code>.
-        Each row needs either a single <code>date</code> (one class), or <code>startDate</code> + <code>endDate</code>
-        (fills every day the sub-batch runs on in that range, same as Bulk Create — leave <code>date</code> blank for
-        this). Rows can mix both styles and different sub-batches, so this also covers one-off makeup classes.
-        <code>subBatchCode</code> must match a sub-batch code exactly (shown in Create Class's dropdown). A date that
-        already has a class on that sub-batch is skipped and reported, so it's safe to re-upload the same file.
+        Columns: <code>subBatchCode, title, topic, description, date, startDate, endDate, numDays, startTime, endTime</code>.
+        Each row needs either a single <code>date</code> (one class), or a <code>startDate</code> with either
+        <code>endDate</code> or <code>numDays</code> (fills every day the sub-batch runs on, same as Bulk Create —
+        <code>numDays</code> counts only running days, e.g. 25 means 25 actual classes, skipping off days — leave
+        <code>date</code> blank for this). Rows can mix all three styles and different sub-batches, so this also
+        covers one-off makeup classes. <code>subBatchCode</code> must match a sub-batch code exactly (shown in Create
+        Class's dropdown). A date that already has a class on that sub-batch is skipped and reported, so it's safe to
+        re-upload the same file.
       </p>
       <button onClick={downloadTemplate} className="text-xs px-3 py-2 border rounded-lg hover:bg-muted/50 flex items-center gap-1">
         <Download className="w-3 h-3" /> Download template
