@@ -184,6 +184,7 @@ export interface LiveClassRecordingRecord {
   durationSec: number | null;
   startedAt: string;
   endedAt: string | null;
+  failReason?: string | null; // staff only
 }
 
 export interface LiveClassPlaybackUrl {

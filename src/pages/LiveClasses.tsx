@@ -591,6 +591,7 @@ function RecordingsModal({ liveClass, onClose, setError }: { liveClass: LiveClas
                 <div>
                   <p className="text-sm font-medium">{formatClassDate(r.startedAt)} · {formatDuration(r.durationSec)}</p>
                   <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${RECORDING_BADGE[r.status]}`}>{r.status}</span>
+                  {r.status === 'FAILED' && r.failReason && <p className="text-xs text-red-600 mt-1 break-words max-w-md">Reason: {r.failReason}</p>}
                 </div>
                 {r.status === 'READY' ? (
                   <button onClick={() => play(r.id)} className="px-3 py-1.5 text-xs rounded-lg bg-blue-600 text-white font-medium inline-flex items-center gap-1">
