@@ -821,7 +821,12 @@ function BulkCreateClassModal({ onClose, onSaved, setError }: { onClose: () => v
     if (selected.startTime && !startTime) setStartTime(selected.startTime);
     if (selected.endTime && !endTime) setEndTime(selected.endTime);
     if (!startDate) setStartDate(selected.startDate.slice(0, 10));
-    if (!endDate && selected.endDate) setEndDate(selected.endDate.slice(0, 10));
+    // Only prefill End Date while that mode is actually active — otherwise
+    // picking a sub-batch quietly fills in a real end date in the
+    // background, and if the person then switches to "Number of running
+    // days" without separately clearing it, that stale date would win at
+    // submit time even though the number field looks like it's in control.
+    if (rangeMode === 'endDate' && !endDate && selected.endDate) setEndDate(selected.endDate.slice(0, 10));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [scheduleId]);
 
@@ -837,8 +842,12 @@ function BulkCreateClassModal({ onClose, onSaved, setError }: { onClose: () => v
     api.post('/api/live-classes/bulk', {
       scheduleId, title: title.trim(), topic: topic || undefined, description: description || undefined,
       startDate, startTime, endTime,
-      endDate: rangeMode === 'endDate' ? endDate : undefined,
-      numDays: rangeMode === 'numDays' ? Number(numDays) : undefined,
+      // Belt-and-suspenders: even though the fields now self-clear on mode
+      // switch, only the field matching the active mode is ever sent —
+      // never both, so a stray leftover value in the inactive field can't
+      // silently win.
+      endDate: rangeMode === 'endDate' ? (endDate || undefined) : undefined,
+      numDays: rangeMode === 'numDays' ? (Number(numDays) || undefined) : undefined,
     })
       .then((r) => setResult(r.data.data))
       .catch((err) => setError(errMsg(err, 'Could not bulk-create the classes.')))
@@ -896,19 +905,22 @@ function BulkCreateClassModal({ onClose, onSaved, setError }: { onClose: () => v
             <span className="text-xs font-medium text-muted-foreground">Range *</span>
             <div className="flex gap-3 mt-1 mb-2">
               <label className="flex items-center gap-1.5 text-xs cursor-pointer">
-                <input type="radio" checked={rangeMode === 'endDate'} onChange={() => setRangeMode('endDate')} /> End date
+                <input type="radio" checked={rangeMode === 'endDate'} onChange={() => { setRangeMode('endDate'); setNumDays(''); }} /> End date
               </label>
               <label className="flex items-center gap-1.5 text-xs cursor-pointer">
-                <input type="radio" checked={rangeMode === 'numDays'} onChange={() => setRangeMode('numDays')} /> Number of running days
+                <input type="radio" checked={rangeMode === 'numDays'} onChange={() => { setRangeMode('numDays'); setEndDate(''); }} /> Number of running days
               </label>
             </div>
             {rangeMode === 'endDate' ? (
-              <input type="date" className={inputCls} value={endDate} onChange={(e) => setEndDate(e.target.value)} />
+              <input
+                type="date" className={inputCls} value={endDate}
+                onChange={(e) => { setEndDate(e.target.value); setRangeMode('endDate'); }}
+              />
             ) : (
               <div>
                 <input
                   type="number" min={1} max={300} className={inputCls} value={numDays}
-                  onChange={(e) => setNumDays(e.target.value)} placeholder="e.g. 25"
+                  onChange={(e) => { setNumDays(e.target.value); setRangeMode('numDays'); }} placeholder="e.g. 25"
                 />
                 <p className="text-xs text-muted-foreground mt-1">
                   Counts only the days {selected ? dayPatternLabel(selected).toLowerCase() : 'this sub-batch'} runs on —
