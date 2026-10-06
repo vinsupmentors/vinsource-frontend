@@ -308,6 +308,12 @@ function AnalyticsTab({ setError }: { setError: (s: string) => void }) {
 }
 
 // ── Class list (Today / Upcoming / Completed) ─────────────────────────────────
+/** ISO timestamp -> local yyyy-mm-dd (matches how dates are displayed on the cards). */
+function localYmd(iso: string): string {
+  const d = new Date(iso);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
 function ClassListTab({ view, canEdit, setError, refreshKey }: { view: 'today' | 'upcoming' | 'completed'; canEdit: boolean; setError: (s: string) => void; refreshKey: number }) {
   const [classes, setClasses] = useState<LiveClass[] | null>(null);
   const [attendanceFor, setAttendanceFor] = useState<LiveClass | null>(null);
@@ -315,6 +321,8 @@ function ClassListTab({ view, canEdit, setError, refreshKey }: { view: 'today' |
   const [filterBatch, setFilterBatch] = useState('');
   const [filterCourse, setFilterCourse] = useState('');
   const [filterSession, setFilterSession] = useState('');
+  const [filterMonth, setFilterMonth] = useState(''); // yyyy-mm
+  const [filterDate, setFilterDate] = useState(''); // yyyy-mm-dd
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [bulkCancelling, setBulkCancelling] = useState(false);
   const navigate = useNavigate();
@@ -326,7 +334,7 @@ function ClassListTab({ view, canEdit, setError, refreshKey }: { view: 'today' |
   // Filter dropdowns (and any in-progress multi-select) reset whenever the
   // tab's underlying view changes, so switching from Upcoming to Completed
   // doesn't carry over a stale filter or selection that no longer applies.
-  useEffect(() => { setFilterBatch(''); setFilterCourse(''); setFilterSession(''); setSelectedIds(new Set()); }, [view]);
+  useEffect(() => { setFilterBatch(''); setFilterCourse(''); setFilterSession(''); setFilterMonth(''); setFilterDate(''); setSelectedIds(new Set()); }, [view]);
 
   const start = (id: string) => {
     api.post(`/api/live-classes/${id}/start`)
@@ -388,7 +396,9 @@ function ClassListTab({ view, canEdit, setError, refreshKey }: { view: 'today' |
   const filtered = classes.filter((c) =>
     (!filterBatch || c.schedule.batch.code === filterBatch) &&
     (!filterCourse || c.schedule.course.name === filterCourse) &&
-    (!filterSession || formatTimeRange(c.startTime, c.endTime) === filterSession)
+    (!filterSession || formatTimeRange(c.startTime, c.endTime) === filterSession) &&
+    (!filterMonth || localYmd(c.scheduledDate).startsWith(filterMonth)) &&
+    (!filterDate || localYmd(c.scheduledDate) === filterDate)
   );
   const cancelableIds = filtered.filter((c) => c.status === 'SCHEDULED').map((c) => c.id);
   const allCancelableSelected = cancelableIds.length > 0 && cancelableIds.every((id) => selectedIds.has(id));
@@ -408,8 +418,12 @@ function ClassListTab({ view, canEdit, setError, refreshKey }: { view: 'today' |
           <option value="">All Sessions</option>
           {sessionOptions.map((s) => <option key={s} value={s}>{s}</option>)}
         </select>
-        {(filterBatch || filterCourse || filterSession) && (
-          <button onClick={() => { setFilterBatch(''); setFilterCourse(''); setFilterSession(''); }} className="text-xs text-muted-foreground underline">
+        <input type="month" title="Filter by month" className="border rounded-lg px-3 py-1.5 text-sm" value={filterMonth}
+          onChange={(e) => { setFilterMonth(e.target.value); setFilterDate(''); }} />
+        <input type="date" title="Filter by date" className="border rounded-lg px-3 py-1.5 text-sm" value={filterDate}
+          onChange={(e) => { setFilterDate(e.target.value); setFilterMonth(''); }} />
+        {(filterBatch || filterCourse || filterSession || filterMonth || filterDate) && (
+          <button onClick={() => { setFilterBatch(''); setFilterCourse(''); setFilterSession(''); setFilterMonth(''); setFilterDate(''); }} className="text-xs text-muted-foreground underline">
             Clear filters
           </button>
         )}
