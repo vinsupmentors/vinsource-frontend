@@ -9,6 +9,7 @@ import {
 } from '@livekit/components-react';
 import { RoomEvent } from 'livekit-client';
 import '@livekit/components-styles';
+import { Lobby, PipButton, roomOptionsFrom, type LocalUserChoices } from '@/components/classroom/ClassroomExtras';
 import {
   Loader2, Video, Mic, MicOff, VideoOff, Users, X, LogOut, PhoneOff, ShieldAlert, AlertTriangle, Hand,
 } from 'lucide-react';
@@ -37,6 +38,7 @@ export default function LiveClassroom() {
   const [error, setError] = useState('');
   const [starting, setStarting] = useState(false);
   const [connected, setConnected] = useState(false);
+  const [choices, setChoices] = useState<LocalUserChoices | null>(null); // mic/camera picked in the lobby
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const loadClass = useCallback(() => {
@@ -105,15 +107,29 @@ export default function LiveClassroom() {
     );
   }
 
+  // Token in hand but mic/camera not chosen yet → Meet-style lobby first.
+  if (join.token && join.url && join.roomName && !choices) {
+    return (
+      <Lobby
+        title={liveClass.title}
+        subtitle={`${liveClass.schedule.course.name} · ${liveClass.schedule.batch.code}`}
+        name={user?.email || 'Participant'}
+        onSubmit={setChoices}
+        onBack={() => navigate(-1)}
+      />
+    );
+  }
+
   // Connected token in hand → render the room.
-  if (join.token && join.url && join.roomName) {
+  if (join.token && join.url && join.roomName && choices) {
     return (
       <LiveKitRoom
         serverUrl={join.url}
         token={join.token}
         connect
-        video
-        audio
+        video={choices.videoEnabled}
+        audio={choices.audioEnabled}
+        options={roomOptionsFrom(choices)}
         data-lk-theme="default"
         style={{ height: '100vh' }}
         onDisconnected={() => { if (id) api.post(`/api/live-classes/${id}/leave`).catch(() => {}); }}
@@ -129,6 +145,20 @@ export default function LiveClassroom() {
         />
         <VideoConference />
       </LiveKitRoom>
+    );
+  }
+
+  // Trainer opening an un-started class: check mic/camera first, then "Start Class" goes live.
+  if (join.waitingForHost && join.canHost && !choices) {
+    return (
+      <Lobby
+        title={liveClass.title}
+        subtitle={`${liveClass.schedule.course.name} · ${liveClass.schedule.batch.code} — you'll go live when you start`}
+        name={user?.email || 'Trainer'}
+        joinLabel="Start Class"
+        onSubmit={(c) => { setChoices(c); startClass(); }}
+        onBack={() => navigate(-1)}
+      />
     );
   }
 
@@ -271,6 +301,7 @@ function ClassroomChrome({ liveClass, canHost, onEnd, onLeave }: { liveClass: Li
         )}
       </div>
       <div className="flex items-center gap-2 flex-shrink-0">
+        <PipButton />
         {!canHost && (
           <button
             onClick={toggleMine}

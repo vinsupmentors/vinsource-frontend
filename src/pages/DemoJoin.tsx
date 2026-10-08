@@ -4,9 +4,11 @@ import api from '@/lib/api';
 import { errMsg } from '@/lib/liveClasses';
 import { LiveKitRoom, VideoConference, RoomAudioRenderer } from '@livekit/components-react';
 import '@livekit/components-styles';
+import { Lobby, PipButton, roomOptionsFrom, type LocalUserChoices } from '@/components/classroom/ClassroomExtras';
 import { Loader2, Video, Timer } from 'lucide-react';
 
 interface Joined { token: string; url: string; title: string; course: string; expiresAt: string }
+interface Ready { title: string; course: string }
 
 /** Public page a prospect opens from the approval email: code + email → join the running class as a normal participant for a limited time. */
 export default function DemoJoinPage() {
@@ -16,7 +18,9 @@ export default function DemoJoinPage() {
   const [error, setError] = useState('');
   const [waiting, setWaiting] = useState(false);
   const [joined, setJoined] = useState<Joined | null>(null);
+  const [ready, setReady] = useState<Ready | null>(null);
   const [ended, setEnded] = useState('');
+  const [choices, setChoices] = useState<LocalUserChoices | null>(null);
   const poll = useRef<ReturnType<typeof setInterval> | null>(null);
   const finished = useRef(false); // set once joined or failed, so the poll never starts/continues
 
@@ -25,7 +29,8 @@ export default function DemoJoinPage() {
     return api.post('/api/public/demo-join', { code, email })
       .then((r) => {
         if (r.data.data.waiting) { setWaiting(true); return; }
-        finished.current = true; stopPoll(); setWaiting(false); setJoined(r.data.data);
+        finished.current = true; stopPoll(); setWaiting(false);
+        if (r.data.data.ready) setReady(r.data.data); else setJoined(r.data.data);
       })
       .catch((e) => { finished.current = true; stopPoll(); setWaiting(false); setError(errMsg(e, 'Could not join.')); });
   }, [code, email]);
@@ -38,11 +43,25 @@ export default function DemoJoinPage() {
   // The interval stops itself once joined/failed (stopPoll in attempt).
   useEffect(() => stopPoll, []);
 
+  // Lobby submit → now actually enter (this is what starts the 20-minute clock).
+  const enter = (c: LocalUserChoices) => {
+    setChoices(c); setError('');
+    api.post('/api/public/demo-join', { code, email, enter: true })
+      .then((r) => setJoined(r.data.data))
+      .catch((e) => { setChoices(null); setReady(null); setError(errMsg(e, 'Could not join.')); });
+  };
+
   if (ended) return <Shell><p className="text-white text-lg">{ended}</p></Shell>;
 
-  if (joined) {
+  // Approved + class is live: Meet-style mic/camera check before entering.
+  // The 20-minute clock only starts when they press Join in the lobby.
+  if (ready && !joined) {
+    return <Lobby title={ready.title} subtitle={`${ready.course} — demo · your ${20}-minute window starts when you join`} name="Demo guest" joinLabel="Join now" onSubmit={enter} />;
+  }
+
+  if (joined && choices) {
     return (
-      <LiveKitRoom serverUrl={joined.url} token={joined.token} connect video audio data-lk-theme="default" style={{ height: '100vh' }}
+      <LiveKitRoom serverUrl={joined.url} token={joined.token} connect video={choices.videoEnabled} audio={choices.audioEnabled} options={roomOptionsFrom(choices)} data-lk-theme="default" style={{ height: '100vh' }}
         onDisconnected={() => setEnded('Your demo time is over. Thank you for joining — our team will be in touch!')}>
         <RoomAudioRenderer />
         <Countdown expiresAt={joined.expiresAt} title={`${joined.course} — demo`} onDone={() => setEnded('Your demo time is over. Thank you for joining — our team will be in touch!')} />
@@ -92,6 +111,7 @@ function Countdown({ expiresAt, title, onDone }: { expiresAt: string; title: str
     <div className="absolute top-0 left-0 right-0 z-[60] flex items-center justify-between px-4 py-2 bg-black/60 backdrop-blur-sm text-white text-sm">
       <span className="font-medium truncate">{title}</span>
       <span className={`inline-flex items-center gap-1.5 text-xs font-semibold ${left < 120000 ? 'text-red-300' : ''}`}><Timer className="w-3.5 h-3.5" /> {m}:{String(s).padStart(2, '0')} left</span>
+      <PipButton />
     </div>
   );
 }
