@@ -24,9 +24,18 @@ export function Lobby({ title, subtitle, name, joinLabel = 'Join now', onSubmit,
   onSubmit: (c: LocalUserChoices) => void; onBack?: () => void;
 }) {
   return (
-    <div className="fixed inset-0 bg-[#0f1115] z-50 overflow-y-auto flex items-center justify-center p-4" data-lk-theme="default">
-      <style>{`.lk-username-container{display:none !important}`}</style>
-      <div className="w-full max-w-xl space-y-4">
+    <div className="fixed inset-0 bg-[#0f1115] z-50 overflow-y-auto" data-lk-theme="default">
+      {/* The preview video was tall enough to push the Join button below the
+          fold (and flex-centering made the overflow unscrollable) — cap the
+          preview height and let the page scroll. */}
+      <style>{`
+        .lk-username-container{display:none !important}
+        .lk-prejoin{width:100% !important;max-width:none !important;padding:0 !important}
+        .lk-prejoin .lk-video-container{max-height:38vh}
+        .lk-prejoin video{max-height:38vh;width:100%;object-fit:cover}
+      `}</style>
+      <div className="min-h-full flex items-center justify-center p-4">
+      <div className="w-full max-w-xl space-y-4 py-4">
         <div className="text-center text-white space-y-1">
           <h1 className="text-xl font-semibold">{title}</h1>
           {subtitle && <p className="text-sm text-white/60">{subtitle}</p>}
@@ -40,6 +49,7 @@ export function Lobby({ title, subtitle, name, joinLabel = 'Join now', onSubmit,
           onError={() => { /* permission errors are shown inside PreJoin itself */ }}
         />
         {onBack && <button onClick={onBack} className="block mx-auto px-4 py-2 text-sm rounded-lg bg-white/10 text-white hover:bg-white/20">Go back</button>}
+      </div>
       </div>
     </div>
   );
