@@ -29,7 +29,10 @@ export function Lobby({ title, subtitle, name, joinLabel = 'Join now', onSubmit,
           fold (and flex-centering made the overflow unscrollable) — cap the
           preview height and let the page scroll. */}
       <style>{`
-        .lk-username-container{display:none !important}
+        /* the Join button lives INSIDE .lk-username-container, so hide only the name input */
+        .lk-username-container{display:flex !important;flex-direction:column;gap:0;width:100%}
+        .lk-username-container input{display:none !important}
+        .lk-username-container .lk-join-button{width:100%;padding:0.75rem 1rem;font-size:1rem;font-weight:600;background:#2563eb;color:#fff;border-radius:0.5rem}
         .lk-prejoin{width:100% !important;max-width:none !important;padding:0 !important}
         .lk-prejoin .lk-video-container{max-height:38vh}
         .lk-prejoin video{max-height:38vh;width:100%;object-fit:cover}
