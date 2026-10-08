@@ -72,6 +72,8 @@ import PublicPortfolioPage from './pages/PublicPortfolio';
 import VerifyCertificatePage from './pages/VerifyCertificate';
 import LiveClassesPage from './pages/LiveClasses';
 import LiveClassroom from './pages/LiveClassroom';
+import DemoRequestsPage from './pages/DemoRequests';
+import DemoJoinPage from './pages/DemoJoin';
 import CalendarPage from './pages/Calendar';
 import StudentCalendarPage from './pages/student/StudentCalendar';
 
@@ -160,6 +162,9 @@ export default function App() {
             }
           />
 
+          {/* Public demo sit-in join (prospect enters link/code + email) */}
+          <Route path="/demo-join" element={<DemoJoinPage />} />
+
           {/* Student portal routes */}
           <Route
             path="/student"
@@ -241,6 +246,7 @@ export default function App() {
             <Route path="resignation" element={<ResignationPage />} />
             <Route path="exit-clearance/:id" element={<ExitClearancePage />} />
             <Route path="my-training" element={<MyTrainingPage />} />
+            <Route path="demo-requests" element={<DemoRequestsPage />} />
             {/* Org Chart locked — <Route path="org-chart" element={<OrgChartPage />} /> */}
           </Route>
 

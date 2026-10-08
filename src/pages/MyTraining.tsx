@@ -456,7 +456,7 @@ function MarksTab({ schedule }: { schedule: ScheduleAssignment['schedule'] }) {
 }
 
 type FeedbackStudentStatus = 'ENROLLED' | 'ONBOARDED' | 'ACTIVE' | 'INACTIVE' | 'COMPLETED' | 'IN_PLACEMENT' | 'PLACED' | 'BATCH_TRANSFER';
-interface FeedbackStudent { id: string; studentCode: string; firstName: string; lastName: string; status?: FeedbackStudentStatus; }
+interface FeedbackStudent { id: string; studentCode: string; firstName: string; lastName: string; status?: FeedbackStudentStatus; track?: string | null; }
 
 type FeedbackSubTab = 'internal' | 'module';
 
@@ -680,7 +680,9 @@ function InternalFeedbackPanel({ schedule }: { schedule: ScheduleAssignment['sch
         return (
           <div key={s.id} className="bg-card rounded-xl border p-4 space-y-3">
             <div className="flex items-center justify-between flex-wrap gap-2">
-              <p className="text-sm font-semibold">{s.firstName} {s.lastName} <span className="text-xs text-muted-foreground font-normal">({s.studentCode})</span></p>
+              <p className="text-sm font-semibold">{s.firstName} {s.lastName} <span className="text-xs text-muted-foreground font-normal">({s.studentCode})</span>
+                {s.track && <span className={`ml-2 text-xs px-2 py-0.5 rounded-full font-semibold ${s.track === 'JRP' || s.track === 'JRP_RECORDED' ? 'bg-orange-100 text-orange-700' : 'bg-blue-100 text-blue-700'}`}>{s.track === 'JRP_RECORDED' ? 'JRP (Recorded)' : s.track}</span>}
+              </p>
               {s.status && (
                 <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${alreadyInPool ? 'bg-indigo-100 text-indigo-700' : 'bg-muted text-muted-foreground'}`}>
                   {STUDENT_STATUS_LABEL[s.status]}

@@ -27,6 +27,8 @@ interface NavItem {
   hideFor?: Role[];
   /** Only show this item to employees who actually have a TrainerAssignment row. */
   trainersOnly?: boolean;
+  /** Show to Sales, Production/Live-Classes users and trainers (demo sit-in requests). */
+  demoAccess?: boolean;
   children?: Omit<NavItem, 'children'>[];
 }
 
@@ -58,6 +60,7 @@ const navItems: NavItem[] = [
   { label: 'Onboarding',     to: '/onboarding',     icon: UserPlus,      minRole: 'MANAGER' },
   { label: 'Appt. Letters',  to: '/appointment-letters', icon: FileBadge,   minRole: 'HR' },
   { label: 'My Training',    to: '/my-training',    icon: Presentation, trainersOnly: true },
+  { label: 'Demo Requests',  to: '/demo-requests',  icon: Presentation, demoAccess: true },
   // { label: 'Org Chart',      to: '/org-chart',      icon: Network },  // hidden — locked
   { label: 'Resignation',    to: '/resignation',    icon: DoorOpen },
   { label: 'Org Setup',      to: '/org-setup',      icon: Building2,     minRole: 'HR' },
@@ -268,6 +271,7 @@ export function Sidebar() {
     if (item.hideFor && role && item.hideFor.includes(role as Role)) return false;
     // "My Training" shows if the user is assigned as a trainer OR has Production module access
     if (item.trainersOnly && !user?.isTrainer && !modules['PRODUCTION_TRAINING']) return false;
+    if (item.demoAccess && !user?.isTrainer && !modules['SALES'] && !modules['PRODUCTION_TRAINING'] && !modules['LIVE_CLASSES']) return false;
     return true;
   });
 
