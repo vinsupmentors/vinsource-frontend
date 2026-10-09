@@ -318,6 +318,7 @@ function ClassListTab({ view, canEdit, setError, refreshKey }: { view: 'today' |
   const [classes, setClasses] = useState<LiveClass[] | null>(null);
   const [attendanceFor, setAttendanceFor] = useState<LiveClass | null>(null);
   const [recordingsFor, setRecordingsFor] = useState<LiveClass | null>(null);
+  const [reportFor, setReportFor] = useState<LiveClass | null>(null);
   const [filterBatch, setFilterBatch] = useState('');
   const [filterCourse, setFilterCourse] = useState('');
   const [filterSession, setFilterSession] = useState('');
@@ -493,6 +494,11 @@ function ClassListTab({ view, canEdit, setError, refreshKey }: { view: 'today' |
                 <ClipboardCheck className="w-3 h-3" /> Attendance
               </button>
             )}
+            {(c.status === 'COMPLETED' || c.status === 'LIVE') && canEdit && (
+              <button onClick={() => setReportFor(c)} className="px-3 py-1.5 text-xs rounded-lg border inline-flex items-center gap-1">
+                <Table2 className="w-3 h-3" /> Report
+              </button>
+            )}
             {c.status === 'COMPLETED' && (
               <button onClick={() => setRecordingsFor(c)} className="px-3 py-1.5 text-xs rounded-lg border inline-flex items-center gap-1">
                 <Film className="w-3 h-3" /> Recording
@@ -504,6 +510,7 @@ function ClassListTab({ view, canEdit, setError, refreshKey }: { view: 'today' |
       </div>
       )}
       {attendanceFor && <AttendanceModal liveClass={attendanceFor} onClose={() => setAttendanceFor(null)} setError={setError} />}
+      {reportFor && <MeetingReportModal liveClass={reportFor} onClose={() => setReportFor(null)} setError={setError} />}
       {recordingsFor && <RecordingsModal liveClass={recordingsFor} onClose={() => setRecordingsFor(null)} setError={setError} />}
     </div>
   );
@@ -568,6 +575,71 @@ function SummaryTab({ setError, refreshKey }: { setError: (s: string) => void; r
 }
 
 // ── Recordings modal (staff + student, same component) ──────────────────────
+interface MeetingReport {
+  class: { title: string; status: string; scheduledDate: string; startTime: string; endTime: string; actualStartAt: string | null; actualEndAt: string | null; course: string; batch: string; subBatch: string | null };
+  summary: { durationSec: number; participantCount: number; avgSec: number };
+  participants: { name: string; code: string | null; role: string; firstJoinedAt: string; lastLeftAt: string; totalSec: number }[];
+}
+const hms = (sec: number) => `${String(Math.floor(sec / 3600)).padStart(2, '0')}:${String(Math.floor((sec % 3600) / 60)).padStart(2, '0')}:${String(sec % 60).padStart(2, '0')}`;
+const clock = (iso: string | null) => (iso ? new Date(iso).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: true }) : '—');
+const ROLE_TXT: Record<string, string> = { HOST: 'Host', CO_TRAINER: 'Co-trainer', STUDENT: 'Student', DEMO: 'Demo guest' };
+
+/** Meeting history — when the class actually ran and each participant's first-joined time and total time in the room. */
+function MeetingReportModal({ liveClass, onClose, setError }: { liveClass: LiveClass; onClose: () => void; setError: (s: string) => void }) {
+  const [data, setData] = useState<MeetingReport | null>(null);
+  const [q, setQ] = useState('');
+  useEffect(() => {
+    api.get(`/api/live-classes/${liveClass.id}/report`).then((r) => setData(r.data.data)).catch((e) => { setError(errMsg(e, 'Could not load the meeting report.')); onClose(); });
+  }, [liveClass.id, setError, onClose]);
+
+  const exportCsv = () => {
+    if (!data) return;
+    const rows = data.participants.map((p) => ({ Name: p.name, Code: p.code || '', Role: ROLE_TXT[p.role] || p.role, 'First joined': clock(p.firstJoinedAt), 'Last left': clock(p.lastLeftAt), 'Time in call (HH:MM:SS)': hms(p.totalSec) }));
+    const ws = XLSX.utils.json_to_sheet(rows);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Meeting report');
+    XLSX.writeFile(wb, `meeting-report-${liveClass.classCode}.xlsx`);
+  };
+
+  const list = (data?.participants || []).filter((p) => p.name.toLowerCase().includes(q.toLowerCase()));
+  return (
+    <Modal title={`Meeting Report — ${liveClass.title}`} onClose={onClose} wide>
+      {!data ? <div className="flex justify-center py-8"><Loader2 className="w-5 h-5 animate-spin text-blue-600" /></div> : (
+        <>
+          <p className="text-sm text-muted-foreground">{data.class.course} · {data.class.batch}{data.class.subBatch ? ` / ${data.class.subBatch}` : ''} · {formatClassDate(data.class.scheduledDate)}</p>
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+            {[
+              ['Started', clock(data.class.actualStartAt)],
+              ['Ended', data.class.actualEndAt ? clock(data.class.actualEndAt) : data.class.status === 'LIVE' ? 'Live now' : '—'],
+              ['Meeting duration', hms(data.summary.durationSec)],
+              ['Participants', String(data.summary.participantCount)],
+            ].map(([k, v]) => (
+              <div key={k} className="border rounded-lg px-3 py-2"><p className="text-[11px] uppercase tracking-wide text-muted-foreground">{k}</p><p className="font-semibold">{v}</p></div>
+            ))}
+          </div>
+          <p className="text-xs text-muted-foreground">Avg. time in call (students): <b>{hms(data.summary.avgSec)}</b></p>
+          <div className="flex items-center gap-2">
+            <input className={inputCls} placeholder="Search by participant name" value={q} onChange={(e) => setQ(e.target.value)} />
+            <button onClick={exportCsv} className="px-3 py-2 text-xs rounded-lg border inline-flex items-center gap-1 whitespace-nowrap"><Download className="w-3.5 h-3.5" /> Export</button>
+          </div>
+          <table className="w-full text-sm">
+            <thead><tr className="text-left text-xs text-muted-foreground border-b"><th className="py-2">Name</th><th>First joined</th><th>Last left</th><th className="text-right">Time in call</th></tr></thead>
+            <tbody>
+              {list.map((p, i) => (
+                <tr key={i} className="border-b last:border-0">
+                  <td className="py-2">{p.name}{p.code ? <span className="text-xs text-muted-foreground"> ({p.code})</span> : null} {(p.role === 'HOST' || p.role === 'CO_TRAINER') && <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-blue-50 text-blue-700">{ROLE_TXT[p.role]}</span>}</td>
+                  <td>{clock(p.firstJoinedAt)}</td><td>{clock(p.lastLeftAt)}</td><td className="text-right font-mono">{hms(p.totalSec)}</td>
+                </tr>
+              ))}
+              {list.length === 0 && <tr><td colSpan={4} className="py-6 text-center text-muted-foreground">No participants.</td></tr>}
+            </tbody>
+          </table>
+        </>
+      )}
+    </Modal>
+  );
+}
+
 function RecordingsModal({ liveClass, onClose, setError }: { liveClass: LiveClass; onClose: () => void; setError: (s: string) => void }) {
   const [recordings, setRecordings] = useState<LiveClassRecordingRecord[] | null>(null);
   const [playingId, setPlayingId] = useState<string | null>(null);

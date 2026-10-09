@@ -30,6 +30,9 @@ interface ScheduleAssignment {
     timing: string;
     course: { id: string; name: string; modules: { id: string; title: string; order: number }[] };
     batch: { id: string; code: string; startDate: string; endDate: string; status: string };
+    status?: string;
+    classesCompletedAt?: string | null;
+    projectPresentationDate?: string | null;
     _count: { enrollments: number };
   };
 }
@@ -131,7 +134,12 @@ export default function MyTraining() {
         </div>
       )}
 
-      {tab === 'batches' && <BatchesTab assignments={assignments} />}
+      {tab === 'batches' && (
+        <BatchesTab
+          assignments={assignments}
+          onCompleted={(scheduleId, d) => setAssignments((rows) => rows.map((r) => (r.schedule.id === scheduleId ? { ...r, schedule: { ...r.schedule, ...d } } : r)))}
+        />
+      )}
       {tab === 'attendance' && (
         attendanceScheduleId ? (
           <AttendanceTab
@@ -151,20 +159,70 @@ export default function MyTraining() {
   );
 }
 
-function BatchesTab({ assignments }: { assignments: ScheduleAssignment[] }) {
+function BatchesTab({ assignments, onCompleted }: { assignments: ScheduleAssignment[]; onCompleted: (scheduleId: string, d: { status: string; classesCompletedAt: string; projectPresentationDate: string }) => void }) {
+  const [completing, setCompleting] = useState<ScheduleAssignment | null>(null);
   return (
-    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-      {assignments.map((a) => (
-        <div key={a.id} className="bg-card rounded-xl border p-5">
-          <p className="text-sm font-semibold">{a.schedule.code ?? a.schedule.batch.code}</p>
-          <p className="text-xs text-muted-foreground mt-0.5">{a.schedule.course.name} · {a.schedule.timing}</p>
-          <div className="flex items-center justify-between mt-3 text-xs text-muted-foreground">
-            <span>{formatDate(a.schedule.batch.startDate)} – {formatDate(a.schedule.batch.endDate)}</span>
-            <span className="px-2 py-0.5 rounded-full bg-muted font-medium">{a.schedule.batch.status}</span>
+    <>
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+        {assignments.map((a) => (
+          <div key={a.id} className="bg-card rounded-xl border p-5">
+            <p className="text-sm font-semibold">{a.schedule.code ?? a.schedule.batch.code}</p>
+            <p className="text-xs text-muted-foreground mt-0.5">{a.schedule.course.name} · {a.schedule.timing}</p>
+            <div className="flex items-center justify-between mt-3 text-xs text-muted-foreground">
+              <span>{formatDate(a.schedule.batch.startDate)} – {formatDate(a.schedule.batch.endDate)}</span>
+              <span className="px-2 py-0.5 rounded-full bg-muted font-medium">{a.schedule.batch.status}</span>
+            </div>
+            <p className="text-xs text-muted-foreground mt-2 flex items-center gap-1"><Users className="w-3.5 h-3.5" /> {a.schedule._count.enrollments} students enrolled</p>
+            {a.schedule.classesCompletedAt ? (
+              <p className="mt-3 text-xs rounded-lg bg-indigo-50 text-indigo-700 px-3 py-2 font-medium">
+                Classes completed · Project phase{a.schedule.projectPresentationDate ? ` — presentation on ${formatDate(a.schedule.projectPresentationDate)}` : ''}
+              </p>
+            ) : a.schedule.status !== 'CANCELLED' && (
+              <button onClick={() => setCompleting(a)} className="mt-3 w-full px-3 py-2 text-xs rounded-lg border border-emerald-300 text-emerald-700 font-medium hover:bg-emerald-50 inline-flex items-center justify-center gap-1.5">
+                <CheckCircle2 className="w-3.5 h-3.5" /> Mark Classes Completed
+              </button>
+            )}
           </div>
-          <p className="text-xs text-muted-foreground mt-2 flex items-center gap-1"><Users className="w-3.5 h-3.5" /> {a.schedule._count.enrollments} students enrolled</p>
+        ))}
+      </div>
+      {completing && <CompleteClassesModal assignment={completing} onClose={() => setCompleting(null)} onDone={(d) => { onCompleted(completing.schedule.id, d); setCompleting(null); }} />}
+    </>
+  );
+}
+
+/** Completing a sub-batch's classes = moving it to the project phase, which needs the presentation date. */
+function CompleteClassesModal({ assignment, onClose, onDone }: { assignment: ScheduleAssignment; onClose: () => void; onDone: (d: { status: string; classesCompletedAt: string; projectPresentationDate: string }) => void }) {
+  const [date, setDate] = useState('');
+  const [saving, setSaving] = useState(false);
+  const { toast } = useToast();
+  const today = new Date(); today.setMinutes(today.getMinutes() - today.getTimezoneOffset());
+  const submit = async () => {
+    setSaving(true);
+    try {
+      const r = await api.post(`/api/trainer-portal/schedules/${assignment.schedule.id}/complete-classes`, { presentationDate: date });
+      toast({ title: 'Classes marked completed', description: `Project phase started. ${r.data.data.advisorsNotified} sales advisor(s) notified.`, variant: 'success' });
+      onDone(r.data.data);
+    } catch (e: unknown) {
+      const err = e as { response?: { data?: { message?: string } } };
+      toast({ title: 'Could not complete the classes', description: err.response?.data?.message || 'Please try again.', variant: 'error' });
+    } finally { setSaving(false); }
+  };
+  return (
+    <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
+      <div className="bg-white rounded-xl w-full max-w-md p-6 space-y-4">
+        <div className="flex items-center justify-between"><h2 className="font-semibold text-lg">Mark classes completed</h2><button onClick={onClose}><X className="w-4 h-4" /></button></div>
+        <p className="text-sm text-muted-foreground">
+          {assignment.schedule.code ?? assignment.schedule.batch.code} — {assignment.schedule.course.name}. This moves the sub-batch to its <b>project phase</b>, stops the daily attendance emails, and tells each student's Sales advisor the batch has completed and when the presentation is.
+        </p>
+        <label className="block space-y-1">
+          <span className="text-xs font-medium text-muted-foreground">Project presentation date *</span>
+          <input type="date" min={today.toISOString().slice(0, 10)} value={date} onChange={(e) => setDate(e.target.value)} className="w-full px-3 py-2 rounded-lg border text-sm" />
+        </label>
+        <div className="flex justify-end gap-2">
+          <button onClick={onClose} className="px-3 py-2 text-sm rounded-lg border">Cancel</button>
+          <button onClick={submit} disabled={!date || saving} className="px-4 py-2 text-sm rounded-lg bg-emerald-600 text-white font-medium disabled:opacity-50">{saving ? 'Saving...' : 'Complete & notify sales'}</button>
         </div>
-      ))}
+      </div>
     </div>
   );
 }
@@ -232,7 +290,7 @@ function AttendanceBatchPicker({ assignments, onSelect }: { assignments: Schedul
 
 function AttendanceTab({ schedule, onBack }: { schedule: ScheduleAssignment['schedule']; onBack: () => void }) {
   const [date, setDate] = useState(() => new Date().toISOString().slice(0, 10));
-  const [roster, setRoster] = useState<{ student: RosterStudent; status: string | null }[]>([]);
+  const [roster, setRoster] = useState<{ student: RosterStudent; status: string | null; mode: 'ONLINE' | 'OFFLINE' | null }[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const { toast } = useToast();
@@ -244,17 +302,23 @@ function AttendanceTab({ schedule, onBack }: { schedule: ScheduleAssignment['sch
       .finally(() => setLoading(false));
   }, [schedule.id, date]);
 
-  const setStatus = (studentId: string, status: string) => {
-    setRoster((rows) => rows.map((r) => (r.student.id === studentId ? { ...r, status } : r)));
+  // P-ON = present online, P-OFF = present offline, A = absent.
+  const setMark = (studentId: string, status: 'PRESENT' | 'ABSENT', mode: 'ONLINE' | 'OFFLINE' | null) => {
+    setRoster((rows) => rows.map((r) => (r.student.id === studentId ? { ...r, status, mode } : r)));
   };
+  const markAll = (mode: 'ONLINE' | 'OFFLINE') => setRoster((rows) => rows.map((r) => ({ ...r, status: 'PRESENT', mode })));
 
   const save = async () => {
     const markedCount = roster.filter((r) => r.status).length;
+    if (roster.some((r) => r.status && r.status !== 'ABSENT' && !r.mode)) {
+      toast({ title: 'Pick Online or Offline', description: 'Every present student must be marked P-ON (online) or P-OFF (offline).', variant: 'error' });
+      return;
+    }
     setSaving(true);
     try {
       await api.post(`/api/trainer-portal/schedules/${schedule.id}/attendance`, {
         date,
-        records: roster.filter((r) => r.status).map((r) => ({ studentId: r.student.id, status: r.status })),
+        records: roster.filter((r) => r.status).map((r) => ({ studentId: r.student.id, status: r.status === 'ABSENT' ? 'ABSENT' : 'PRESENT', mode: r.status === 'ABSENT' ? null : r.mode })),
       });
       toast({
         title: 'Attendance saved',
@@ -280,6 +344,8 @@ function AttendanceTab({ schedule, onBack }: { schedule: ScheduleAssignment['sch
           <ArrowLeft className="w-4 h-4" /> {schedule.code ?? schedule.batch.code} — {schedule.course.name} · {schedule.timing}
         </button>
         <div className="flex items-center gap-3">
+          <button onClick={() => markAll('ONLINE')} className="px-3 py-2 rounded-lg border text-xs font-medium hover:bg-muted">All P - ON</button>
+          <button onClick={() => markAll('OFFLINE')} className="px-3 py-2 rounded-lg border text-xs font-medium hover:bg-muted">All P - OFF</button>
           <input type="date" value={date} onChange={(e) => setDate(e.target.value)} className="px-3 py-2 rounded-lg border bg-background text-sm" />
           <button onClick={save} disabled={saving} className="flex items-center gap-2 px-4 py-2 rounded-lg bg-blue-600 text-white text-sm font-medium hover:bg-blue-700 disabled:opacity-60">
             {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />} Save attendance
@@ -309,19 +375,20 @@ function AttendanceTab({ schedule, onBack }: { schedule: ScheduleAssignment['sch
                   <td className="px-4 py-3">{r.student.firstName} {r.student.lastName} <span className="text-xs text-muted-foreground">({r.student.studentCode})</span></td>
                   <td className="px-4 py-3">
                     <div className="flex gap-1.5">
-                      {(['PRESENT', 'LATE', 'ABSENT'] as const).map((s) => (
+                      {([
+                        { key: 'ON', label: 'P - ON', on: r.status !== 'ABSENT' && r.status !== null && r.mode === 'ONLINE', act: () => setMark(r.student.id, 'PRESENT', 'ONLINE'), cls: 'bg-green-600 text-white border-green-600' },
+                        { key: 'OFF', label: 'P - OFF', on: r.status !== 'ABSENT' && r.status !== null && r.mode === 'OFFLINE', act: () => setMark(r.student.id, 'PRESENT', 'OFFLINE'), cls: 'bg-blue-600 text-white border-blue-600' },
+                        { key: 'A', label: 'A', on: r.status === 'ABSENT', act: () => setMark(r.student.id, 'ABSENT', null), cls: 'bg-red-600 text-white border-red-600' },
+                      ]).map((b) => (
                         <button
-                          key={s}
-                          onClick={() => setStatus(r.student.id, s)}
-                          className={`text-xs px-2.5 py-1 rounded-full font-medium border transition ${
-                            r.status === s
-                              ? s === 'PRESENT' ? 'bg-green-600 text-white border-green-600' : s === 'LATE' ? 'bg-amber-500 text-white border-amber-500' : 'bg-red-600 text-white border-red-600'
-                              : 'bg-background text-muted-foreground border-border hover:bg-muted'
-                          }`}
+                          key={b.key}
+                          onClick={b.act}
+                          className={`text-xs px-3 py-1 rounded-full font-medium border transition ${b.on ? b.cls : 'bg-background text-muted-foreground border-border hover:bg-muted'}`}
                         >
-                          {s}
+                          {b.label}
                         </button>
                       ))}
+                      {r.status && r.status !== 'ABSENT' && !r.mode && <span className="text-xs text-amber-600 self-center ml-1">pick ON / OFF</span>}
                     </div>
                   </td>
                 </tr>
