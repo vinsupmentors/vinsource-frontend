@@ -8,7 +8,7 @@ import {
   LiveClass, ScheduleOption, LiveClassDashboard, STATUS_BADGE, LiveClassSummaryRow,
   LiveClassAttendanceResponse, ATTENDANCE_BADGE, LiveClassAnalytics,
   LiveClassRecordingRecord, LiveClassPlaybackUrl, RECORDING_BADGE, formatDuration,
-  formatTimeRange, formatClassDate, errMsg, dayPatternLabel, trainerNames,
+  formatTimeRange, formatClassDate, errMsg, dayPatternLabel, trainerNames, statusLabel,
 } from '@/lib/liveClasses';
 import {
   Video, PlayCircle, CalendarClock, CheckCircle2, X, Loader2, PlusCircle,
@@ -216,7 +216,7 @@ function AnalyticsTab({ setError }: { setError: (s: string) => void }) {
 
   const cards = [
     { label: 'Classes Held', value: data.summary.completedClasses, icon: CheckCircle2, color: 'text-emerald-600' },
-    { label: 'Cancelled', value: data.summary.cancelledClasses, icon: XCircle, color: 'text-red-600' },
+    { label: 'Holidays', value: data.summary.cancelledClasses, icon: XCircle, color: 'text-red-600' },
     { label: 'Avg. Attendance', value: `${data.summary.avgAttendancePercent}%`, icon: TrendingUp, color: 'text-blue-600' },
     { label: 'Avg. Chat / Class', value: data.summary.avgChatMessagesPerClass, icon: MessageSquare, color: 'text-purple-600' },
   ];
@@ -326,6 +326,7 @@ function ClassListTab({ view, canEdit, setError, refreshKey }: { view: 'today' |
   const [filterDate, setFilterDate] = useState(''); // yyyy-mm-dd
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [bulkCancelling, setBulkCancelling] = useState(false);
+  const [cancelTarget, setCancelTarget] = useState<{ ids: string[]; label: string } | null>(null);
   const navigate = useNavigate();
 
   const load = useCallback(() => {
@@ -343,13 +344,7 @@ function ClassListTab({ view, canEdit, setError, refreshKey }: { view: 'today' |
       .catch((err) => setError(errMsg(err, 'Could not start the class.')));
   };
 
-  const cancel = (c: LiveClass) => {
-    const reason = window.prompt(`Cancel "${c.title}"? Enrolled students will be notified. Reason (optional):`);
-    if (reason === null) return;
-    api.post(`/api/live-classes/${c.id}/cancel`, { reason: reason || undefined })
-      .then(load)
-      .catch((err) => setError(errMsg(err, 'Could not cancel the class.')));
-  };
+  const cancel = (c: LiveClass) => setCancelTarget({ ids: [c.id], label: `"${c.title}"` });
 
   const toggleSelect = (id: string) => {
     setSelectedIds((prev) => {
@@ -361,18 +356,23 @@ function ClassListTab({ view, canEdit, setError, refreshKey }: { view: 'today' |
 
   const cancelSelected = () => {
     if (!selectedIds.size) return;
-    const reason = window.prompt(`Cancel ${selectedIds.size} selected class${selectedIds.size === 1 ? '' : 'es'}? Reason (optional):`);
-    if (reason === null) return;
+    setCancelTarget({ ids: Array.from(selectedIds), label: `${selectedIds.size} selected class${selectedIds.size === 1 ? '' : 'es'}` });
+  };
+
+  // Cancel = removed from every list; Holiday = stays visible, labelled Holiday.
+  const confirmCancel = (holiday: boolean, reason: string) => {
+    if (!cancelTarget) return;
     setBulkCancelling(true);
-    api.post('/api/live-classes/cancel-bulk', { ids: Array.from(selectedIds), reason: reason || undefined })
+    api.post('/api/live-classes/cancel-bulk', { ids: cancelTarget.ids, reason: reason || undefined, holiday })
       .then((r) => {
         const results = r.data.data.results as { id: string; status: 'cancelled' | 'error'; message?: string }[];
         const failed = results.filter((x) => x.status === 'error');
-        if (failed.length) setError(`${results.length - failed.length} cancelled, ${failed.length} could not be cancelled (${failed[0].message}${failed.length > 1 ? ', ...' : ''}).`);
+        if (failed.length) setError(`${results.length - failed.length} done, ${failed.length} could not be updated (${failed[0].message}${failed.length > 1 ? ', ...' : ''}).`);
         setSelectedIds(new Set());
+        setCancelTarget(null);
         load();
       })
-      .catch((err) => setError(errMsg(err, 'Could not cancel the selected classes.')))
+      .catch((err) => setError(errMsg(err, 'Could not update the selected classes.')))
       .finally(() => setBulkCancelling(false));
   };
 
@@ -446,7 +446,7 @@ function ClassListTab({ view, canEdit, setError, refreshKey }: { view: 'today' |
           <div className="flex gap-2">
             <button onClick={() => setSelectedIds(new Set())} className="px-3 py-1.5 text-xs rounded-lg border">Clear</button>
             <button onClick={cancelSelected} disabled={bulkCancelling} className="px-3 py-1.5 text-xs rounded-lg bg-red-600 text-white font-medium disabled:opacity-50">
-              {bulkCancelling ? 'Cancelling...' : 'Cancel Selected'}
+              {bulkCancelling ? 'Working...' : 'Cancel / Holiday'}
             </button>
           </div>
         </div>
@@ -468,13 +468,13 @@ function ClassListTab({ view, canEdit, setError, refreshKey }: { view: 'today' |
                 <p className="text-xs text-muted-foreground">{c.schedule.batch.code}</p>
               </div>
             </div>
-            <span className={`text-xs font-medium px-2 py-0.5 rounded-full whitespace-nowrap ${STATUS_BADGE[c.status]}`}>{c.status}</span>
+            <span className={`text-xs font-medium px-2 py-0.5 rounded-full whitespace-nowrap ${c.status === 'CANCELLED' && c.isHoliday ? 'bg-amber-50 text-amber-700' : STATUS_BADGE[c.status]}`}>{statusLabel(c)}</span>
           </div>
           <p className="text-sm">{c.title}{c.topic ? <span className="text-muted-foreground"> — {c.topic}</span> : null}</p>
           <p className="text-xs text-muted-foreground">Trainer: {trainerNames(c)}</p>
           <p className="text-xs text-muted-foreground flex items-center gap-1"><Clock className="w-3 h-3" /> {formatClassDate(c.scheduledDate)} · {formatTimeRange(c.startTime, c.endTime)}</p>
           <p className="text-xs text-muted-foreground flex items-center gap-1"><GraduationCap className="w-3 h-3" /> {c.schedule._count?.enrollments ?? 0} students enrolled</p>
-          {c.status === 'CANCELLED' && c.cancelReason && <p className="text-xs text-red-600">Reason: {c.cancelReason}</p>}
+          {c.status === 'CANCELLED' && c.cancelReason && <p className="text-xs text-amber-700">Holiday: {c.cancelReason}</p>}
 
           <div className="flex gap-2 pt-1">
             {c.status === 'LIVE' && (
@@ -510,6 +510,7 @@ function ClassListTab({ view, canEdit, setError, refreshKey }: { view: 'today' |
       </div>
       )}
       {attendanceFor && <AttendanceModal liveClass={attendanceFor} onClose={() => setAttendanceFor(null)} setError={setError} />}
+      {cancelTarget && <CancelClassModal label={cancelTarget.label} busy={bulkCancelling} onClose={() => setCancelTarget(null)} onConfirm={confirmCancel} />}
       {reportFor && <MeetingReportModal liveClass={reportFor} onClose={() => setReportFor(null)} setError={setError} />}
       {recordingsFor && <RecordingsModal liveClass={recordingsFor} onClose={() => setRecordingsFor(null)} setError={setError} />}
     </div>
@@ -575,6 +576,33 @@ function SummaryTab({ setError, refreshKey }: { setError: (s: string) => void; r
 }
 
 // ── Recordings modal (staff + student, same component) ──────────────────────
+function CancelClassModal({ label, busy, onClose, onConfirm }: { label: string; busy: boolean; onClose: () => void; onConfirm: (holiday: boolean, reason: string) => void }) {
+  const [kind, setKind] = useState<'cancel' | 'holiday'>('cancel');
+  const [reason, setReason] = useState('');
+  return (
+    <Modal title="Cancel or mark as Holiday" onClose={onClose}>
+      <p className="text-sm text-muted-foreground">{label}</p>
+      <label className={`flex items-start gap-2 border rounded-lg px-3 py-2 cursor-pointer ${kind === 'cancel' ? 'border-red-400 bg-red-50' : ''}`}>
+        <input type="radio" className="mt-1" checked={kind === 'cancel'} onChange={() => setKind('cancel')} />
+        <span className="text-sm"><b>Cancel</b><span className="block text-xs text-muted-foreground">Removed from every list — staff and students no longer see it.</span></span>
+      </label>
+      <label className={`flex items-start gap-2 border rounded-lg px-3 py-2 cursor-pointer ${kind === 'holiday' ? 'border-amber-400 bg-amber-50' : ''}`}>
+        <input type="radio" className="mt-1" checked={kind === 'holiday'} onChange={() => setKind('holiday')} />
+        <span className="text-sm"><b>Mark as Holiday</b><span className="block text-xs text-muted-foreground">Stays visible, labelled "Holiday" (with the reason), so everyone knows there's no class that day.</span></span>
+      </label>
+      <Field label={kind === 'holiday' ? 'Holiday name / reason' : 'Reason (optional)'}>
+        <input className={inputCls} value={reason} onChange={(e) => setReason(e.target.value)} placeholder={kind === 'holiday' ? 'e.g. Diwali' : ''} />
+      </Field>
+      <div className="flex justify-end gap-2">
+        <button onClick={onClose} className="px-3 py-2 text-sm rounded-lg border">Back</button>
+        <button onClick={() => onConfirm(kind === 'holiday', reason)} disabled={busy} className={`px-4 py-2 text-sm rounded-lg text-white font-medium disabled:opacity-50 ${kind === 'holiday' ? 'bg-amber-600' : 'bg-red-600'}`}>
+          {busy ? 'Saving...' : kind === 'holiday' ? 'Mark Holiday' : 'Cancel Class'}
+        </button>
+      </div>
+    </Modal>
+  );
+}
+
 interface MeetingReport {
   class: { title: string; status: string; scheduledDate: string; startTime: string; endTime: string; actualStartAt: string | null; actualEndAt: string | null; course: string; batch: string; subBatch: string | null };
   summary: { durationSec: number; participantCount: number; avgSec: number };

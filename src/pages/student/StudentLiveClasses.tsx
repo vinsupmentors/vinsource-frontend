@@ -5,7 +5,7 @@ import RecordingVideoPlayer from '@/components/ProtectedVideoPlayer';
 import {
   LiveClass, LiveClassDashboard, STATUS_BADGE, ATTENDANCE_BADGE, LiveClassAttendanceResponse,
   LiveClassRecordingRecord, LiveClassPlaybackUrl, RECORDING_BADGE, formatDuration,
-  formatTimeRange, formatClassDate, errMsg, trainerNames,
+  formatTimeRange, formatClassDate, errMsg, trainerNames, statusLabel,
 } from '@/lib/liveClasses';
 import { Radio, Clock, CalendarClock, CheckCircle2, Loader2, X, Film, PlayCircle } from 'lucide-react';
 
@@ -121,12 +121,12 @@ function ClassList({ view, setError }: { view: Tab; setError: (s: string) => voi
         <div key={c.id} className="border rounded-xl p-4 space-y-2">
           <div className="flex items-start justify-between gap-2">
             <p className="font-semibold text-sm">{c.schedule.course.name}</p>
-            <span className={`text-xs font-medium px-2 py-0.5 rounded-full whitespace-nowrap ${STATUS_BADGE[c.status]}`}>{c.status}</span>
+            <span className={`text-xs font-medium px-2 py-0.5 rounded-full whitespace-nowrap ${c.status === 'CANCELLED' && c.isHoliday ? 'bg-amber-50 text-amber-700' : STATUS_BADGE[c.status]}`}>{statusLabel(c)}</span>
           </div>
           <p className="text-sm">{c.title}{c.topic ? <span className="text-muted-foreground"> — {c.topic}</span> : null}</p>
           <p className="text-xs text-muted-foreground">Trainer: {trainerNames(c)}</p>
           <p className="text-xs text-muted-foreground flex items-center gap-1"><Clock className="w-3 h-3" /> {formatClassDate(c.scheduledDate)} · {formatTimeRange(c.startTime, c.endTime)}</p>
-          {c.status === 'CANCELLED' && c.cancelReason && <p className="text-xs text-red-600">Cancelled: {c.cancelReason}</p>}
+          {c.status === 'CANCELLED' && c.cancelReason && <p className="text-xs text-amber-700">Holiday: {c.cancelReason}</p>}
 
           <div className="pt-1">
             {c.status === 'LIVE' && (

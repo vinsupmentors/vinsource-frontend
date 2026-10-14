@@ -38,6 +38,7 @@ export interface LiveClass {
   actualEndAt: string | null;
   status: LiveClassStatus;
   cancelReason: string | null;
+  isHoliday?: boolean; // a CANCELLED class flagged as a Holiday (plain cancellations are never listed)
   rescheduledFrom: string | null;
   createdBy: { firstName: string; lastName: string } | null;
   schedule: LiveClassScheduleInfo;
@@ -100,6 +101,11 @@ export function dayPatternLabel(s: Pick<ScheduleOption, 'dayPattern' | 'customWe
   if (!s.customWeekdays) return 'Custom days (none set)';
   const days = WEEKDAY_LABELS.filter((_, i) => (s.customWeekdays! & (1 << i)) !== 0);
   return days.length ? days.join(', ') : 'Custom days (none set)';
+}
+
+/** Label for the status chip: a cancelled Holiday reads "HOLIDAY". */
+export function statusLabel(c: { status: string; isHoliday?: boolean }): string {
+  return c.status === 'CANCELLED' && c.isHoliday ? 'HOLIDAY' : c.status;
 }
 
 export const STATUS_BADGE: Record<LiveClassStatus, string> = {
