@@ -131,7 +131,7 @@ export default function LiveClassroom() {
         audio={choices.audioEnabled}
         options={roomOptionsFrom(choices)}
         data-lk-theme="default"
-        style={{ height: '100vh' }}
+        style={{ height: '100dvh', display: 'flex', flexDirection: 'column' }}
         onDisconnected={() => { if (id) api.post(`/api/live-classes/${id}/leave`).catch(() => {}); }}
         onConnected={() => setConnected(true)}
       >
@@ -143,7 +143,10 @@ export default function LiveClassroom() {
           onLeave={() => { navigate(-1); }}
           connected={connected}
         />
-        <VideoConference />
+        {/* Room sits BELOW the top bar (not under it) so the top of a shared screen is never covered. */}
+        <div style={{ flex: '1 1 0', minHeight: 0, position: 'relative' }}>
+          <VideoConference style={{ height: '100%' }} />
+        </div>
       </LiveKitRoom>
     );
   }
@@ -289,7 +292,7 @@ function ClassroomChrome({ liveClass, canHost, onEnd, onLeave }: { liveClass: Li
   const myRole = parseRole(localParticipant.metadata);
 
   return (
-    <div className="absolute top-0 left-0 right-0 z-[60] flex items-center justify-between px-4 py-2 bg-black/60 backdrop-blur-sm text-white text-sm">
+    <div className="relative flex-shrink-0 z-[60] flex items-center justify-between px-4 py-2 bg-black/60 backdrop-blur-sm text-white text-sm">
       <div className="flex items-center gap-3 min-w-0">
         <span className="inline-flex items-center gap-1 text-xs font-bold text-red-400"><span className="w-2 h-2 rounded-full bg-red-500 animate-pulse" /> LIVE</span>
         <span className="font-medium truncate">{liveClass.title}</span>
