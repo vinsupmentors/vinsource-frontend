@@ -314,6 +314,19 @@ function localYmd(iso: string): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 }
 
+/** Session bucket from the class's clock times: Full Day = runs 6+ hours; otherwise by start — before 12:00 Morning, 12:00–4:59 PM Afternoon, 5 PM onward Evening. */
+const SESSION_OPTIONS = ['Morning', 'Afternoon', 'Evening', 'Full Day'] as const;
+function sessionOf(startTime: string, endTime: string): (typeof SESSION_OPTIONS)[number] {
+  const mins = (t: string) => { const [h, m] = t.split(':').map(Number); return h * 60 + (m || 0); };
+  const start = mins(startTime);
+  let end = mins(endTime);
+  if (end <= start) end += 24 * 60; // crosses midnight
+  if (end - start >= 6 * 60) return 'Full Day';
+  if (start < 12 * 60) return 'Morning';
+  if (start < 17 * 60) return 'Afternoon';
+  return 'Evening';
+}
+
 function ClassListTab({ view, canEdit, setError, refreshKey }: { view: 'today' | 'upcoming' | 'completed'; canEdit: boolean; setError: (s: string) => void; refreshKey: number }) {
   const [classes, setClasses] = useState<LiveClass[] | null>(null);
   const [attendanceFor, setAttendanceFor] = useState<LiveClass | null>(null);
@@ -392,12 +405,12 @@ function ClassListTab({ view, canEdit, setError, refreshKey }: { view: 'today' |
   // whatever this person can already see (their own batches, if not admin).
   const batchOptions = Array.from(new Set(classes.map((c) => c.schedule.batch.code))).sort();
   const courseOptions = Array.from(new Set(classes.map((c) => c.schedule.course.name))).sort();
-  const sessionOptions = Array.from(new Set(classes.map((c) => formatTimeRange(c.startTime, c.endTime)))).sort();
+  const sessionOptions = SESSION_OPTIONS.filter((o) => classes.some((c) => sessionOf(c.startTime, c.endTime) === o));
 
   const filtered = classes.filter((c) =>
     (!filterBatch || c.schedule.batch.code === filterBatch) &&
     (!filterCourse || c.schedule.course.name === filterCourse) &&
-    (!filterSession || formatTimeRange(c.startTime, c.endTime) === filterSession) &&
+    (!filterSession || sessionOf(c.startTime, c.endTime) === filterSession) &&
     (!filterMonth || localYmd(c.scheduledDate).startsWith(filterMonth)) &&
     (!filterDate || localYmd(c.scheduledDate) === filterDate)
   );
