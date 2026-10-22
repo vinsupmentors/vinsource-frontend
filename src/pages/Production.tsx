@@ -196,8 +196,8 @@ function errMsg(err: unknown, fallback: string) {
   return e.response?.data?.message || fallback;
 }
 
-type Tab = 'courses' | 'batches' | 'students' | 'content' | 'placement-training' | 'portfolios' | 'reports' | 'deletion-requests' | 'device-requests';
-const VALID_TABS: Tab[] = ['courses', 'batches', 'students', 'content', 'placement-training', 'portfolios', 'reports', 'deletion-requests', 'device-requests'];
+type Tab = 'courses' | 'batches' | 'students' | 'content' | 'placement-training' | 'portfolios' | 'reports' | 'deletion-requests' | 'device-requests' | 'double-enrollments';
+const VALID_TABS: Tab[] = ['courses', 'batches', 'students', 'content', 'placement-training', 'portfolios', 'reports', 'deletion-requests', 'device-requests', 'double-enrollments'];
 const TABS: { id: Tab; label: string; icon: React.ComponentType<{ className?: string }> }[] = [
   { id: 'courses', label: 'Courses', icon: BookOpen },
   { id: 'batches', label: 'Batches & Schedules', icon: CalendarRange },
@@ -215,6 +215,9 @@ const DELETION_REQUESTS_TAB: { id: Tab; label: string; icon: React.ComponentType
 const DEVICE_REQUESTS_TAB: { id: Tab; label: string; icon: React.ComponentType<{ className?: string }> } =
   { id: 'device-requests', label: 'Device Requests', icon: Smartphone };
 
+const DOUBLE_ENROLL_TAB: { id: Tab; label: string; icon: React.ComponentType<{ className?: string }> } =
+  { id: 'double-enrollments', label: 'Double Enrollments', icon: Users };
+
 export default function ProductionPage() {
   const { modules, loaded, hasModule } = useModuleAccess();
   const level = modules.PRODUCTION_TRAINING;
@@ -223,7 +226,7 @@ export default function ProductionPage() {
   // Who can approve/reject student deletion requests — kept in sync with the
   // requireRole(...) list on the approve-delete/cancel-delete-request routes.
   const canApproveDeletions = role === 'ADMIN' || role === 'SUPER_ADMIN' || role === 'MANAGER';
-  const visibleTabs = canApproveDeletions ? [...TABS, DELETION_REQUESTS_TAB, DEVICE_REQUESTS_TAB] : TABS;
+  const visibleTabs = canApproveDeletions ? [...TABS, DOUBLE_ENROLL_TAB, DELETION_REQUESTS_TAB, DEVICE_REQUESTS_TAB] : TABS;
 
   const [searchParams, setSearchParams] = useSearchParams();
   const tabFromUrl = searchParams.get('tab') as Tab | null;
@@ -314,7 +317,7 @@ export default function ProductionPage() {
           <h1 className="text-2xl font-bold">Production (Training)</h1>
           <p className="text-muted-foreground text-sm">Courses, batches, trainers, and student tracks (JRP / IOP / PAP)</p>
         </div>
-        {canEdit && tab !== 'content' && tab !== 'placement-training' && tab !== 'reports' && tab !== 'portfolios' && tab !== 'deletion-requests' && (
+        {canEdit && tab !== 'content' && tab !== 'placement-training' && tab !== 'reports' && tab !== 'portfolios' && tab !== 'deletion-requests' && tab !== 'double-enrollments' && tab !== 'device-requests' && (
           <button
             onClick={() => (tab === 'courses' ? setShowAddCourse(true) : tab === 'batches' ? setShowAddBatch(true) : setShowAddStudent(true))}
             className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700"
@@ -368,6 +371,8 @@ export default function ProductionPage() {
         <DeletionRequestsTab setError={setError} />
       ) : tab === 'device-requests' ? (
         <DeviceRequestsTab setError={setError} />
+      ) : tab === 'double-enrollments' ? (
+        <DoubleEnrollmentsTab setError={setError} />
       ) : (
         <StudentsTab
           canEdit={canEdit}
@@ -1008,7 +1013,7 @@ function AddScheduleModal({ batchId, employees, onClose, setError, onSaved }: {
     setSaving(true);
     setError('');
     try {
-      await api.post(`/api/production/batches/${batchId}/schedules`, {
+      const res = await api.post(`/api/production/batches/${batchId}/schedules`, {
         ...form,
         endDate: form.endDate || undefined,
         capacity: form.capacity || undefined,
@@ -1017,6 +1022,7 @@ function AddScheduleModal({ batchId, employees, onClose, setError, onSaved }: {
         trainerIds,
         studentIds,
       });
+      if (res.data?.pendingApproval > 0) window.alert(`${res.data.pendingApproval} student(s) are already in another course and were NOT added yet — a double-enrollment request was sent to the Production Manager.`);
       onSaved();
     } catch (err) { setError(errMsg(err, 'Failed to add sub-batch')); } finally { setSaving(false); }
   };
@@ -1123,7 +1129,7 @@ function AddStudentsToScheduleModal({ scheduleId, courseName, onClose, setError,
   const [studentSearch, setStudentSearch] = useState('');
   const [studentIds, setStudentIds] = useState<string[]>([]);
   const [saving, setSaving] = useState(false);
-  const [result, setResult] = useState<{ enrolled: number; alreadyEnrolled: number; total: number } | null>(null);
+  const [result, setResult] = useState<{ enrolled: number; alreadyEnrolled: number; pendingApproval?: number; total: number } | null>(null);
 
   useEffect(() => {
     api.get('/api/production/students', { params: { pageSize: 500 } }).then((res) => {
@@ -1166,6 +1172,7 @@ function AddStudentsToScheduleModal({ scheduleId, courseName, onClose, setError,
         <div className="space-y-2 text-sm">
           <p>{result.enrolled} student(s) added to {courseName}.</p>
           {result.alreadyEnrolled > 0 && <p className="text-muted-foreground">{result.alreadyEnrolled} were already enrolled and were skipped.</p>}
+          {!!result.pendingApproval && <p className="text-amber-700">{result.pendingApproval} already in another course — sent to the Production Manager for double-enrollment approval.</p>}
         </div>
         <div className="flex justify-end pt-2">
           <button onClick={() => onSaved()} className="px-4 py-2 text-sm rounded-lg bg-blue-600 text-white">Done</button>
@@ -1360,7 +1367,11 @@ function StudentsTab({ canEdit, setError, refresh, refreshKey, batches, onEnroll
   };
 
   const updateEnrollment = async (id: string, status: EnrollmentStatus) => {
-    try { await api.put(`/api/production/enrollments/${id}`, { status }); fetchStudents(); }
+    try {
+      const res = await api.put(`/api/production/enrollments/${id}`, { status });
+      if (res.data?.data?.pendingApproval) window.alert(res.data.message || 'Sent to the Production Manager for double-enrollment approval.');
+      fetchStudents();
+    }
     catch (err) { setError(errMsg(err, 'Failed to update enrollment')); }
   };
 
@@ -1887,11 +1898,12 @@ function EditStudentModal({ student, batches, onClose, setError, onSaved }: {
         // additional concurrent enrollment — it retires the old enrollment
         // (status -> DROPPED) in the same transaction, so the student portal
         // only ever shows the new batch/trainer, not both.
-        await api.post('/api/production/enrollments', {
+        const mv = await api.post('/api/production/enrollments', {
           studentId: student.id,
           scheduleId: newScheduleId,
           previousEnrollmentId: currentEnrollment?.status === 'ACTIVE' ? currentEnrollment.id : undefined,
         });
+        if (mv.data?.data?.pendingApproval) window.alert(mv.data.message || 'Sent to the Production Manager for double-enrollment approval.');
       }
       onSaved();
     } catch (err) { setError(errMsg(err, 'Failed to update student')); } finally { setSaving(false); }
@@ -2067,6 +2079,97 @@ function DeviceRequestsTab({ setError }: { setError: (s: string) => void }) {
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+interface DoubleEnrollRow {
+  id: string; status: 'PENDING' | 'APPROVED' | 'REJECTED'; reason: string | null; createdAt: string; reviewedAt: string | null; reviewNote: string | null;
+  student: {
+    id: string; firstName: string; lastName: string; studentCode: string; track: string; phone: string;
+    enrollments: { id: string; status: string; schedule: { course: { name: string }; batch: { code: string } } }[];
+  };
+  schedule: { course: { name: string }; batch: { code: string }; timing: string };
+  requestedBy: { firstName: string; lastName: string } | null;
+  reviewedBy: { firstName: string; lastName: string } | null;
+}
+
+/** Production Manager's second check on a student being enrolled in two courses at once. */
+function DoubleEnrollmentsTab({ setError }: { setError: (s: string) => void }) {
+  const [view, setView] = useState<'PENDING' | 'ALL'>('PENDING');
+  const [rows, setRows] = useState<DoubleEnrollRow[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [busyId, setBusyId] = useState<string | null>(null);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      const res = await api.get('/api/production/double-enrollments', { params: { status: view } });
+      setRows(res.data.data);
+    } catch (err) { setError(errMsg(err, 'Failed to load double-enrollment requests')); }
+    finally { setLoading(false); }
+  }, [view, setError]);
+  useEffect(() => { load(); }, [load]);
+
+  const act = async (r: DoubleEnrollRow, kind: 'approve' | 'reject') => {
+    const name = `${r.student.firstName} ${r.student.lastName}`;
+    const note = kind === 'reject' ? window.prompt(`Reject ${name}'s second enrollment? Optional note:`) : '';
+    if (kind === 'reject' && note === null) return;
+    if (kind === 'approve' && !window.confirm(`Approve ${name} (${r.student.studentCode}) being enrolled in ${r.schedule.course.name} · ${r.schedule.batch.code} while still in their current course?`)) return;
+    setBusyId(r.id);
+    try {
+      await api.post(`/api/production/double-enrollments/${r.id}/${kind}`, { note: note || undefined });
+      load();
+    } catch (err) { setError(errMsg(err, `Could not ${kind}`)); }
+    finally { setBusyId(null); }
+  };
+
+  return (
+    <div className="space-y-4">
+      <p className="text-xs text-muted-foreground">
+        A student already in one course cannot be added to a second one directly. The attempt lands here, and the student is enrolled
+        only after a Production Manager / Admin approves it.
+      </p>
+      <div className="flex gap-2 text-sm">
+        <button onClick={() => setView('PENDING')} className={`px-3 py-1 rounded-lg border ${view === 'PENDING' ? 'bg-blue-600 text-white border-blue-600' : ''}`}>Pending</button>
+        <button onClick={() => setView('ALL')} className={`px-3 py-1 rounded-lg border ${view === 'ALL' ? 'bg-blue-600 text-white border-blue-600' : ''}`}>All history</button>
+      </div>
+      {loading ? <div className="text-center text-muted-foreground py-8">Loading...</div>
+        : rows.length === 0 ? <div className="text-center text-muted-foreground py-8 text-sm">No {view === 'PENDING' ? 'pending ' : ''}double-enrollment requests.</div>
+          : rows.map((r) => (
+            <div key={r.id} className="bg-card border rounded-xl p-4 space-y-2">
+              <div className="flex items-center justify-between flex-wrap gap-2">
+                <div>
+                  <p className="font-medium">{r.student.firstName} {r.student.lastName} <span className="text-xs text-muted-foreground">({r.student.studentCode} · {r.student.track})</span></p>
+                  <p className="text-xs text-muted-foreground">{r.student.phone}</p>
+                </div>
+                <span className={`text-xs px-2 py-1 rounded-full ${r.status === 'PENDING' ? 'bg-amber-100 text-amber-700' : r.status === 'APPROVED' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>{r.status}</span>
+              </div>
+              <div className="text-sm grid sm:grid-cols-2 gap-2">
+                <div className="border rounded-lg p-2 bg-muted/20">
+                  <p className="text-xs text-muted-foreground">Currently in</p>
+                  {r.student.enrollments.length === 0 ? <p>—</p> : r.student.enrollments.map((e) => (
+                    <p key={e.id}>{e.schedule.course.name} · {e.schedule.batch.code} <span className="text-xs text-muted-foreground">({e.status})</span></p>
+                  ))}
+                </div>
+                <div className="border rounded-lg p-2 bg-amber-50">
+                  <p className="text-xs text-muted-foreground">Requested to ALSO join</p>
+                  <p className="font-medium">{r.schedule.course.name} · {r.schedule.batch.code} <span className="text-xs text-muted-foreground">({r.schedule.timing})</span></p>
+                </div>
+              </div>
+              <p className="text-xs text-muted-foreground">
+                Requested {formatDateTime(r.createdAt)}{r.requestedBy ? ` by ${r.requestedBy.firstName} ${r.requestedBy.lastName}` : ''}
+                {r.reason ? ` · Reason: ${r.reason}` : ''}
+                {r.status !== 'PENDING' && r.reviewedAt ? ` · ${r.status === 'APPROVED' ? 'Approved' : 'Rejected'} ${formatDateTime(r.reviewedAt)}${r.reviewedBy ? ` by ${r.reviewedBy.firstName} ${r.reviewedBy.lastName}` : ''}${r.reviewNote ? ` — ${r.reviewNote}` : ''}` : ''}
+              </p>
+              {r.status === 'PENDING' && (
+                <div className="flex gap-2 pt-1">
+                  <button onClick={() => act(r, 'approve')} disabled={busyId === r.id} className="text-xs px-3 py-1.5 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50">Approve enrollment</button>
+                  <button onClick={() => act(r, 'reject')} disabled={busyId === r.id} className="text-xs px-3 py-1.5 border rounded-lg hover:bg-muted/50 disabled:opacity-50">Reject</button>
+                </div>
+              )}
+            </div>
+          ))}
     </div>
   );
 }
@@ -2484,7 +2587,8 @@ function EnrollStudentModal({ onClose, setError, onSaved }: {
     setSaving(true);
     setError('');
     try {
-      await api.post('/api/production/enrollments', { studentId, scheduleId });
+      const res = await api.post('/api/production/enrollments', { studentId, scheduleId });
+      if (res.data?.data?.pendingApproval) window.alert(res.data.message || 'Sent to the Production Manager for double-enrollment approval.');
       onSaved();
     } catch (err) { setError(errMsg(err, 'Failed to enroll student')); } finally { setSaving(false); }
   };
@@ -2521,7 +2625,7 @@ function BulkEnrollModal({ onClose, setError, onSaved }: {
   const [scheduleId, setScheduleId] = useState('');
   const [studentIds, setStudentIds] = useState<string[]>([]);
   const [saving, setSaving] = useState(false);
-  const [result, setResult] = useState<{ enrolled: number; alreadyEnrolled: number; total: number } | null>(null);
+  const [result, setResult] = useState<{ enrolled: number; alreadyEnrolled: number; pendingApproval?: number; total: number } | null>(null);
 
   useEffect(() => { api.get('/api/production/batches').then((res) => setBatches(res.data.data)).catch(() => setBatches([])); }, []);
   useEffect(() => {
@@ -2562,6 +2666,7 @@ function BulkEnrollModal({ onClose, setError, onSaved }: {
         <div className="space-y-2 text-sm">
           <p>{result.enrolled} student(s) enrolled.</p>
           {result.alreadyEnrolled > 0 && <p className="text-muted-foreground">{result.alreadyEnrolled} were already enrolled in this schedule and were skipped.</p>}
+          {!!result.pendingApproval && <p className="text-amber-700">{result.pendingApproval} already in another course — sent to the Production Manager for double-enrollment approval.</p>}
         </div>
         <div className="flex justify-end pt-2">
           <button onClick={() => onSaved()} className="px-4 py-2 text-sm rounded-lg bg-blue-600 text-white">Done</button>
