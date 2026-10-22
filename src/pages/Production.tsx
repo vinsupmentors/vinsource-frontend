@@ -5185,6 +5185,7 @@ function ComfortRankCardModal({ row, modules, onClose }: { row: ComfortRow; modu
 
 function ComfortReportPanel({ setError }: { setError: (s: string) => void }) {
   const [rankRow, setRankRow] = useState<ComfortRow | null>(null);
+  const [search, setSearch] = useState('');
   const [rows, setRows] = useState<ComfortRow[]>([]);
   const [modules, setModules] = useState<ComfortModule[]>([]);
   const [loading, setLoading] = useState(true);
@@ -5208,7 +5209,23 @@ function ComfortReportPanel({ setError }: { setError: (s: string) => void }) {
   }, [filters, session, setError]);
 
   // Track filter is applied client-side (the endpoint has no track param).
-  const baseRows = useMemo(() => (filters.track ? rows.filter((r) => r.track === filters.track) : rows), [rows, filters.track]);
+  const baseRows = useMemo(() => {
+    let out = filters.track ? rows.filter((r) => r.track === filters.track) : rows;
+    const q = search.trim().toLowerCase();
+    if (q) {
+      const digits = q.replace(/\D/g, '');
+      out = out.filter((r) =>
+        r.studentCode.toLowerCase().includes(q)
+        || r.studentName.toLowerCase().includes(q)
+        || (r.email || '').toLowerCase().includes(q)
+        || (digits.length >= 3 && (r.phone || '').replace(/\D/g, '').includes(digits))
+        || (r.phone || '').toLowerCase().includes(q)
+        || r.batchCode.toLowerCase().includes(q)
+        || r.courseName.toLowerCase().includes(q)
+        || r.trainers.toLowerCase().includes(q));
+    }
+    return out;
+  }, [rows, filters.track, search]);
 
   // Module marks only make sense when the rows are all one course.
   const courseIdsInRows = useMemo(() => Array.from(new Set(baseRows.map((r) => r.courseId))), [baseRows]);
@@ -5280,6 +5297,12 @@ function ComfortReportPanel({ setError }: { setError: (s: string) => void }) {
   return (
     <div className="space-y-3">
       {rankRow && <ComfortRankCardModal row={rankRow} modules={modules} onClose={() => setRankRow(null)} />}
+      <input
+        value={search}
+        onChange={(e) => setSearch(e.target.value)}
+        placeholder="Search by student ID, name, phone number, email…"
+        className="w-full max-w-md border rounded-lg px-3 py-2 text-sm"
+      />
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="flex flex-wrap items-center gap-2">
           <ReportFilterBar filters={filters} onChange={setFilters} showTrainer />
