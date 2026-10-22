@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import api, { BASE_URL } from '@/lib/api';
 import { formatDate, formatDateTime } from '@/lib/utils';
 import { useToast } from '@/components/ui/toaster';
@@ -678,6 +678,58 @@ const STUDENT_STATUS_LABEL: Record<FeedbackStudentStatus, string> = {
 
 interface PresentationInfo { presentationDone: boolean; presentationAt?: string | null; presentationPhotos?: string[] | null }
 
+/** Live camera capture (getUserMedia) — returns a JPEG File per shot; stays open so several photos can be taken. */
+function CameraCapture({ onCapture, onClose }: { onCapture: (f: File) => void; onClose: () => void }) {
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const streamRef = useRef<MediaStream | null>(null);
+  const [err, setErr] = useState('');
+  const [shots, setShots] = useState(0);
+
+  useEffect(() => {
+    let cancelled = false;
+    navigator.mediaDevices?.getUserMedia({ video: { facingMode: 'environment' }, audio: false })
+      .then((s) => {
+        if (cancelled) { s.getTracks().forEach((t) => t.stop()); return; }
+        streamRef.current = s;
+        if (videoRef.current) { videoRef.current.srcObject = s; videoRef.current.play().catch(() => {}); }
+      })
+      .catch(() => setErr('Could not open the camera. Allow camera access in the browser, or use "Attach photos" instead.'));
+    return () => { cancelled = true; streamRef.current?.getTracks().forEach((t) => t.stop()); };
+  }, []);
+
+  const snap = () => {
+    const v = videoRef.current;
+    if (!v || !v.videoWidth) return;
+    const c = document.createElement('canvas');
+    c.width = v.videoWidth; c.height = v.videoHeight;
+    c.getContext('2d')!.drawImage(v, 0, 0);
+    c.toBlob((b) => {
+      if (!b) return;
+      onCapture(new File([b], `presentation_${Date.now()}.jpg`, { type: 'image/jpeg' }));
+      setShots((n) => n + 1);
+    }, 'image/jpeg', 0.9);
+  };
+
+  return (
+    <div className="fixed inset-0 z-[100] bg-black/70 flex items-center justify-center p-4">
+      <div className="bg-card rounded-xl p-4 w-full max-w-xl space-y-3">
+        <div className="flex items-center justify-between">
+          <p className="text-sm font-semibold">Take live photos</p>
+          <button onClick={onClose} className="p-1 rounded hover:bg-muted"><X className="w-4 h-4" /></button>
+        </div>
+        {err ? <p className="text-sm text-red-600">{err}</p> : <video ref={videoRef} playsInline muted className="w-full rounded-lg bg-black max-h-[60vh]" />}
+        <div className="flex items-center justify-between">
+          <span className="text-xs text-muted-foreground">{shots} photo{shots === 1 ? '' : 's'} taken</span>
+          <div className="flex gap-2">
+            <button onClick={snap} disabled={!!err} className="px-3 py-1.5 rounded-lg bg-blue-600 text-white text-xs font-medium disabled:opacity-50">Capture</button>
+            <button onClick={onClose} className="px-3 py-1.5 rounded-lg border text-xs font-medium">Done</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 /** Project presentation proof: date + exactly two photos. Required before certificate eligibility / IOP / placement. */
 function PresentationBlock({ studentId, courseId, info, onDone }: {
   studentId: string; courseId: string; info: PresentationInfo | undefined; onDone: (p: PresentationInfo) => void;
@@ -687,11 +739,14 @@ function PresentationBlock({ studentId, courseId, info, onDone }: {
   const [files, setFiles] = useState<File[]>([]);
   const [busy, setBusy] = useState(false);
   const [redo, setRedo] = useState(false);
+  const [camera, setCamera] = useState(false);
+  const MAX_PHOTOS = 6;
+  const addFiles = (list: File[]) => setFiles((prev) => [...prev, ...list].slice(0, MAX_PHOTOS));
   const done = !!info?.presentationDone;
   const photoHref = (u: string) => (u.startsWith('http') ? u : `${BASE_URL}${u}`);
 
   const submit = async () => {
-    if (files.length !== 2) { toast({ title: 'Select exactly 2 photos', variant: 'error' }); return; }
+    if (files.length < 2) { toast({ title: 'Add at least 2 photos', variant: 'error' }); return; }
     setBusy(true);
     try {
       const fd = new FormData();
@@ -713,7 +768,7 @@ function PresentationBlock({ studentId, courseId, info, onDone }: {
       <div className="flex items-center justify-between gap-2 flex-wrap">
         <p className="text-xs font-semibold">
           {done ? <span className="text-green-700 flex items-center gap-1"><CheckCircle2 className="w-3.5 h-3.5" /> Project presentation completed{info?.presentationAt ? ` · ${formatDate(info.presentationAt)}` : ''}</span>
-            : <span className="text-amber-800">Project presentation pending — upload 2 photos to unlock certificate eligibility &amp; placement</span>}
+            : <span className="text-amber-800">Project presentation pending — add at least 2 photos (attach or take live) to unlock certificate eligibility &amp; placement</span>}
         </p>
         {done && !redo && <button onClick={() => setRedo(true)} className="text-xs text-blue-600">Replace photos</button>}
       </div>
@@ -731,14 +786,35 @@ function PresentationBlock({ studentId, courseId, info, onDone }: {
             <input type="date" value={date} max={new Date().toISOString().slice(0, 10)} onChange={(e) => setDate(e.target.value)} className="px-2 py-1 rounded-md border bg-background text-xs" />
           </div>
           <div>
-            <label className="block text-[11px] text-muted-foreground mb-0.5">2 photos of the student presenting</label>
-            <input type="file" accept="image/png,image/jpeg,image/webp" multiple onChange={(e) => setFiles(Array.from(e.target.files || []).slice(0, 2))} className="text-xs" />
+            <label className="block text-[11px] text-muted-foreground mb-0.5">Photos of the student presenting (2 to {MAX_PHOTOS})</label>
+            <div className="flex items-center gap-2">
+              <label className="px-2.5 py-1.5 rounded-md border bg-background text-xs cursor-pointer hover:bg-muted">
+                Attach photos
+                <input type="file" accept="image/png,image/jpeg,image/webp" multiple className="hidden"
+                  onChange={(e) => { addFiles(Array.from(e.target.files || [])); e.target.value = ''; }} />
+              </label>
+              <button type="button" onClick={() => setCamera(true)} disabled={files.length >= MAX_PHOTOS} className="px-2.5 py-1.5 rounded-md border bg-background text-xs hover:bg-muted disabled:opacity-50">
+                Take live photo
+              </button>
+            </div>
           </div>
-          <button onClick={submit} disabled={busy || files.length !== 2} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-green-600 text-white text-xs font-medium hover:bg-green-700 disabled:opacity-50">
+          <button onClick={submit} disabled={busy || files.length < 2} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-green-600 text-white text-xs font-medium hover:bg-green-700 disabled:opacity-50">
             {busy ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <CheckCircle2 className="w-3.5 h-3.5" />} Mark presentation completed
           </button>
         </div>
       )}
+      {(!done || redo) && files.length > 0 && (
+        <div className="flex flex-wrap gap-2">
+          {files.map((f, i) => (
+            <div key={`${f.name}-${i}`} className="relative">
+              <img src={URL.createObjectURL(f)} alt="" className="h-16 w-24 object-cover rounded border" />
+              <button type="button" onClick={() => setFiles((p) => p.filter((_, j) => j !== i))} className="absolute -top-1.5 -right-1.5 bg-red-600 text-white rounded-full w-4 h-4 text-[10px] leading-4">×</button>
+            </div>
+          ))}
+          <span className="text-[11px] text-muted-foreground self-end">{files.length} selected</span>
+        </div>
+      )}
+      {camera && <CameraCapture onCapture={(f) => addFiles([f])} onClose={() => setCamera(false)} />}
     </div>
   );
 }
