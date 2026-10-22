@@ -5292,6 +5292,13 @@ function ComfortReportPanel({ setError }: { setError: (s: string) => void }) {
       : s === 'Long Leave' || s.startsWith('Inactive') ? 'bg-red-600 text-white'
         : s === 'Batch Transfer' ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-700';
   const photoHref = (u: string) => (u.startsWith('http') ? u : `${BASE_URL}${u}`);
+  // Freeze Student # and Student Name while scrolling sideways.
+  const FREEZE_ID_W = 96; const FREEZE_NAME_W = 190;
+  const freezeStyle = (key: string, head: boolean): React.CSSProperties | undefined => {
+    if (key === 'studentCode') return { position: 'sticky', left: 0, minWidth: FREEZE_ID_W, width: FREEZE_ID_W, maxWidth: FREEZE_ID_W, zIndex: head ? 40 : 10, background: head ? '#1e293b' : '#fff' };
+    if (key === 'studentName') return { position: 'sticky', left: FREEZE_ID_W, minWidth: FREEZE_NAME_W, width: FREEZE_NAME_W, maxWidth: FREEZE_NAME_W, zIndex: head ? 40 : 10, background: head ? '#1e293b' : '#fff', boxShadow: '2px 0 4px -1px rgba(0,0,0,0.25)' };
+    return undefined;
+  };
   const filteredCount = Object.values(colFilters).filter(Boolean).length;
 
   return (
@@ -5334,7 +5341,7 @@ function ComfortReportPanel({ setError }: { setError: (s: string) => void }) {
               <thead className="sticky top-0 z-20">
                 <tr className="bg-slate-800 text-white">
                   {cols.map((c) => (
-                    <th key={c.key} className="px-2 py-2 text-left font-semibold whitespace-nowrap border-r border-slate-600">
+                    <th key={c.key} style={freezeStyle(c.key, true)} className="px-2 py-2 text-left font-semibold whitespace-nowrap border-r border-slate-600">
                       <ColumnFilterHeader
                         label={c.label}
                         values={distinct[c.key] || []}
@@ -5363,7 +5370,7 @@ function ComfortReportPanel({ setError }: { setError: (s: string) => void }) {
                       if (c.key === 'presentation') content = <span className={`px-2 py-0.5 rounded ${r.presentationDone ? 'bg-green-100 text-green-800' : 'bg-amber-100 text-amber-800'}`}>{v}</span>;
                       if (c.key === 'trainerComments') cls = 'px-2 py-1 border-r min-w-[200px] max-w-[320px] whitespace-normal';
                       if (c.key === 'email') cls += ' max-w-[200px] truncate';
-                      return <td key={c.key} className={cls} title={c.key === 'email' ? v : undefined}>{content}</td>;
+                      return <td key={c.key} style={freezeStyle(c.key, false)} className={cls} title={c.key === 'email' ? v : c.key === 'studentName' ? v : undefined}>{content}</td>;
                     })}
                     <td className="px-2 py-1 whitespace-nowrap">
                       {r.presentationPhotos.length ? (
