@@ -5092,7 +5092,99 @@ function ColumnFilterHeader({
   );
 }
 
+/** Rank card for one student + sub-batch, opened from the Comfort report. */
+function ComfortRankCardModal({ row, modules, onClose }: { row: ComfortRow; modules: ComfortModule[]; onClose: () => void }) {
+  const [data, setData] = useState<StudentReportData | null>(null);
+  const [error, setErr] = useState('');
+  useEffect(() => {
+    api.get(`/api/production/reports/students/${row.studentId}`)
+      .then((r) => setData(r.data.data))
+      .catch((e) => setErr(errMsg(e, 'Failed to load rank card')));
+  }, [row.studentId]);
+  const sc = data?.schedules.find((s) => s.scheduleId === row.scheduleId);
+  const mods = modules.filter((m) => m.courseId === row.courseId);
+  return (
+    <Modal title={`Rank Card — ${row.studentName} (${row.studentCode})`} onClose={onClose} wide>
+      <p className="text-xs text-muted-foreground -mt-2">{row.batchCode} · {row.courseName} · {row.track}</p>
+      {error ? <p className="text-sm text-red-600">{error}</p> : !data ? (
+        <p className="text-center text-muted-foreground py-6">Loading...</p>
+      ) : !sc ? (
+        <p className="text-sm text-muted-foreground">No rank data for this sub-batch.</p>
+      ) : (
+        <div className="space-y-4">
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-sm">
+            <div className="border rounded-lg p-2"><p className="text-xs text-muted-foreground">Rank</p><p className="font-semibold">{sc.rank ? `#${sc.rank} of ${sc.totalStudents}` : '—'}</p></div>
+            <div className="border rounded-lg p-2"><p className="text-xs text-muted-foreground">Your score</p><p className="font-semibold">{sc.marksObtained}/{sc.marksMax} ({sc.percentage}%)</p></div>
+            <div className="border rounded-lg p-2"><p className="text-xs text-muted-foreground">Class average</p><p className="font-semibold">{sc.classAverage}%</p></div>
+            <div className="border rounded-lg p-2"><p className="text-xs text-muted-foreground">Attendance</p><p className="font-semibold">{row.present}/{row.total}{row.attendancePct != null ? ` (${row.attendancePct}%)` : ''}</p></div>
+          </div>
+          {mods.length > 0 && (
+            <div>
+              <p className="text-xs font-medium text-muted-foreground mb-1">Module-wise marks</p>
+              <div className="grid sm:grid-cols-2 gap-1">
+                {mods.map((m) => {
+                  const s = row.moduleMarks[m.id];
+                  return (
+                    <div key={m.id} className="flex items-center justify-between text-xs border rounded-lg px-2 py-1">
+                      <span>M{m.order} {m.title}</span>
+                      <span className="font-medium">{s ? `${Math.round(s.got * 10) / 10}/${s.max}` : '—'}</span>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+          {sc.onlineTests.length > 0 && (
+            <div>
+              <p className="text-xs font-medium text-muted-foreground mb-1">Online tests</p>
+              <div className="space-y-1">
+                {sc.onlineTests.map((t) => (
+                  <div key={t.id} className="flex items-center justify-between text-xs border rounded-lg px-2 py-1">
+                    <span>{t.testTitle} <span className="text-muted-foreground">({t.moduleTitle})</span></span>
+                    <span className="text-muted-foreground">{t.score !== null ? `${t.score}/${t.totalMarks}` : t.status}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+          {sc.projects.length > 0 && (
+            <div>
+              <p className="text-xs font-medium text-muted-foreground mb-1">Projects</p>
+              <div className="space-y-1">
+                {sc.projects.map((p) => (
+                  <div key={p.id} className="flex items-center justify-between text-xs border rounded-lg px-2 py-1">
+                    <span>{p.projectTitle} <span className="text-muted-foreground">({p.moduleTitle})</span></span>
+                    <span className="text-muted-foreground">{p.status}{p.graded ? ` · ${p.grade}/${p.maxGrade}` : ''}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+          {sc.moduleFeedback.length > 0 && (
+            <div>
+              <p className="text-xs font-medium text-muted-foreground mb-1">Trainer module feedback</p>
+              <div className="space-y-1">
+                {sc.moduleFeedback.map((f) => (
+                  <div key={f.id} className="text-xs border rounded-lg px-2 py-1">
+                    <span className="font-medium">{f.moduleTitle}</span>{f.rating ? ` · ${f.rating}/5` : ''}
+                    {f.comments && <p className="text-muted-foreground">{f.comments}</p>}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+          <div className="flex flex-wrap gap-2 text-xs">
+            <span className={`px-2 py-0.5 rounded-full ${row.presentationDone ? 'bg-green-100 text-green-800' : 'bg-amber-100 text-amber-800'}`}>{row.presentationDone ? 'Presentation done' : 'Presentation pending'}</span>
+            <span className={`px-2 py-0.5 rounded-full ${row.certificateEligible ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-700'}`}>{row.certificateEligible ? 'Certificate eligible' : 'Not yet eligible'}</span>
+          </div>
+        </div>
+      )}
+    </Modal>
+  );
+}
+
 function ComfortReportPanel({ setError }: { setError: (s: string) => void }) {
+  const [rankRow, setRankRow] = useState<ComfortRow | null>(null);
   const [rows, setRows] = useState<ComfortRow[]>([]);
   const [modules, setModules] = useState<ComfortModule[]>([]);
   const [loading, setLoading] = useState(true);
@@ -5187,6 +5279,7 @@ function ComfortReportPanel({ setError }: { setError: (s: string) => void }) {
 
   return (
     <div className="space-y-3">
+      {rankRow && <ComfortRankCardModal row={rankRow} modules={modules} onClose={() => setRankRow(null)} />}
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="flex flex-wrap items-center gap-2">
           <ReportFilterBar filters={filters} onChange={setFilters} showTrainer />
@@ -5240,6 +5333,9 @@ function ComfortReportPanel({ setError }: { setError: (s: string) => void }) {
                       let cls = 'px-2 py-1 whitespace-nowrap border-r';
                       let content: React.ReactNode = v;
                       if (c.key === 'attendancePct') cls += ` ${pctClass(r.attendancePct)}`;
+                      if (c.key === 'studentName') {
+                        content = <button onClick={() => setRankRow(r)} className="text-blue-600 hover:underline font-medium text-left" title="Open rank card">{v}</button>;
+                      }
                       if (c.key === 'status') content = <span className={`px-2 py-0.5 rounded ${statusClass(v)}`}>{v}</span>;
                       if (c.key === 'presentation') content = <span className={`px-2 py-0.5 rounded ${r.presentationDone ? 'bg-green-100 text-green-800' : 'bg-amber-100 text-amber-800'}`}>{v}</span>;
                       if (c.key === 'trainerComments') cls = 'px-2 py-1 border-r min-w-[200px] max-w-[320px] whitespace-normal';
@@ -5247,9 +5343,19 @@ function ComfortReportPanel({ setError }: { setError: (s: string) => void }) {
                       return <td key={c.key} className={cls} title={c.key === 'email' ? v : undefined}>{content}</td>;
                     })}
                     <td className="px-2 py-1 whitespace-nowrap">
-                      {r.presentationPhotos.length
-                        ? r.presentationPhotos.map((u, i) => <a key={u} href={photoHref(u)} target="_blank" rel="noreferrer" className="text-blue-600 mr-2">Photo {i + 1}</a>)
-                        : <span className="text-muted-foreground">—</span>}
+                      {r.presentationPhotos.length ? (
+                        <span className="inline-flex items-center gap-1">
+                          {r.presentationPhotos.map((u, i) => (
+                            <a key={u} href={photoHref(u)} target="_blank" rel="noreferrer" title={`Photo ${i + 1}`}>
+                              <img src={photoHref(u)} alt={`Presentation ${i + 1}`} className="h-8 w-12 object-cover rounded border" />
+                            </a>
+                          ))}
+                        </span>
+                      ) : r.presentationDone ? (
+                        <span className="text-muted-foreground" title="Marked done before photo proof was required">Earlier batch · no photos</span>
+                      ) : (
+                        <span className="text-amber-700">Not uploaded</span>
+                      )}
                     </td>
                   </tr>
                 ))}
