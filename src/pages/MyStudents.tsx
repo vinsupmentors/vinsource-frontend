@@ -48,7 +48,21 @@ interface AdvisedStudentRow {
   enrollments: EnrollmentLite[];
   portfolio?: { status: string; targetRole?: string | null } | null;
   certificateRequests: { type: string; feeApprovedAt?: string | null; ldmApprovedAt?: string | null; certificateNo?: string | null }[];
+  trainerFeedbacks?: { courseId: string; presentationDone: boolean; presentationAt?: string | null; presentationPhotos?: string[] | null; certificateEligible: boolean }[];
   skillAdvisor?: EmployeeLite | null;
+}
+
+/** Project presentation status for the roster: done (with date) / pending / n.a. for students with no course. */
+function PresentationBadge({ s }: { s: AdvisedStudentRow }) {
+  if (s.enrollments.length === 0) return <span className="text-xs text-muted-foreground">—</span>;
+  const done = (s.trainerFeedbacks || []).filter((f) => f.presentationDone);
+  if (done.length === 0) return <span className="text-[11px] font-medium rounded-full px-2 py-1 bg-amber-100 text-amber-700 whitespace-nowrap">Pending</span>;
+  const latest = done.map((f) => f.presentationAt).filter(Boolean).sort().pop();
+  return (
+    <span className="text-[11px] font-medium rounded-full px-2 py-1 bg-green-100 text-green-700 whitespace-nowrap">
+      ✓ Done{latest ? ` · ${formatDate(latest)}` : ''}
+    </span>
+  );
 }
 
 // A student's onboarding is a fixed 3-step ladder — profile filled in, every
@@ -108,7 +122,7 @@ function StudentRosterTable({ students, loading, emptyLabel, showAdvisor, onOpen
   students: AdvisedStudentRow[]; loading: boolean; emptyLabel: string; showAdvisor?: boolean;
   onOpen: (id: string) => void;
 }) {
-  const colCount = showAdvisor ? 7 : 6;
+  const colCount = showAdvisor ? 8 : 7;
   return (
     <div className="bg-card border rounded-xl overflow-x-auto">
       <table className="w-full text-sm">
@@ -118,6 +132,7 @@ function StudentRosterTable({ students, loading, emptyLabel, showAdvisor, onOpen
             <th className="px-3 py-3">Course / Batch</th>
             <th className="px-3 py-3">Status</th>
             <th className="px-3 py-3">Onboarding</th>
+            <th className="px-3 py-3">Presentation</th>
             <th className="px-3 py-3">Portfolio</th>
             <th className="px-3 py-3">Certificates</th>
             {showAdvisor && <th className="px-3 py-3">Advisor</th>}
@@ -143,6 +158,7 @@ function StudentRosterTable({ students, loading, emptyLabel, showAdvisor, onOpen
                 </span>
               </td>
               <td className="px-3 py-3 whitespace-nowrap"><OnboardingStageBadge student={s} /></td>
+              <td className="px-3 py-3 whitespace-nowrap"><PresentationBadge s={s} /></td>
               <td className="px-3 py-3 whitespace-nowrap text-xs">
                 {s.portfolio ? (
                   <span className={s.portfolio.status === 'APPROVED' ? 'text-green-700 font-medium' : 'text-muted-foreground'}>
@@ -495,6 +511,7 @@ interface DossierData {
     trainerFeedbacks: {
       id: string; certificateEligible: boolean; performanceRating?: number | null;
       placementReadinessNote?: string | null; course: { id: string; name: string };
+      presentationDone?: boolean; presentationAt?: string | null; presentationPhotos?: string[] | null;
     }[];
   };
   interviews: {
@@ -703,9 +720,22 @@ function StudentDossierModal({ studentId, onClose }: { studentId: string; onClos
                           <StarRow rating={tf.performanceRating} />
                         </div>
                         {tf.placementReadinessNote && <p className="text-xs text-muted-foreground">"{tf.placementReadinessNote}"</p>}
-                        <span className={`text-[11px] font-medium px-2 py-0.5 rounded-full ${tf.certificateEligible ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
-                          {tf.certificateEligible ? '✓ Certificate Eligible' : '✗ Not Eligible'}
-                        </span>
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span className={`text-[11px] font-medium px-2 py-0.5 rounded-full ${tf.certificateEligible ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
+                            {tf.certificateEligible ? '✓ Certificate Eligible' : '✗ Not Eligible'}
+                          </span>
+                          <span className={`text-[11px] font-medium px-2 py-0.5 rounded-full ${tf.presentationDone ? 'bg-green-100 text-green-700' : 'bg-amber-100 text-amber-700'}`}>
+                            {tf.presentationDone ? `✓ Presentation done${tf.presentationAt ? ` · ${formatDate(tf.presentationAt)}` : ''}` : 'Presentation pending'}
+                          </span>
+                        </div>
+                        {tf.presentationDone && Array.isArray(tf.presentationPhotos) && tf.presentationPhotos.length > 0 && (
+                          <div className="flex gap-2 pt-1">
+                            {tf.presentationPhotos.map((u) => {
+                              const href = u.startsWith('http') ? u : `${BASE_URL}${u}`;
+                              return <a key={u} href={href} target="_blank" rel="noreferrer"><img src={href} alt="Presentation" className="h-20 w-28 object-cover rounded-lg border" /></a>;
+                            })}
+                          </div>
+                        )}
                       </div>
                     ))}
                   </>

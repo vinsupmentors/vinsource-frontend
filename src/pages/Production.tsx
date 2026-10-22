@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useState, useCallback, useMemo } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { useSelector } from 'react-redux';
 import { RootState } from '@/store';
@@ -4538,7 +4538,7 @@ function BulkUploadQuestionsModal({ testId, endpointBase, onClose, setError, onS
 
 // ── REPORTS ────────────────────────────────────────────────────────────────
 
-type ReportsSubTab = 'trainer' | 'batches' | 'attendance' | 'students' | 'kra' | 'recipients';
+type ReportsSubTab = 'trainer' | 'batches' | 'attendance' | 'students' | 'kra' | 'comfort' | 'recipients';
 
 function ReportsTab({ canEdit, setError }: { canEdit: boolean; setError: (s: string) => void }) {
   const [subTab, setSubTab] = useState<ReportsSubTab>('trainer');
@@ -4549,6 +4549,7 @@ function ReportsTab({ canEdit, setError }: { canEdit: boolean; setError: (s: str
     { id: 'attendance', label: 'Attendance', icon: ClipboardList },
     { id: 'students', label: 'Student (A–Z)', icon: GraduationCap },
     { id: 'kra', label: 'Daily KRA', icon: NotebookPen },
+    { id: 'comfort', label: 'Comfort', icon: ClipboardList },
     { id: 'recipients', label: 'Email Recipients', icon: Mail },
   ];
 
@@ -4580,6 +4581,8 @@ function ReportsTab({ canEdit, setError }: { canEdit: boolean; setError: (s: str
         <StudentReportPanel setError={setError} />
       ) : subTab === 'kra' ? (
         <KraReportPanel setError={setError} />
+      ) : subTab === 'comfort' ? (
+        <ComfortReportPanel setError={setError} />
       ) : (
         <RecipientsPanel canEdit={canEdit} setError={setError} />
       )}
@@ -5017,6 +5020,246 @@ interface AttendanceReportRow {
   studentId: string; studentName: string; studentCode: string; track: StudentTrack;
   batchCode: string; courseName: string; totalDays: number; present: number; absent: number;
   attendancePct: number | null; absentDates: string[];
+}
+
+// ── COMFORT REPORT ─────────────────────────────────────────────────────────
+interface ComfortRow {
+  enrollmentId: string; studentId: string; studentCode: string; studentName: string; phone: string; email: string | null;
+  type: string; slot: string; slotTime: string; track: string; placementStatus: string;
+  batchCode: string; courseName: string; trainers: string; scheduleId: string; courseId: string;
+  total: number; present: number; absent: number; attendancePct: number | null;
+  moduleMarks: Record<string, { got: number; max: number } | null>;
+  modulesDone: number; avgMark: number | null; avgPct: number | null;
+  mainProject: string; presentationDone: boolean; presentationAt: string | null; presentationPhotos: string[];
+  certificateEligible: boolean; trainerComments: string; status: string;
+}
+interface ComfortModule { id: string; courseId: string; order: number; title: string }
+interface ComfortCol { key: string; label: string; get: (r: ComfortRow) => string; width?: number; sticky?: number }
+
+const COMFORT_SESSIONS = [
+  { value: '', label: 'All sessions' },
+  { value: 'MORNING', label: 'Morning' },
+  { value: 'AFTERNOON', label: 'Afternoon' },
+  { value: 'EVENING', label: 'Evening' },
+];
+
+/** Excel-style header filter: search + tick-list of distinct values + A→Z / Z→A. */
+function ColumnFilterHeader({
+  label, values, selected, onChange, sort, onSort,
+}: {
+  label: string; values: string[]; selected: Set<string> | undefined; onChange: (s: Set<string> | undefined) => void;
+  sort: 'asc' | 'desc' | null; onSort: (d: 'asc' | 'desc' | null) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [q, setQ] = useState('');
+  const shown = values.filter((v) => (v || '(Blank)').toLowerCase().includes(q.toLowerCase()));
+  const active = !!selected;
+  const toggle = (v: string) => {
+    const next = new Set(selected ?? values);
+    if (next.has(v)) next.delete(v); else next.add(v);
+    onChange(next.size === values.length ? undefined : next);
+  };
+  return (
+    <div className="relative inline-flex items-center gap-1">
+      <span>{label}</span>
+      <button onClick={() => setOpen((o) => !o)} className={`px-1 rounded text-[10px] leading-4 ${active || sort ? 'bg-blue-600 text-white' : 'bg-white/20 hover:bg-white/40'}`} title="Filter / sort">▾</button>
+      {open && (
+        <>
+          <div className="fixed inset-0 z-30" onClick={() => setOpen(false)} />
+          <div className="absolute left-0 top-6 z-40 w-56 rounded-lg border bg-white text-gray-800 shadow-xl p-2 font-normal text-xs">
+            <div className="flex gap-1 mb-2">
+              <button onClick={() => onSort(sort === 'asc' ? null : 'asc')} className={`flex-1 border rounded px-1 py-1 ${sort === 'asc' ? 'bg-blue-50 border-blue-400' : ''}`}>Sort A→Z</button>
+              <button onClick={() => onSort(sort === 'desc' ? null : 'desc')} className={`flex-1 border rounded px-1 py-1 ${sort === 'desc' ? 'bg-blue-50 border-blue-400' : ''}`}>Sort Z→A</button>
+            </div>
+            <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search…" className="w-full border rounded px-2 py-1 mb-2" />
+            <div className="flex justify-between mb-1">
+              <button className="text-blue-600" onClick={() => onChange(undefined)}>Select all</button>
+              <button className="text-blue-600" onClick={() => onChange(new Set())}>Clear</button>
+            </div>
+            <div className="max-h-48 overflow-y-auto space-y-0.5">
+              {shown.map((v) => (
+                <label key={v} className="flex items-center gap-2 px-1 py-0.5 hover:bg-gray-50 rounded cursor-pointer">
+                  <input type="checkbox" checked={!selected || selected.has(v)} onChange={() => toggle(v)} />
+                  <span className="truncate">{v || '(Blank)'}</span>
+                </label>
+              ))}
+              {shown.length === 0 && <p className="text-muted-foreground px-1 py-1">No matches</p>}
+            </div>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+function ComfortReportPanel({ setError }: { setError: (s: string) => void }) {
+  const [rows, setRows] = useState<ComfortRow[]>([]);
+  const [modules, setModules] = useState<ComfortModule[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [filters, setFilters] = useState<ReportFilters>(EMPTY_REPORT_FILTERS);
+  const [session, setSession] = useState('');
+  const [colFilters, setColFilters] = useState<Record<string, Set<string> | undefined>>({});
+  const [sortBy, setSortBy] = useState<{ key: string; dir: 'asc' | 'desc' } | null>(null);
+
+  useEffect(() => {
+    setLoading(true);
+    api.get('/api/production/reports/comfort', {
+      params: {
+        batchId: filters.batchId || undefined, scheduleId: filters.scheduleId || undefined,
+        courseId: filters.courseId || undefined, trainerId: filters.trainerId || undefined,
+        timing: session || undefined,
+      },
+    })
+      .then((res) => { setRows(res.data.data.rows); setModules(res.data.data.modules); setColFilters({}); })
+      .catch((err) => setError(errMsg(err, 'Failed to load comfort report')))
+      .finally(() => setLoading(false));
+  }, [filters, session, setError]);
+
+  // Track filter is applied client-side (the endpoint has no track param).
+  const baseRows = useMemo(() => (filters.track ? rows.filter((r) => r.track === filters.track) : rows), [rows, filters.track]);
+
+  // Module marks only make sense when the rows are all one course.
+  const courseIdsInRows = useMemo(() => Array.from(new Set(baseRows.map((r) => r.courseId))), [baseRows]);
+  const singleCourse = courseIdsInRows.length === 1;
+  const moduleCols = useMemo(() => (singleCourse ? modules.filter((m) => m.courseId === courseIdsInRows[0]) : []), [modules, singleCourse, courseIdsInRows]);
+
+  const cols: ComfortCol[] = useMemo(() => {
+    const fmtDate = (d: string | null) => (d ? new Date(d).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric', timeZone: 'Asia/Kolkata' }) : '');
+    return [
+      { key: 'studentCode', label: 'Student #', get: (r) => r.studentCode },
+      { key: 'studentName', label: 'Student Name', get: (r) => r.studentName },
+      { key: 'phone', label: 'Phone', get: (r) => r.phone },
+      { key: 'email', label: 'Mail ID', get: (r) => r.email || '' },
+      { key: 'type', label: 'Type', get: (r) => r.type },
+      { key: 'slot', label: 'Slot', get: (r) => r.slot },
+      { key: 'batchCode', label: 'Batch', get: (r) => r.batchCode },
+      { key: 'courseName', label: 'Course', get: (r) => r.courseName },
+      { key: 'trainers', label: 'Trainer', get: (r) => r.trainers },
+      { key: 'placementStatus', label: 'Placement Status', get: (r) => r.placementStatus },
+      { key: 'total', label: 'Total', get: (r) => String(r.total) },
+      { key: 'present', label: 'P', get: (r) => String(r.present) },
+      { key: 'absent', label: 'A', get: (r) => String(r.absent) },
+      { key: 'attendancePct', label: '%', get: (r) => (r.attendancePct == null ? '' : `${r.attendancePct}%`) },
+      ...moduleCols.map((m) => ({
+        key: `m_${m.id}`, label: `M${m.order} ${m.title}`,
+        get: (r: ComfortRow) => { const s = r.moduleMarks[m.id]; return s ? String(Math.round(s.got * 10) / 10) : ''; },
+      })),
+      { key: 'modulesDone', label: 'MD Done', get: (r) => String(r.modulesDone) },
+      { key: 'avgMark', label: 'Avg Mark', get: (r) => (r.avgMark == null ? '' : String(r.avgMark)) },
+      { key: 'mainProject', label: 'Main Project', get: (r) => r.mainProject },
+      { key: 'presentation', label: 'Presentation', get: (r) => (r.presentationDone ? `Done ${fmtDate(r.presentationAt)}` : 'Pending') },
+      { key: 'certificateEligible', label: 'Cert Eligible', get: (r) => (r.certificateEligible ? 'Yes' : 'No') },
+      { key: 'trainerComments', label: 'Trainer Cmts', get: (r) => r.trainerComments },
+      { key: 'status', label: 'Status', get: (r) => r.status },
+    ];
+  }, [moduleCols]);
+
+  const distinct = useMemo(() => {
+    const out: Record<string, string[]> = {};
+    for (const c of cols) out[c.key] = Array.from(new Set(baseRows.map((r) => c.get(r)))).sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
+    return out;
+  }, [cols, baseRows]);
+
+  const visible = useMemo(() => {
+    let out = baseRows.filter((r) => cols.every((c) => { const sel = colFilters[c.key]; return !sel || sel.has(c.get(r)); }));
+    if (sortBy) {
+      const col = cols.find((c) => c.key === sortBy.key);
+      if (col) out = [...out].sort((a, b) => col.get(a).localeCompare(col.get(b), undefined, { numeric: true }) * (sortBy.dir === 'asc' ? 1 : -1));
+    }
+    return out;
+  }, [baseRows, cols, colFilters, sortBy]);
+
+  const downloadExcel = () => {
+    exportRowsToExcel('comfort_report.xlsx', visible.map((r) => {
+      const o: Record<string, unknown> = {};
+      for (const c of cols) o[c.label] = c.get(r);
+      return o;
+    }), 'Comfort');
+  };
+
+  const pctClass = (p: number | null) => (p == null ? '' : p >= 75 ? 'text-green-700 font-semibold' : p >= 60 ? 'text-amber-700 font-semibold' : 'text-red-700 font-semibold');
+  const statusClass = (s: string) =>
+    s === 'Completed' || s === 'Placed' ? 'bg-green-100 text-green-800'
+      : s === 'Long Leave' || s.startsWith('Inactive') ? 'bg-red-600 text-white'
+        : s === 'Batch Transfer' ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-700';
+  const photoHref = (u: string) => (u.startsWith('http') ? u : `${BASE_URL}${u}`);
+  const filteredCount = Object.values(colFilters).filter(Boolean).length;
+
+  return (
+    <div className="space-y-3">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div className="flex flex-wrap items-center gap-2">
+          <ReportFilterBar filters={filters} onChange={setFilters} showTrainer />
+          <select value={session} onChange={(e) => setSession(e.target.value)} className="border rounded-lg px-2 py-1 text-sm">
+            {COMFORT_SESSIONS.map((s) => <option key={s.value} value={s.value}>{s.label}</option>)}
+          </select>
+          {filteredCount > 0 && <button onClick={() => setColFilters({})} className="text-xs text-blue-600">Clear column filters ({filteredCount})</button>}
+        </div>
+        <button
+          onClick={downloadExcel}
+          disabled={visible.length === 0}
+          className="flex items-center gap-1 text-xs border rounded-lg px-2 py-1.5 text-blue-600 disabled:text-muted-foreground disabled:cursor-not-allowed"
+        >
+          <Download className="w-3 h-3" /> Download Excel
+        </button>
+      </div>
+      {!singleCourse && baseRows.length > 0 && (
+        <p className="text-xs text-muted-foreground">Pick a course (or sub-batch) to see the module-wise marks columns.</p>
+      )}
+      {loading ? (
+        <div className="text-center text-muted-foreground py-8">Loading...</div>
+      ) : visible.length === 0 ? (
+        <p className="text-sm text-muted-foreground py-8 text-center">No students match.</p>
+      ) : (
+        <>
+          <p className="text-xs text-muted-foreground">{visible.length} of {baseRows.length} students</p>
+          <div className="border rounded-lg overflow-auto max-h-[70vh]">
+            <table className="text-xs border-collapse min-w-full">
+              <thead className="sticky top-0 z-20">
+                <tr className="bg-slate-800 text-white">
+                  {cols.map((c) => (
+                    <th key={c.key} className="px-2 py-2 text-left font-semibold whitespace-nowrap border-r border-slate-600">
+                      <ColumnFilterHeader
+                        label={c.label}
+                        values={distinct[c.key] || []}
+                        selected={colFilters[c.key]}
+                        onChange={(s) => setColFilters((p) => ({ ...p, [c.key]: s }))}
+                        sort={sortBy?.key === c.key ? sortBy.dir : null}
+                        onSort={(d) => setSortBy(d ? { key: c.key, dir: d } : null)}
+                      />
+                    </th>
+                  ))}
+                  <th className="px-2 py-2 text-left whitespace-nowrap">Proof</th>
+                </tr>
+              </thead>
+              <tbody>
+                {visible.map((r) => (
+                  <tr key={r.enrollmentId} className="border-b hover:bg-blue-50/40">
+                    {cols.map((c) => {
+                      const v = c.get(r);
+                      let cls = 'px-2 py-1 whitespace-nowrap border-r';
+                      let content: React.ReactNode = v;
+                      if (c.key === 'attendancePct') cls += ` ${pctClass(r.attendancePct)}`;
+                      if (c.key === 'status') content = <span className={`px-2 py-0.5 rounded ${statusClass(v)}`}>{v}</span>;
+                      if (c.key === 'presentation') content = <span className={`px-2 py-0.5 rounded ${r.presentationDone ? 'bg-green-100 text-green-800' : 'bg-amber-100 text-amber-800'}`}>{v}</span>;
+                      if (c.key === 'trainerComments') cls = 'px-2 py-1 border-r min-w-[200px] max-w-[320px] whitespace-normal';
+                      if (c.key === 'email') cls += ' max-w-[200px] truncate';
+                      return <td key={c.key} className={cls} title={c.key === 'email' ? v : undefined}>{content}</td>;
+                    })}
+                    <td className="px-2 py-1 whitespace-nowrap">
+                      {r.presentationPhotos.length
+                        ? r.presentationPhotos.map((u, i) => <a key={u} href={photoHref(u)} target="_blank" rel="noreferrer" className="text-blue-600 mr-2">Photo {i + 1}</a>)
+                        : <span className="text-muted-foreground">—</span>}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </>
+      )}
+    </div>
+  );
 }
 
 function AttendanceReportPanel({ setError }: { setError: (s: string) => void }) {

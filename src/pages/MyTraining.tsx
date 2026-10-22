@@ -676,7 +676,75 @@ const STUDENT_STATUS_LABEL: Record<FeedbackStudentStatus, string> = {
   COMPLETED: 'Completed', IN_PLACEMENT: 'In Placement Pool', PLACED: 'Placed', BATCH_TRANSFER: 'Batch Transfer',
 };
 
+interface PresentationInfo { presentationDone: boolean; presentationAt?: string | null; presentationPhotos?: string[] | null }
+
+/** Project presentation proof: date + exactly two photos. Required before certificate eligibility / IOP / placement. */
+function PresentationBlock({ studentId, courseId, info, onDone }: {
+  studentId: string; courseId: string; info: PresentationInfo | undefined; onDone: (p: PresentationInfo) => void;
+}) {
+  const { toast } = useToast();
+  const [date, setDate] = useState(new Date().toISOString().slice(0, 10));
+  const [files, setFiles] = useState<File[]>([]);
+  const [busy, setBusy] = useState(false);
+  const [redo, setRedo] = useState(false);
+  const done = !!info?.presentationDone;
+  const photoHref = (u: string) => (u.startsWith('http') ? u : `${BASE_URL}${u}`);
+
+  const submit = async () => {
+    if (files.length !== 2) { toast({ title: 'Select exactly 2 photos', variant: 'error' }); return; }
+    setBusy(true);
+    try {
+      const fd = new FormData();
+      fd.append('courseId', courseId);
+      fd.append('presentationDate', date);
+      files.forEach((f) => fd.append('photos', f));
+      const res = await api.post(`/api/trainer-portal/students/${studentId}/presentation`, fd, { headers: { 'Content-Type': 'multipart/form-data' } });
+      onDone({ presentationDone: true, presentationAt: res.data.data.presentationAt, presentationPhotos: res.data.data.presentationPhotos });
+      setFiles([]); setRedo(false);
+      toast({ title: 'Presentation marked completed', description: 'Student can now be made certificate eligible.', variant: 'success' });
+    } catch (e: unknown) {
+      const err = e as { response?: { data?: { message?: string } } };
+      toast({ title: 'Could not save presentation', description: err.response?.data?.message || 'Please try again.', variant: 'error' });
+    } finally { setBusy(false); }
+  };
+
+  return (
+    <div className={`rounded-lg border p-3 space-y-2 ${done ? 'bg-green-50 border-green-200' : 'bg-amber-50 border-amber-200'}`}>
+      <div className="flex items-center justify-between gap-2 flex-wrap">
+        <p className="text-xs font-semibold">
+          {done ? <span className="text-green-700 flex items-center gap-1"><CheckCircle2 className="w-3.5 h-3.5" /> Project presentation completed{info?.presentationAt ? ` · ${formatDate(info.presentationAt)}` : ''}</span>
+            : <span className="text-amber-800">Project presentation pending — upload 2 photos to unlock certificate eligibility &amp; placement</span>}
+        </p>
+        {done && !redo && <button onClick={() => setRedo(true)} className="text-xs text-blue-600">Replace photos</button>}
+      </div>
+      {done && Array.isArray(info?.presentationPhotos) && (
+        <div className="flex gap-2">
+          {info!.presentationPhotos!.map((u) => (
+            <a key={u} href={photoHref(u)} target="_blank" rel="noreferrer"><img src={photoHref(u)} alt="Presentation" className="h-16 w-24 object-cover rounded border" /></a>
+          ))}
+        </div>
+      )}
+      {(!done || redo) && (
+        <div className="flex flex-wrap items-end gap-2">
+          <div>
+            <label className="block text-[11px] text-muted-foreground mb-0.5">Presentation date</label>
+            <input type="date" value={date} max={new Date().toISOString().slice(0, 10)} onChange={(e) => setDate(e.target.value)} className="px-2 py-1 rounded-md border bg-background text-xs" />
+          </div>
+          <div>
+            <label className="block text-[11px] text-muted-foreground mb-0.5">2 photos of the student presenting</label>
+            <input type="file" accept="image/png,image/jpeg,image/webp" multiple onChange={(e) => setFiles(Array.from(e.target.files || []).slice(0, 2))} className="text-xs" />
+          </div>
+          <button onClick={submit} disabled={busy || files.length !== 2} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-green-600 text-white text-xs font-medium hover:bg-green-700 disabled:opacity-50">
+            {busy ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <CheckCircle2 className="w-3.5 h-3.5" />} Mark presentation completed
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function InternalFeedbackPanel({ schedule }: { schedule: ScheduleAssignment['schedule'] }) {
+  const [presMap, setPresMap] = useState<Record<string, PresentationInfo>>({});
   const [students, setStudents] = useState<FeedbackStudent[]>([]);
   const [feedbackMap, setFeedbackMap] = useState<Record<string, { performanceRating?: number; placementReadinessNote?: string; jrpToIopRecommended?: boolean; certificateEligible?: boolean }>>({});
   const [loading, setLoading] = useState(true);
@@ -692,6 +760,11 @@ function InternalFeedbackPanel({ schedule }: { schedule: ScheduleAssignment['sch
     ]).then(([enrollRes, fbRes]) => {
       const enrolled: FeedbackStudent[] = (enrollRes.data.data || []).map((e: { student: FeedbackStudent }) => e.student);
       setStudents(enrolled);
+      const pm: Record<string, PresentationInfo> = {};
+      for (const e of (enrollRes.data.data || []) as { student: FeedbackStudent; presentation?: PresentationInfo }[]) {
+        if (e.presentation) pm[e.student.id] = e.presentation;
+      }
+      setPresMap(pm);
       const map: Record<string, { performanceRating?: number; placementReadinessNote?: string; jrpToIopRecommended?: boolean; certificateEligible?: boolean }> = {};
       for (const fb of fbRes.data.data || []) {
         if (fb.course.id === schedule.course.id) map[fb.student.id] = fb;
@@ -744,6 +817,7 @@ function InternalFeedbackPanel({ schedule }: { schedule: ScheduleAssignment['sch
         const fb = feedbackMap[s.id] || {};
         const alreadyInPool = s.status === 'IN_PLACEMENT' || s.status === 'PLACED';
         const locked = s.status === 'PLACED' || s.status === 'BATCH_TRANSFER';
+        const presDone = !!presMap[s.id]?.presentationDone;
         return (
           <div key={s.id} className="bg-card rounded-xl border p-4 space-y-3">
             <div className="flex items-center justify-between flex-wrap gap-2">
@@ -756,14 +830,20 @@ function InternalFeedbackPanel({ schedule }: { schedule: ScheduleAssignment['sch
                 </span>
               )}
             </div>
+            <PresentationBlock
+              studentId={s.id}
+              courseId={schedule.course.id}
+              info={presMap[s.id]}
+              onDone={(p) => setPresMap((m) => ({ ...m, [s.id]: p }))}
+            />
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div>
                 <label className="block text-xs font-medium mb-1 text-muted-foreground">Performance rating (1–5)</label>
                 <input type="number" min={1} max={5} value={fb.performanceRating ?? ''} onChange={(e) => update(s.id, 'performanceRating', Number(e.target.value))} className="w-24 px-2 py-1.5 rounded-md border bg-background text-sm" />
               </div>
               <div className="flex items-center gap-4 pt-5">
-                <label className="flex items-center gap-1.5 text-xs"><input type="checkbox" checked={!!fb.jrpToIopRecommended} onChange={(e) => update(s.id, 'jrpToIopRecommended', e.target.checked)} /> Recommend JRP→IOP</label>
-                <label className="flex items-center gap-1.5 text-xs"><input type="checkbox" checked={!!fb.certificateEligible} onChange={(e) => update(s.id, 'certificateEligible', e.target.checked)} /> Certificate eligible</label>
+                <label className={`flex items-center gap-1.5 text-xs ${presDone ? '' : 'opacity-50'}`} title={presDone ? undefined : 'Mark the project presentation completed first'}><input type="checkbox" disabled={!presDone} checked={presDone && !!fb.jrpToIopRecommended} onChange={(e) => update(s.id, 'jrpToIopRecommended', e.target.checked)} /> Recommend JRP→IOP</label>
+                <label className={`flex items-center gap-1.5 text-xs ${presDone ? '' : 'opacity-50'}`} title={presDone ? undefined : 'Mark the project presentation completed first'}><input type="checkbox" disabled={!presDone} checked={presDone && !!fb.certificateEligible} onChange={(e) => update(s.id, 'certificateEligible', e.target.checked)} /> Certificate eligible</label>
               </div>
             </div>
             <div>
@@ -777,8 +857,8 @@ function InternalFeedbackPanel({ schedule }: { schedule: ScheduleAssignment['sch
               {!alreadyInPool && !locked && (
                 <button
                   onClick={() => pushToPlacement(s.id)}
-                  disabled={pushingId === s.id || !fb.certificateEligible}
-                  title={fb.certificateEligible ? 'Send this student to the Placement Pool' : 'Save feedback with "Certificate eligible" checked first'}
+                  disabled={pushingId === s.id || !fb.certificateEligible || !presDone}
+                  title={!presDone ? 'Complete the project presentation (2 photos) first' : fb.certificateEligible ? 'Send this student to the Placement Pool' : 'Save feedback with "Certificate eligible" checked first'}
                   className="flex items-center gap-2 px-3 py-1.5 rounded-lg border border-indigo-200 bg-indigo-50 text-indigo-700 text-xs font-medium hover:bg-indigo-100 disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   {pushingId === s.id ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Rocket className="w-3.5 h-3.5" />} Transfer to Placement Pool
