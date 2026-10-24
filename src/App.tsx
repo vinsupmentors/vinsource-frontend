@@ -74,6 +74,7 @@ import LiveClassesPage from './pages/LiveClasses';
 import LiveClassroom from './pages/LiveClassroom';
 import DemoRequestsPage from './pages/DemoRequests';
 import DemoJoinPage from './pages/DemoJoin';
+import SalesDemoRoomPage from './pages/SalesDemoRoom';
 import CalendarPage from './pages/Calendar';
 import StudentCalendarPage from './pages/student/StudentCalendar';
 
@@ -161,6 +162,9 @@ export default function App() {
               </PrivateRoute>
             }
           />
+
+          {/* Sales online demo room — BDA hosts, Sales Admin observes (full screen, logged-in) */}
+          <Route path="/sales-demo/:id" element={<PrivateRoute><SalesDemoRoomPage /></PrivateRoute>} />
 
           {/* Public demo sit-in join (prospect enters link/code + email) */}
           <Route path="/demo-join" element={<DemoJoinPage />} />

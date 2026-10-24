@@ -7,8 +7,8 @@ import '@livekit/components-styles';
 import { Lobby, PipButton, roomOptionsFrom, type LocalUserChoices } from '@/components/classroom/ClassroomExtras';
 import { Loader2, Video, Timer } from 'lucide-react';
 
-interface Joined { token: string; url: string; title: string; course: string; expiresAt: string }
-interface Ready { title: string; course: string }
+interface Joined { token: string; url: string; title: string; course: string; expiresAt: string; maxMinutes?: number }
+interface Ready { title: string; course: string; maxMinutes?: number }
 
 /** Public page a prospect opens from the approval email: code + email → join the running class as a normal participant for a limited time. */
 export default function DemoJoinPage() {
@@ -56,7 +56,7 @@ export default function DemoJoinPage() {
   // Approved + class is live: Meet-style mic/camera check before entering.
   // The 20-minute clock only starts when they press Join in the lobby.
   if (ready && !joined) {
-    return <Lobby title={ready.title} subtitle={`${ready.course} — demo · your ${20}-minute window starts when you join`} name="Demo guest" joinLabel="Join now" onSubmit={enter} />;
+    return <Lobby title={ready.title} subtitle={ready.maxMinutes ? `${ready.course} — demo · ${ready.maxMinutes}-minute session` : `${ready.course} — demo · your 20-minute window starts when you join`} name="Demo guest" joinLabel="Join now" onSubmit={enter} />;
   }
 
   if (joined && choices) {
@@ -84,7 +84,7 @@ export default function DemoJoinPage() {
             <input className="w-full border rounded-lg px-3 py-2 text-sm tracking-widest uppercase" placeholder="Access code" value={code} onChange={(e) => setCode(e.target.value.toUpperCase())} />
             <input type="email" className="w-full border rounded-lg px-3 py-2 text-sm" placeholder="Your email" value={email} onChange={(e) => setEmail(e.target.value)} />
             <button onClick={submit} disabled={code.length < 6 || !/^\S+@\S+\.\S+$/.test(email)} className="w-full py-2.5 rounded-lg bg-blue-600 text-white text-sm font-medium disabled:opacity-50">Join Class</button>
-            <p className="text-xs text-gray-500 text-center">You'll have 20 minutes in the class, starting when you enter. You can see, speak and share your screen.</p>
+            <p className="text-xs text-gray-500 text-center">You can see, speak and share your screen. Sessions are time-limited and close automatically.</p>
           </>
         )}
       </div>

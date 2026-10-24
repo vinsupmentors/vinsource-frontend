@@ -3,13 +3,13 @@ import { useSearchParams } from 'react-router-dom';
 import * as XLSX from 'xlsx';
 import api, { BASE_URL } from '@/lib/api';
 import { useModuleAccess } from '@/hooks/useModuleAccess';
-import { formatDate, formatDateTime } from '@/lib/utils';
+import { formatDate, formatDateTime, formatTime } from '@/lib/utils';
 import {
   Lock, Plus, X, Phone, Mail, Calendar, Users, TrendingUp, CheckCircle2,
   PhoneCall, Video, MapPin, RefreshCw, AlertTriangle, Settings, Trash2, Activity,
   ChevronLeft, ChevronRight, Upload, Download, Percent,
   Smartphone, PhoneIncoming, Link2, UserPlus, Copy, Ban, Check, History,
-  Target as TargetIcon, Trophy, Clock, PlayCircle,
+  Target as TargetIcon, Trophy, Clock, PlayCircle, Bell, ListChecks, BarChart3, Eye,
 } from 'lucide-react';
 
 const PAGE_SIZE = 100;
@@ -46,6 +46,14 @@ interface DemoLite {
   rescheduleReason?: string | null;
   proofUrl?: string | null;
   outcome?: DemoOutcome | null;
+  // Portal-hosted online room (ONLINE demos)
+  roomName?: string | null;
+  accessCode?: string | null;
+  maxMinutes?: number;
+  startedAt?: string | null;
+  expiresAt?: string | null;
+  closedAt?: string | null;
+  reopenRequestedAt?: string | null;
 }
 
 interface Lead {
@@ -56,6 +64,7 @@ interface Lead {
   source?: string | null;
   courseInterest?: string | null;
   status: LeadStatus;
+  activityStatus?: ActivityStatus | null;
   lostReason?: LeadLostReason | null;
   notes?: string | null;
   lastContactAt?: string | null;
@@ -100,10 +109,34 @@ function RecordingPlayer({ url }: { url?: string | null }) {
   );
 }
 
+type ActivityStatus = 'DNP' | 'FOLLOW_UP' | 'DEMO_BOOKED' | 'DEMO_OVER' | 'NOT_INTERESTED' | 'DISQUALIFIED';
+type ActivityType = 'CALL' | 'MEETING';
+const ACTIVITY_STATUSES: { value: ActivityStatus; label: string }[] = [
+  { value: 'DNP', label: 'DNP' },
+  { value: 'FOLLOW_UP', label: 'Follow-up' },
+  { value: 'DEMO_BOOKED', label: 'Demo booked' },
+  { value: 'DEMO_OVER', label: 'Demo over' },
+  { value: 'NOT_INTERESTED', label: 'Not interested' },
+  { value: 'DISQUALIFIED', label: 'Disqualified' },
+];
+const ACTIVITY_STATUS_LABEL = Object.fromEntries(ACTIVITY_STATUSES.map((s) => [s.value, s.label])) as Record<ActivityStatus, string>;
+// Statuses that keep the lead open, so a follow-up date AND time must be given.
+const NEEDS_FOLLOW_UP: ActivityStatus[] = ['DNP', 'FOLLOW_UP', 'DEMO_BOOKED', 'DEMO_OVER'];
+// Stage each status moves the lead into (mirrors the server; shown as a preview).
+const STATUS_STAGE: Record<ActivityStatus, LeadStatus> = {
+  DNP: 'CONTACTED', FOLLOW_UP: 'CONTACTED', DEMO_BOOKED: 'DEMO_SCHEDULED', DEMO_OVER: 'DEMO_DONE', NOT_INTERESTED: 'LOST', DISQUALIFIED: 'LOST',
+};
+
+interface LeadHistoryRow {
+  id: string; type: string; summary: string; createdAt: string; actor?: EmployeeLite | null;
+}
+
 interface CallLog {
   id: string;
   recordingUrl?: string | null;
-  notes: string;
+  activityType?: ActivityType | null;
+  activityStatus?: ActivityStatus | null;
+  notes: string | null;
   nextFollowUpAt?: string | null;
   calledAt: string;
   calledBy?: EmployeeLite | null;
@@ -201,6 +234,8 @@ interface TargetRow {
 // Global call log — every call (manual or auto-tracked), across all leads.
 interface CallLogRow {
   id: string;
+  activityType?: ActivityType | null;
+  activityStatus?: ActivityStatus | null;
   recordingUrl?: string | null;
   rawPhoneNumber?: string | null;
   direction?: 'INBOUND' | 'OUTBOUND' | 'MISSED' | null;
@@ -345,9 +380,40 @@ function formatCurrency(n: number): string {
   return `₹${n.toLocaleString('en-IN', { maximumFractionDigits: 0 })}`;
 }
 
+/** Dropdown with tick-boxes so several values can be selected at once. `value` is a comma-joined string (what the API takes). */
+function MultiSelect({ label, options, value, onChange }: {
+  label: string; options: { value: string; label: string }[]; value: string; onChange: (v: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const selected = value ? value.split(',') : [];
+  const toggle = (v: string) => onChange((selected.includes(v) ? selected.filter((x) => x !== v) : [...selected, v]).join(','));
+  return (
+    <div className="relative">
+      <button type="button" onClick={() => setOpen((o) => !o)} className={`px-3 py-2 border rounded-lg text-sm flex items-center gap-2 ${selected.length ? 'border-blue-400 bg-blue-50 text-blue-700' : ''}`}>
+        {label}{selected.length > 0 && <span className="text-xs font-semibold">({selected.length})</span>}
+        <ChevronRight className={`w-3 h-3 transition-transform ${open ? 'rotate-90' : ''}`} />
+      </button>
+      {open && (
+        <>
+          <div className="fixed inset-0 z-20" onClick={() => setOpen(false)} />
+          <div className="absolute z-30 mt-1 w-56 max-h-72 overflow-y-auto bg-white border rounded-lg shadow-lg p-1">
+            {options.length === 0 && <p className="text-xs text-muted-foreground px-2 py-2">No options</p>}
+            {options.map((o) => (
+              <label key={o.value} className="flex items-center gap-2 px-2 py-1.5 text-sm hover:bg-muted/50 rounded cursor-pointer">
+                <input type="checkbox" checked={selected.includes(o.value)} onChange={() => toggle(o.value)} /> {o.label}
+              </label>
+            ))}
+            {selected.length > 0 && <button onClick={() => onChange('')} className="w-full text-left text-xs text-blue-600 px-2 py-1.5 hover:underline">Clear</button>}
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
 // ── Main page ────────────────────────────────────────────────────────────
-type Tab = 'leads' | 'pulse' | 'leadQuality' | 'demoBooked' | 'demoRescheduled' | 'demoConducted' | 'devices' | 'unmatchedCalls' | 'callLog' | 'leaderboard' | 'targets';
-const VALID_TABS: Tab[] = ['leads', 'pulse', 'leadQuality', 'demoBooked', 'demoRescheduled', 'demoConducted', 'devices', 'unmatchedCalls', 'callLog', 'leaderboard', 'targets'];
+type Tab = 'leads' | 'reminders' | 'tasks' | 'summaries' | 'activityMonitor' | 'pulse' | 'leadQuality' | 'liveDemos' | 'demoBooked' | 'demoRescheduled' | 'demoConducted' | 'devices' | 'unmatchedCalls' | 'callLog' | 'leaderboard' | 'targets';
+const VALID_TABS: Tab[] = ['leads', 'reminders', 'tasks', 'summaries', 'activityMonitor', 'pulse', 'leadQuality', 'liveDemos', 'demoBooked', 'demoRescheduled', 'demoConducted', 'devices', 'unmatchedCalls', 'callLog', 'leaderboard', 'targets'];
 // Sales Pulse / Lead Quality are aggregate, cross-rep views — admin only.
 // BDAs get Demo Booked/Rescheduled/Conducted instead, scoped to their own leads.
 // Devices (issuing call-tracking tokens) is admin-only too. Unmatched Calls
@@ -355,7 +421,7 @@ const VALID_TABS: Tab[] = ['leads', 'pulse', 'leadQuality', 'demoBooked', 'demoR
 // and BDAs can see and work it. Leaderboard/Targets are management-level KPI
 // views, same access tier as Pulse/Lead Quality. "My Students" lives on its
 // own top-level page (see MyStudents.tsx), not as a Sales tab.
-const ADMIN_ONLY_TABS: Tab[] = ['pulse', 'leadQuality', 'devices', 'leaderboard', 'targets'];
+const ADMIN_ONLY_TABS: Tab[] = ['summaries', 'activityMonitor', 'pulse', 'leadQuality', 'liveDemos', 'devices', 'leaderboard', 'targets'];
 const BDA_ONLY_TABS: Tab[] = ['demoBooked', 'demoRescheduled', 'demoConducted'];
 const EDIT_REQUIRED_TABS: Tab[] = ['unmatchedCalls'];
 
@@ -389,7 +455,15 @@ export default function SalesPage() {
   const [employees, setEmployees] = useState<EmployeeLite[]>([]);
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>('');
+  const [activityFilter, setActivityFilter] = useState<string>('');
   const [followUpFilter, setFollowUpFilter] = useState<string>('');
+  const [assignedFilter, setAssignedFilter] = useState<string>('');
+  const [sourceFilter, setSourceFilter] = useState<string>('');
+  const [createdFrom, setCreatedFrom] = useState('');
+  const [createdTo, setCreatedTo] = useState('');
+  const [followFrom, setFollowFrom] = useState('');
+  const [followTo, setFollowTo] = useState('');
+  const [sourceOptions, setSourceOptions] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [showAdd, setShowAdd] = useState(false);
@@ -405,7 +479,8 @@ export default function SalesPage() {
 
   // Any filter change resets to page 1 — otherwise you can land on a page
   // number that no longer exists once the result set shrinks.
-  useEffect(() => { setPage(1); }, [search, statusFilter, followUpFilter]);
+  useEffect(() => { setPage(1); }, [search, statusFilter, activityFilter, followUpFilter, assignedFilter, sourceFilter, createdFrom, createdTo, followFrom, followTo]);
+  useEffect(() => { api.get('/api/sales/sources').then((r) => setSourceOptions(r.data.data)).catch(() => setSourceOptions([])); }, []);
 
   const fetchAll = useCallback(async () => {
     setLoading(true);
@@ -414,6 +489,13 @@ export default function SalesPage() {
       const params: Record<string, string> = { page: String(page), limit: String(PAGE_SIZE) };
       if (search) params.search = search;
       if (statusFilter) params.status = statusFilter;
+      if (activityFilter) params.activityStatus = activityFilter;
+      if (assignedFilter) params.assignedToId = assignedFilter;
+      if (sourceFilter) params.source = sourceFilter;
+      if (createdFrom) params.createdFrom = createdFrom;
+      if (createdTo) params.createdTo = createdTo;
+      if (followFrom) params.followUpFrom = followFrom;
+      if (followTo) params.followUpTo = followTo;
       if (followUpFilter) params.followUp = followUpFilter;
       const [leadsRes, statsRes] = await Promise.all([
         api.get('/api/sales/leads', { params }),
@@ -428,9 +510,21 @@ export default function SalesPage() {
     } finally {
       setLoading(false);
     }
-  }, [page, search, statusFilter, followUpFilter]);
+  }, [page, search, statusFilter, activityFilter, followUpFilter, assignedFilter, sourceFilter, createdFrom, createdTo, followFrom, followTo]);
 
   useEffect(() => { if (level && tab === 'leads') fetchAll(); }, [level, tab, fetchAll]);
+
+  // Soft delete: the lead leaves every screen but stays in the database with its history.
+  const deleteLead = async (lead: Lead) => {
+    if (!window.confirm(`Remove "${lead.name}" from the screen? The lead and its history stay in the database.`)) return;
+    try {
+      await api.delete(`/api/sales/leads/${lead.id}`);
+      fetchAll();
+    } catch (err: unknown) {
+      const e = err as { response?: { data?: { message?: string } } };
+      setError(e.response?.data?.message || 'Failed to remove lead');
+    }
+  };
 
   useEffect(() => {
     if (!level) return;
@@ -535,16 +629,23 @@ export default function SalesPage() {
         {(isAdmin
           ? [
               { id: 'leads' as Tab, label: 'Leads', icon: Users },
+              { id: 'reminders' as Tab, label: 'My Reminders', icon: Bell },
+              { id: 'tasks' as Tab, label: 'Manage Tasks', icon: ListChecks },
               { id: 'callLog' as Tab, label: 'Call Log', icon: History },
+              { id: 'summaries' as Tab, label: 'Summaries', icon: BarChart3 },
+              { id: 'activityMonitor' as Tab, label: 'Activity Monitor', icon: Eye },
               { id: 'pulse' as Tab, label: 'Sales Pulse', icon: Activity },
               { id: 'leaderboard' as Tab, label: 'Leaderboard', icon: Trophy },
               { id: 'targets' as Tab, label: 'Targets', icon: TargetIcon },
               { id: 'leadQuality' as Tab, label: 'Lead Quality', icon: Percent },
+              { id: 'liveDemos' as Tab, label: 'Live Demos', icon: Video },
               { id: 'unmatchedCalls' as Tab, label: 'Unmatched Calls', icon: PhoneIncoming },
               { id: 'devices' as Tab, label: 'Devices', icon: Smartphone },
             ]
           : [
               { id: 'leads' as Tab, label: 'Leads', icon: Users },
+              { id: 'reminders' as Tab, label: 'My Reminders', icon: Bell },
+              { id: 'tasks' as Tab, label: 'My Tasks', icon: ListChecks },
               { id: 'callLog' as Tab, label: 'Call Log', icon: History },
               { id: 'demoBooked' as Tab, label: 'Demo Booked', icon: Calendar },
               { id: 'demoRescheduled' as Tab, label: 'Demo Rescheduled', icon: RefreshCw },
@@ -589,15 +690,32 @@ export default function SalesPage() {
               placeholder="Search name, phone, email..."
               className="px-3 py-2 border rounded-lg text-sm w-64"
             />
-            <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} className="px-3 py-2 border rounded-lg text-sm">
-              <option value="">All statuses</option>
-              {STATUSES.map((s) => <option key={s} value={s}>{s.replace(/_/g, ' ')}</option>)}
-            </select>
+            <MultiSelect label="Lead stage" value={statusFilter} onChange={setStatusFilter}
+              options={STATUSES.map((s) => ({ value: s, label: s.replace(/_/g, ' ') }))} />
+            <MultiSelect label="Status" value={activityFilter} onChange={setActivityFilter}
+              options={[...ACTIVITY_STATUSES.map((s) => ({ value: s.value, label: s.label })), { value: 'NONE', label: 'No status yet' }]} />
+            {isAdmin && (
+              <MultiSelect label="Assigned to" value={assignedFilter} onChange={setAssignedFilter}
+                options={[{ value: 'NONE', label: 'Unassigned' }, ...employees.map((e) => ({ value: e.id, label: `${e.firstName} ${e.lastName}` }))]} />
+            )}
+            <MultiSelect label="Source" value={sourceFilter} onChange={setSourceFilter}
+              options={[...sourceOptions.map((s) => ({ value: s, label: s })), { value: 'Unknown', label: 'Unknown' }]} />
             <select value={followUpFilter} onChange={(e) => setFollowUpFilter(e.target.value)} className="px-3 py-2 border rounded-lg text-sm">
               <option value="">All reminders</option>
               <option value="today">Due today</option>
               <option value="overdue">Overdue</option>
             </select>
+            <label className="text-xs text-muted-foreground flex items-center gap-1">Created
+              <input type="date" value={createdFrom} onChange={(e) => setCreatedFrom(e.target.value)} className="px-2 py-1.5 border rounded-lg text-sm" />
+              –<input type="date" value={createdTo} onChange={(e) => setCreatedTo(e.target.value)} className="px-2 py-1.5 border rounded-lg text-sm" />
+            </label>
+            <label className="text-xs text-muted-foreground flex items-center gap-1">Follow-up
+              <input type="date" value={followFrom} onChange={(e) => setFollowFrom(e.target.value)} className="px-2 py-1.5 border rounded-lg text-sm" />
+              –<input type="date" value={followTo} onChange={(e) => setFollowTo(e.target.value)} className="px-2 py-1.5 border rounded-lg text-sm" />
+            </label>
+            {(statusFilter || activityFilter || assignedFilter || sourceFilter || createdFrom || createdTo || followFrom || followTo || followUpFilter) && (
+              <button onClick={() => { setStatusFilter(''); setActivityFilter(''); setAssignedFilter(''); setSourceFilter(''); setCreatedFrom(''); setCreatedTo(''); setFollowFrom(''); setFollowTo(''); setFollowUpFilter(''); }} className="text-xs text-blue-600 hover:underline">Clear all filters</button>
+            )}
           </div>
 
           {/* Leads table */}
@@ -610,6 +728,7 @@ export default function SalesPage() {
                   <th className="px-3 py-3">Phone</th>
                   <th className="px-3 py-3">Email</th>
                   <th className="px-3 py-3">Status</th>
+                  <th className="px-3 py-3">Lead Stage</th>
                   <th className="px-3 py-3">Assigned</th>
                   <th className="px-3 py-3">Source</th>
                   <th className="px-3 py-3">Demo</th>
@@ -618,13 +737,14 @@ export default function SalesPage() {
                   <th className="px-3 py-3">Created</th>
                   <th className="px-3 py-3">Lead Age</th>
                   <th className="px-3 py-3">Date Of Demo</th>
+                  {isAdmin && <th className="px-3 py-3"></th>}
                 </tr>
               </thead>
               <tbody className="divide-y">
                 {loading ? (
-                  <tr><td colSpan={13} className="px-4 py-8 text-center text-muted-foreground">Loading...</td></tr>
+                  <tr><td colSpan={15} className="px-4 py-8 text-center text-muted-foreground">Loading...</td></tr>
                 ) : leads.length === 0 ? (
-                  <tr><td colSpan={13} className="px-4 py-8 text-center text-muted-foreground">No leads found</td></tr>
+                  <tr><td colSpan={15} className="px-4 py-8 text-center text-muted-foreground">No leads found</td></tr>
                 ) : leads.map((lead, i) => {
                   const latestDemo = lead.demos?.[0];
                   return (
@@ -642,6 +762,11 @@ export default function SalesPage() {
                         {lead.email ? (
                           <div className="flex items-center gap-1 text-xs text-muted-foreground"><Mail className="w-3 h-3" /> {lead.email}</div>
                         ) : '—'}
+                      </td>
+                      <td className="px-3 py-3 whitespace-nowrap">
+                        {lead.activityStatus
+                          ? <span className="text-xs font-medium rounded-full px-2 py-1 bg-slate-100 text-slate-700">{ACTIVITY_STATUS_LABEL[lead.activityStatus]}</span>
+                          : <span className="text-xs text-muted-foreground">—</span>}
                       </td>
                       <td className="px-3 py-3">
                         {canEdit ? (
@@ -685,7 +810,7 @@ export default function SalesPage() {
                         ) : <span className="text-muted-foreground text-xs">Not booked</span>}
                       </td>
                       <td className={`px-3 py-3 text-xs whitespace-nowrap ${reminderColor(lead.nextFollowUpAt)}`}>
-                        {lead.nextFollowUpAt ? formatDate(lead.nextFollowUpAt) : '—'}
+                        {lead.nextFollowUpAt ? formatDateTime(lead.nextFollowUpAt) : '—'}
                       </td>
                       <td className="px-3 py-3 text-xs text-muted-foreground whitespace-nowrap">
                         {lead.lastContactAt ? formatDateTime(lead.lastContactAt) : 'Never'}
@@ -695,6 +820,11 @@ export default function SalesPage() {
                       <td className="px-3 py-3 text-xs text-muted-foreground whitespace-nowrap">
                         {latestDemo ? formatDate(latestDemo.scheduledAt) : '—'}
                       </td>
+                      {isAdmin && (
+                        <td className="px-3 py-3">
+                          <button onClick={() => deleteLead(lead)} title="Remove from screen (kept in database)" className="text-xs text-red-600 hover:underline">Remove</button>
+                        </td>
+                      )}
                     </tr>
                   );
                 })}
@@ -729,6 +859,16 @@ export default function SalesPage() {
       {tab === 'pulse' && isAdmin && <SalesPulsePanel canEdit={canEdit} />}
 
       {tab === 'leadQuality' && isAdmin && <LeadQualityPanel />}
+
+      {tab === 'liveDemos' && isAdmin && <LiveDemosPanel />}
+
+      {tab === 'reminders' && <RemindersPanel onOpenLead={openLeadDetail} />}
+
+      {tab === 'tasks' && <TasksPanel isAdmin={isAdmin} canEdit={canEdit} employees={employees} onOpenLead={openLeadDetail} />}
+
+      {tab === 'summaries' && isAdmin && <SummariesPanel />}
+
+      {tab === 'activityMonitor' && isAdmin && <ActivityMonitorPanel employees={employees} onOpenLead={openLeadDetail} />}
 
       {tab === 'leaderboard' && isAdmin && <LeaderboardPanel />}
 
@@ -1086,9 +1226,14 @@ function LeadDetailModal({ lead, employees, canEdit, onClose, onChanged, setGlob
   const [loadingHistory, setLoadingHistory] = useState(true);
   const [localError, setLocalError] = useState('');
 
+  const [history, setHistory] = useState<LeadHistoryRow[]>([]);
+  const [courses, setCourses] = useState<{ id: string; name: string }[]>([]);
   const [callNotes, setCallNotes] = useState('');
-  const [callFollowUp, setCallFollowUp] = useState('');
-  const [callStatus, setCallStatus] = useState<LeadStatus | ''>('');
+  const [callFollowUp, setCallFollowUp] = useState(''); // datetime-local value (date AND time)
+  const [callActivityType, setCallActivityType] = useState<ActivityType>('CALL');
+  const [callActivityStatus, setCallActivityStatus] = useState<ActivityStatus | ''>('');
+  const [callStage, setCallStage] = useState<LeadStatus | ''>(''); // optional manual stage override
+  const [callCourse, setCallCourse] = useState(lead.courseInterest || '');
   const [callLostReason, setCallLostReason] = useState<LeadLostReason | ''>('');
   // Student intake — collected during the call itself, pre-filled with
   // whatever's already on file for this lead so a BDA only has to fill in
@@ -1103,6 +1248,9 @@ function LeadDetailModal({ lead, employees, canEdit, onClose, onChanged, setGlob
   const [showScheduleForm, setShowScheduleForm] = useState(false);
   const [demoScheduledAt, setDemoScheduledAt] = useState('');
   const [demoMode, setDemoMode] = useState<DemoMode>('ONLINE');
+  const [demoCourse, setDemoCourse] = useState(lead.courseInterest || '');
+  const [demoConductedBy, setDemoConductedBy] = useState(lead.assignedTo?.id || '');
+  const [demoEmail, setDemoEmail] = useState(lead.email || '');
   const [savingDemo, setSavingDemo] = useState(false);
 
   const [actingDemo, setActingDemo] = useState<{ id: string; type: 'complete' | 'reschedule' | 'noshow' | 'cancel' } | null>(null);
@@ -1113,7 +1261,6 @@ function LeadDetailModal({ lead, employees, canEdit, onClose, onChanged, setGlob
   const [actionRescheduleReason, setActionRescheduleReason] = useState('');
   // Mark Conducted specifics.
   const [actionOutcome, setActionOutcome] = useState<DemoOutcome | ''>('');
-  const [actionCoConductedById, setActionCoConductedById] = useState('');
   const [actionProofFile, setActionProofFile] = useState<File | null>(null);
   const [savingAction, setSavingAction] = useState(false);
 
@@ -1123,12 +1270,14 @@ function LeadDetailModal({ lead, employees, canEdit, onClose, onChanged, setGlob
     setLoadingHistory(true);
     setLocalError('');
     try {
-      const [callsRes, demosRes] = await Promise.all([
+      const [callsRes, demosRes, histRes] = await Promise.all([
         api.get(`/api/sales/leads/${lead.id}/calls`),
         api.get('/api/sales/demos', { params: { leadId: lead.id } }),
+        api.get(`/api/sales/leads/${lead.id}/history`),
       ]);
       setCallLogs(callsRes.data.data);
       setDemos(demosRes.data.data);
+      setHistory(histRes.data.data);
     } catch (err: unknown) {
       const e = err as { response?: { data?: { message?: string } } };
       setLocalError(e.response?.data?.message || 'Failed to load lead history');
@@ -1138,25 +1287,32 @@ function LeadDetailModal({ lead, employees, canEdit, onClose, onChanged, setGlob
   }, [lead.id]);
 
   useEffect(() => { load(); }, [load]);
+  useEffect(() => { api.get('/api/sales/courses').then((r) => setCourses(r.data.data)).catch(() => setCourses([])); }, []);
 
   const submitCall = async () => {
-    if (!callNotes.trim()) { setLocalError('Call notes are required'); return; }
-    if (callStatus === 'LOST' && !callLostReason) { setLocalError('Pick a reason for marking this lead Lost'); return; }
+    if (!callActivityStatus) { setLocalError('Choose the Update Status first'); return; }
+    // DNP (did not pick) needs no notes; every other status does.
+    if (callActivityStatus !== 'DNP' && !callNotes.trim()) { setLocalError('Notes are required for this status'); return; }
+    if (NEEDS_FOLLOW_UP.includes(callActivityStatus) && !callFollowUp) { setLocalError('Pick the follow-up date and time'); return; }
+    if (callActivityStatus === 'DEMO_BOOKED' && !callCourse.trim()) { setLocalError('Select the course for the demo'); return; }
     setSavingCall(true);
     setLocalError('');
     try {
       await api.post(`/api/sales/leads/${lead.id}/calls`, {
-        notes: callNotes.trim(),
-        nextFollowUpAt: callFollowUp ? new Date(callFollowUp).toISOString() : undefined,
-        status: callStatus || undefined,
-        lostReason: callStatus === 'LOST' ? callLostReason : undefined,
+        activityType: callActivityType,
+        activityStatus: callActivityStatus,
+        notes: callNotes.trim() || undefined,
+        nextFollowUpAt: NEEDS_FOLLOW_UP.includes(callActivityStatus) ? new Date(callFollowUp).toISOString() : undefined,
+        status: callStage || undefined,
+        courseInterest: callCourse.trim() || undefined,
+        lostReason: callActivityStatus === 'DISQUALIFIED' ? (callLostReason || undefined) : undefined,
         city: callCity.trim(),
         educationQualification: callEducation.trim(),
         collegeName: callCollege.trim(),
         passedOutYear: callPassedOutYear.trim(),
         currentStatus: callCurrentStatus.trim(),
       });
-      setCallNotes(''); setCallFollowUp(''); setCallStatus(''); setCallLostReason('');
+      setCallNotes(''); setCallFollowUp(''); setCallActivityStatus(''); setCallStage(''); setCallLostReason('');
       await load();
       onChanged();
     } catch (err: unknown) {
@@ -1182,6 +1338,8 @@ function LeadDetailModal({ lead, employees, canEdit, onClose, onChanged, setGlob
 
   const submitScheduleDemo = async () => {
     if (!demoScheduledAt) { setLocalError('Pick a date/time for the demo'); return; }
+    if (!demoCourse.trim()) { setLocalError('Select the course for the demo'); return; }
+    if (demoMode === 'ONLINE' && !/^\S+@\S+\.\S+$/.test(demoEmail.trim())) { setLocalError('Enter the student\'s email — the online demo link is sent there'); return; }
     setSavingDemo(true);
     setLocalError('');
     try {
@@ -1189,6 +1347,9 @@ function LeadDetailModal({ lead, employees, canEdit, onClose, onChanged, setGlob
         leadId: lead.id,
         scheduledAt: new Date(demoScheduledAt).toISOString(),
         mode: demoMode,
+        courseEnquired: demoCourse.trim(),
+        conductedById: demoConductedBy || undefined,
+        attendeeEmail: demoMode === 'ONLINE' ? demoEmail.trim() : undefined,
       });
       setDemoScheduledAt(''); setDemoMode('ONLINE');
       setShowScheduleForm(false);
@@ -1205,7 +1366,7 @@ function LeadDetailModal({ lead, employees, canEdit, onClose, onChanged, setGlob
   const closeAction = () => {
     setActingDemo(null); setActionFeedback(''); setActionConductedById('');
     setActionNewScheduledAt(''); setActionNewMode('ONLINE'); setActionRescheduleReason('');
-    setActionOutcome(''); setActionCoConductedById(''); setActionProofFile(null);
+    setActionOutcome(''); setActionProofFile(null);
   };
 
   const submitAction = async () => {
@@ -1227,7 +1388,6 @@ function LeadDetailModal({ lead, employees, canEdit, onClose, onChanged, setGlob
         fd.append('outcome', actionOutcome);
         if (actionFeedback) fd.append('feedback', actionFeedback);
         if (actionConductedById) fd.append('conductedById', actionConductedById);
-        if (actionCoConductedById) fd.append('coConductedById', actionCoConductedById);
         if (actionProofFile) fd.append('proof', actionProofFile);
         await api.put(`/api/sales/demos/${actingDemo.id}`, fd, { headers: { 'Content-Type': 'multipart/form-data' } });
       } else if (actingDemo.type === 'noshow') {
@@ -1298,33 +1458,84 @@ function LeadDetailModal({ lead, employees, canEdit, onClose, onChanged, setGlob
         {/* Log a call */}
         {canEdit && (
           <div className="border rounded-xl p-4 space-y-3 bg-muted/20">
-            <h3 className="font-semibold text-sm flex items-center gap-2"><PhoneCall className="w-4 h-4" /> Log a Call</h3>
-            <textarea
-              className="w-full px-3 py-2 border rounded-lg text-sm"
-              placeholder="What happened on this call?"
-              rows={2}
-              value={callNotes}
-              onChange={(e) => setCallNotes(e.target.value)}
-            />
+            <h3 className="font-semibold text-sm flex items-center gap-2"><PhoneCall className="w-4 h-4" /> Log Activity</h3>
+
             <div className="flex flex-wrap items-center gap-3">
               <label className="text-xs text-muted-foreground flex items-center gap-2">
-                Next follow-up:
-                <input type="date" className="px-2 py-1 border rounded-lg text-sm" value={callFollowUp} onChange={(e) => setCallFollowUp(e.target.value)} />
+                Activity:
+                <select className="px-2 py-1 border rounded-lg text-sm" value={callActivityType} onChange={(e) => setCallActivityType(e.target.value as ActivityType)}>
+                  <option value="CALL">Call</option>
+                  <option value="MEETING">Meeting / Visit</option>
+                </select>
               </label>
+              {/* Step 1: update status */}
               <label className="text-xs text-muted-foreground flex items-center gap-2">
-                Update status:
-                <select className="px-2 py-1 border rounded-lg text-sm" value={callStatus} onChange={(e) => setCallStatus(e.target.value as LeadStatus | '')}>
-                  <option value="">No change</option>
-                  {STATUSES.map((s) => <option key={s} value={s}>{s.replace(/_/g, ' ')}</option>)}
+                1. Update status *
+                <select className="px-2 py-1 border rounded-lg text-sm" value={callActivityStatus} onChange={(e) => { setCallActivityStatus(e.target.value as ActivityStatus | ''); setCallStage(''); }}>
+                  <option value="">Select...</option>
+                  {ACTIVITY_STATUSES.map((s) => <option key={s.value} value={s.value}>{s.label}</option>)}
                 </select>
               </label>
-              {callStatus === 'LOST' && (
-                <select className="px-2 py-1 border rounded-lg text-sm" value={callLostReason} onChange={(e) => setCallLostReason(e.target.value as LeadLostReason)}>
-                  <option value="">Reason...</option>
-                  {LOST_REASONS.map((r) => <option key={r.value} value={r.value}>{r.label}</option>)}
-                </select>
-              )}
             </div>
+
+            {callActivityStatus && (
+              <div className="space-y-3">
+                {/* Step 2: follow-up date AND time */}
+                {NEEDS_FOLLOW_UP.includes(callActivityStatus) && (
+                  <label className="text-xs text-muted-foreground flex items-center gap-2">
+                    2. Follow-up date & time *
+                    <input type="datetime-local" className="px-2 py-1 border rounded-lg text-sm" value={callFollowUp} onChange={(e) => setCallFollowUp(e.target.value)} />
+                  </label>
+                )}
+
+                {/* Demo booked needs the course */}
+                {callActivityStatus === 'DEMO_BOOKED' && (
+                  <label className="text-xs text-muted-foreground flex items-center gap-2">
+                    Course for the demo *
+                    <select className="px-2 py-1 border rounded-lg text-sm" value={callCourse} onChange={(e) => setCallCourse(e.target.value)}>
+                      <option value="">Select course...</option>
+                      {callCourse && !courses.some((c) => c.name === callCourse) && <option value={callCourse}>{callCourse}</option>}
+                      {courses.map((c) => <option key={c.id} value={c.name}>{c.name}</option>)}
+                    </select>
+                  </label>
+                )}
+
+                {callActivityStatus === 'DISQUALIFIED' && (
+                  <select className="px-2 py-1 border rounded-lg text-sm" value={callLostReason} onChange={(e) => setCallLostReason(e.target.value as LeadLostReason | '')}>
+                    <option value="">Reason (optional)...</option>
+                    {LOST_REASONS.filter((r) => r.value !== 'NOT_INTERESTED').map((r) => <option key={r.value} value={r.value}>{r.label}</option>)}
+                  </select>
+                )}
+
+                {/* Step 3: lead stage — follows the status automatically */}
+                <label className="text-xs text-muted-foreground flex flex-wrap items-center gap-2">
+                  3. Lead stage
+                  <select
+                    className="px-2 py-1 border rounded-lg text-sm"
+                    value={callStage}
+                    onChange={(e) => setCallStage(e.target.value as LeadStatus | '')}
+                    disabled={STATUS_STAGE[callActivityStatus] === 'LOST'}
+                  >
+                    <option value="">Auto → {STATUS_STAGE[callActivityStatus].replace(/_/g, ' ')}</option>
+                    {STATUS_STAGE[callActivityStatus] !== 'LOST' && STATUSES.filter((s) => s !== 'LOST' && s !== 'NEW').map((s) => <option key={s} value={s}>{s.replace(/_/g, ' ')}</option>)}
+                  </select>
+                  <span className="text-[11px]">Set automatically from the status; change only if needed.</span>
+                </label>
+
+                {/* DNP = did not pick, so no notes to write */}
+                {callActivityStatus !== 'DNP' ? (
+                  <textarea
+                    className="w-full px-3 py-2 border rounded-lg text-sm"
+                    placeholder={callActivityType === 'MEETING' ? 'What was discussed in the meeting? *' : 'What happened on this call? *'}
+                    rows={2}
+                    value={callNotes}
+                    onChange={(e) => setCallNotes(e.target.value)}
+                  />
+                ) : (
+                  <p className="text-xs text-muted-foreground italic">DNP — no notes needed.</p>
+                )}
+              </div>
+            )}
 
             <p className="text-xs font-medium text-muted-foreground pt-1">Student details</p>
             <div className="grid grid-cols-2 gap-2">
@@ -1337,7 +1548,7 @@ function LeadDetailModal({ lead, employees, canEdit, onClose, onChanged, setGlob
 
             <div className="flex justify-end">
               <button onClick={submitCall} disabled={savingCall} className="px-4 py-2 text-sm rounded-lg bg-blue-600 text-white disabled:opacity-50">
-                {savingCall ? 'Saving...' : 'Log Call'}
+                {savingCall ? 'Saving...' : 'Log Activity'}
               </button>
             </div>
           </div>
@@ -1345,25 +1556,47 @@ function LeadDetailModal({ lead, employees, canEdit, onClose, onChanged, setGlob
 
         {/* Call history */}
         <div>
-          <h3 className="font-semibold text-sm mb-2">Call History {lead._count?.callLogs ? `(${lead._count.callLogs})` : ''}</h3>
+          <h3 className="font-semibold text-sm mb-2">Activity History {lead._count?.callLogs ? `(${lead._count.callLogs})` : ''}</h3>
           {loadingHistory ? (
             <p className="text-sm text-muted-foreground">Loading...</p>
           ) : callLogs.length === 0 ? (
-            <p className="text-sm text-muted-foreground">No calls logged yet.</p>
+            <p className="text-sm text-muted-foreground">No activity logged yet.</p>
           ) : (
             <div className="space-y-2 max-h-56 overflow-y-auto pr-1">
               {callLogs.map((c) => (
                 <div key={c.id} className="border rounded-lg p-3 text-sm">
                   <div className="flex items-center justify-between text-xs text-muted-foreground mb-1">
-                    <span>{c.calledBy ? `${c.calledBy.firstName} ${c.calledBy.lastName}` : 'Unknown'}</span>
+                    <span>
+                      {c.calledBy ? `${c.calledBy.firstName} ${c.calledBy.lastName}` : 'Unknown'}
+                      {' · '}{c.activityType === 'MEETING' ? 'Meeting' : 'Call'}
+                      {c.activityStatus && <span className="ml-1 font-medium text-foreground">· {ACTIVITY_STATUS_LABEL[c.activityStatus]}</span>}
+                    </span>
                     <span>{formatDateTime(c.calledAt)}</span>
                   </div>
-                  <p>{c.notes}</p>
+                  {c.notes ? <p>{c.notes}</p> : <p className="text-xs text-muted-foreground italic">No notes</p>}
                   {c.recordingUrl && <div className="mt-2"><RecordingPlayer url={c.recordingUrl} /></div>}
-                  {c.nextFollowUpAt && <p className="text-xs text-amber-600 mt-1">Next follow-up: {formatDate(c.nextFollowUpAt)}</p>}
+                  {c.nextFollowUpAt && <p className="text-xs text-amber-600 mt-1">Next follow-up: {formatDateTime(c.nextFollowUpAt)}</p>}
                 </div>
               ))}
             </div>
+          )}
+        </div>
+
+        {/* Full lead history — from creation, never edited */}
+        <div>
+          <h3 className="font-semibold text-sm mb-2">Lead History</h3>
+          {history.length === 0 ? (
+            <p className="text-sm text-muted-foreground">No history yet.</p>
+          ) : (
+            <ol className="relative border-l pl-4 space-y-2 max-h-60 overflow-y-auto pr-1">
+              {history.map((h) => (
+                <li key={h.id} className="text-xs">
+                  <span className="absolute -left-[5px] mt-1 w-2.5 h-2.5 rounded-full bg-blue-500" />
+                  <p className="text-foreground">{h.summary}</p>
+                  <p className="text-muted-foreground">{h.actor ? `${h.actor.firstName} ${h.actor.lastName}` : 'System'} · {formatDateTime(h.createdAt)}</p>
+                </li>
+              ))}
+            </ol>
           )}
         </div>
 
@@ -1386,7 +1619,22 @@ function LeadDetailModal({ lead, employees, canEdit, onClose, onChanged, setGlob
                 </select>
               </div>
 
-              <p className="text-xs text-muted-foreground italic">Student details are captured in Log a Call above and carry over automatically.</p>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                <select className="px-2 py-1.5 border rounded-lg text-sm" value={demoCourse} onChange={(e) => setDemoCourse(e.target.value)}>
+                  <option value="">Course *</option>
+                  {demoCourse && !courses.some((c) => c.name === demoCourse) && <option value={demoCourse}>{demoCourse}</option>}
+                  {courses.map((c) => <option key={c.id} value={c.name}>{c.name}</option>)}
+                </select>
+                <select className="px-2 py-1.5 border rounded-lg text-sm" value={demoConductedBy} onChange={(e) => setDemoConductedBy(e.target.value)}>
+                  <option value="">Conducted by...</option>
+                  {employees.map((e) => <option key={e.id} value={e.id}>{e.firstName} {e.lastName}</option>)}
+                </select>
+                {demoMode === 'ONLINE' && (
+                  <input type="email" className="px-2 py-1.5 border rounded-lg text-sm sm:col-span-2" placeholder="Student email * (online demo link is sent here)" value={demoEmail} onChange={(e) => setDemoEmail(e.target.value)} />
+                )}
+              </div>
+              {demoMode === 'ONLINE' && <p className="text-xs text-muted-foreground">Online demos run inside the portal for 60 minutes. Sales Admin is emailed and can watch it live.</p>}
+              <p className="text-xs text-muted-foreground italic">Student details are captured in Log Activity above and carry over automatically.</p>
 
               <div className="flex gap-2">
                 <button onClick={submitScheduleDemo} disabled={savingDemo} className="px-3 py-1.5 text-xs rounded-lg bg-blue-600 text-white disabled:opacity-50">
@@ -1427,7 +1675,24 @@ function LeadDetailModal({ lead, employees, canEdit, onClose, onChanged, setGlob
                     <p className="text-xs text-muted-foreground">{intakeParts.join(' · ')}</p>
                   )}
                   {d.bookingComments && <p className="text-xs text-muted-foreground italic">"{d.bookingComments}"</p>}
-                  {d.conductedBy && <p className="text-xs text-muted-foreground">Conducted by {d.conductedBy.firstName} {d.conductedBy.lastName}{d.coConductedBy ? ` · with ${d.coConductedBy.firstName} ${d.coConductedBy.lastName}` : ''}</p>}
+                  {d.conductedBy && <p className="text-xs text-muted-foreground">Conducted by {d.conductedBy.firstName} {d.conductedBy.lastName}</p>}
+                  {d.mode === 'ONLINE' && d.roomName && d.status === 'SCHEDULED' && (
+                    <div className="flex flex-wrap items-center gap-2 text-xs">
+                      {d.closedAt ? (
+                        <>
+                          <span className="text-red-600 font-medium">Room closed (60 min over)</span>
+                          {d.reopenRequestedAt
+                            ? <span className="text-amber-600">Reopen request waiting for Sales Admin</span>
+                            : <a href={`/sales-demo/${d.id}`} target="_blank" rel="noreferrer" className="text-blue-600 hover:underline font-medium">Request reopen</a>}
+                        </>
+                      ) : (
+                        <a href={`/sales-demo/${d.id}`} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 px-2 py-1 rounded-lg bg-green-600 text-white font-medium">
+                          <Video className="w-3 h-3" /> {d.startedAt ? 'Rejoin demo room' : 'Start demo room'}
+                        </a>
+                      )}
+                      {d.accessCode && <span className="text-muted-foreground">Code: <span className="font-mono">{d.accessCode}</span> · link emailed to student</span>}
+                    </div>
+                  )}
                   {d.outcome && (
                     <span className={`inline-block text-xs font-medium rounded-full px-2 py-1 ${DEMO_OUTCOME_COLOR[d.outcome]}`}>{DEMO_OUTCOME_LABEL[d.outcome]}</span>
                   )}
@@ -1480,12 +1745,6 @@ function LeadDetailModal({ lead, employees, canEdit, onClose, onChanged, setGlob
                                 {employees.map((e) => <option key={e.id} value={e.id}>{e.firstName} {e.lastName}</option>)}
                               </select>
                             )}
-                            {employees.length > 0 && (
-                              <select className="px-2 py-1 border rounded-lg text-xs" value={actionCoConductedById} onChange={(e) => setActionCoConductedById(e.target.value)}>
-                                <option value="">Co-conducted by (optional)...</option>
-                                {employees.map((e) => <option key={e.id} value={e.id}>{e.firstName} {e.lastName}</option>)}
-                              </select>
-                            )}
                           </div>
                           <label className="text-xs text-muted-foreground flex items-center gap-2">
                             Proof of demo {d.proofUrl ? '(already attached — pick a file to replace it)' : '*'}:
@@ -1526,6 +1785,459 @@ function LeadDetailModal({ lead, employees, canEdit, onClose, onChanged, setGlob
             </div>
           )}
         </div>
+      </div>
+    </div>
+  );
+}
+
+// ── My Reminders: follow-ups due + open tasks, grouped by urgency ────────────
+interface TaskRow {
+  id: string; title: string; description?: string | null; dueAt?: string | null; status: 'OPEN' | 'DONE' | 'CANCELLED';
+  completedAt?: string | null; bucket?: string;
+  lead?: { id: string; name: string; phone?: string } | null;
+  assignedTo?: EmployeeLite; createdBy?: EmployeeLite | null;
+}
+interface FollowUpRow {
+  id: string; name: string; phone: string; status: LeadStatus; activityStatus?: ActivityStatus | null;
+  courseInterest?: string | null; nextFollowUpAt: string; bucket: string;
+}
+const BUCKETS: { id: string; label: string; cls: string }[] = [
+  { id: 'overdue', label: 'Overdue', cls: 'text-red-600' },
+  { id: 'today', label: 'Today', cls: 'text-amber-600' },
+  { id: 'upcoming', label: 'Upcoming', cls: 'text-foreground' },
+];
+
+function RemindersPanel({ onOpenLead }: { onOpenLead: (id: string) => void }) {
+  const [followUps, setFollowUps] = useState<FollowUpRow[]>([]);
+  const [tasks, setTasks] = useState<TaskRow[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+  const load = useCallback(async () => {
+    setLoading(true); setError('');
+    try {
+      const r = (await api.get('/api/sales/reminders')).data.data;
+      setFollowUps(r.followUps); setTasks(r.tasks);
+    } catch (err: unknown) { setError((err as { response?: { data?: { message?: string } } }).response?.data?.message || 'Failed to load reminders'); }
+    finally { setLoading(false); }
+  }, []);
+  useEffect(() => { load(); }, [load]);
+
+  const done = async (id: string) => {
+    try { await api.put(`/api/sales/tasks/${id}`, { status: 'DONE' }); load(); }
+    catch (err: unknown) { setError((err as { response?: { data?: { message?: string } } }).response?.data?.message || 'Failed'); }
+  };
+
+  return (
+    <div className="space-y-6">
+      {error && <div className="bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg px-4 py-3">{error}</div>}
+      <div className="flex items-center justify-between">
+        <p className="text-xs text-muted-foreground">Your lead follow-ups and open tasks. Log an activity on a lead to set or clear its follow-up.</p>
+        <button onClick={load} disabled={loading} className="flex items-center gap-2 px-3 py-2 border rounded-lg text-sm font-medium hover:bg-muted/50 disabled:opacity-50">
+          <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} /> Refresh
+        </button>
+      </div>
+      {BUCKETS.map((b) => {
+        const f = followUps.filter((x) => x.bucket === b.id);
+        const t = tasks.filter((x) => x.bucket === b.id);
+        if (!f.length && !t.length) return null;
+        return (
+          <div key={b.id} className="space-y-2">
+            <h3 className={`text-sm font-semibold ${b.cls}`}>{b.label} ({f.length + t.length})</h3>
+            <div className="bg-card border rounded-xl divide-y">
+              {f.map((l) => (
+                <div key={`f-${l.id}`} className="flex items-center justify-between gap-3 px-4 py-3 text-sm">
+                  <div className="min-w-0">
+                    <button onClick={() => onOpenLead(l.id)} className="text-blue-600 hover:underline font-medium">{l.name}</button>
+                    <span className="text-xs text-muted-foreground ml-2">{l.phone}{l.courseInterest ? ` · ${l.courseInterest}` : ''}</span>
+                    <p className="text-xs text-muted-foreground">Follow-up · {l.activityStatus ? ACTIVITY_STATUS_LABEL[l.activityStatus] : l.status.replace(/_/g, ' ')}</p>
+                  </div>
+                  <span className={`text-xs whitespace-nowrap ${b.cls}`}>{formatDateTime(l.nextFollowUpAt)}</span>
+                </div>
+              ))}
+              {t.map((x) => (
+                <div key={`t-${x.id}`} className="flex items-center justify-between gap-3 px-4 py-3 text-sm">
+                  <div className="min-w-0">
+                    <span className="font-medium">{x.title}</span>
+                    {x.lead && <button onClick={() => onOpenLead(x.lead!.id)} className="text-xs text-blue-600 hover:underline ml-2">{x.lead.name}</button>}
+                    <p className="text-xs text-muted-foreground">Task{x.createdBy ? ` · from ${x.createdBy.firstName} ${x.createdBy.lastName}` : ''}</p>
+                  </div>
+                  <div className="flex items-center gap-3">
+                    {x.dueAt && <span className={`text-xs whitespace-nowrap ${b.cls}`}>{formatDateTime(x.dueAt)}</span>}
+                    <button onClick={() => done(x.id)} className="text-xs font-medium text-green-600 hover:underline">Done</button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        );
+      })}
+      {tasks.filter((x) => x.bucket === 'later').length > 0 && (
+        <div className="space-y-2">
+          <h3 className="text-sm font-semibold">No due date</h3>
+          <div className="bg-card border rounded-xl divide-y">
+            {tasks.filter((x) => x.bucket === 'later').map((x) => (
+              <div key={x.id} className="flex items-center justify-between px-4 py-3 text-sm">
+                <span className="font-medium">{x.title}</span>
+                <button onClick={() => done(x.id)} className="text-xs font-medium text-green-600 hover:underline">Done</button>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+      {!loading && followUps.length === 0 && tasks.length === 0 && <p className="text-sm text-muted-foreground text-center py-10">Nothing pending — you're all caught up.</p>}
+    </div>
+  );
+}
+
+// ── Manage Tasks: create tasks (Sales Admin can assign to anyone) ───────────
+function TasksPanel({ isAdmin, canEdit, employees, onOpenLead }: { isAdmin: boolean; canEdit: boolean; employees: EmployeeLite[]; onOpenLead: (id: string) => void }) {
+  const [rows, setRows] = useState<TaskRow[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+  const [statusF, setStatusF] = useState('OPEN');
+  const [assigneeF, setAssigneeF] = useState('');
+  const [title, setTitle] = useState('');
+  const [desc, setDesc] = useState('');
+  const [due, setDue] = useState('');
+  const [assignee, setAssignee] = useState('');
+  const [saving, setSaving] = useState(false);
+
+  const load = useCallback(async () => {
+    setLoading(true); setError('');
+    try {
+      const params: Record<string, string> = {};
+      if (statusF) params.status = statusF;
+      if (isAdmin && assigneeF) params.assignedToId = assigneeF;
+      setRows((await api.get('/api/sales/tasks', { params })).data.data);
+    } catch (err: unknown) { setError((err as { response?: { data?: { message?: string } } }).response?.data?.message || 'Failed to load tasks'); }
+    finally { setLoading(false); }
+  }, [statusF, assigneeF, isAdmin]);
+  useEffect(() => { load(); }, [load]);
+
+  const add = async () => {
+    if (!title.trim()) { setError('Enter a task title'); return; }
+    setSaving(true); setError('');
+    try {
+      await api.post('/api/sales/tasks', { title: title.trim(), description: desc.trim() || undefined, dueAt: due ? new Date(due).toISOString() : undefined, assignedToId: isAdmin && assignee ? assignee : undefined });
+      setTitle(''); setDesc(''); setDue(''); setAssignee('');
+      load();
+    } catch (err: unknown) { setError((err as { response?: { data?: { message?: string } } }).response?.data?.message || 'Failed to add task'); }
+    finally { setSaving(false); }
+  };
+  const setStatus = async (id: string, status: string) => {
+    try { await api.put(`/api/sales/tasks/${id}`, { status }); load(); }
+    catch (err: unknown) { setError((err as { response?: { data?: { message?: string } } }).response?.data?.message || 'Failed'); }
+  };
+
+  return (
+    <div className="space-y-4">
+      {error && <div className="bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg px-4 py-3">{error}</div>}
+      {canEdit && (
+        <div className="border rounded-xl p-4 space-y-3 bg-muted/20">
+          <h3 className="font-semibold text-sm">{isAdmin ? 'Create / assign a task' : 'Add a task for yourself'}</h3>
+          <div className="flex flex-wrap gap-2">
+            <input className="px-3 py-2 border rounded-lg text-sm flex-1 min-w-[220px]" placeholder="Task title *" value={title} onChange={(e) => setTitle(e.target.value)} />
+            <input type="datetime-local" className="px-2 py-2 border rounded-lg text-sm" value={due} onChange={(e) => setDue(e.target.value)} />
+            {isAdmin && (
+              <select className="px-2 py-2 border rounded-lg text-sm" value={assignee} onChange={(e) => setAssignee(e.target.value)}>
+                <option value="">Assign to me</option>
+                {employees.map((e) => <option key={e.id} value={e.id}>{e.firstName} {e.lastName}</option>)}
+              </select>
+            )}
+            <button onClick={add} disabled={saving} className="px-4 py-2 text-sm rounded-lg bg-blue-600 text-white disabled:opacity-50">{saving ? 'Saving...' : 'Add task'}</button>
+          </div>
+          <textarea className="w-full px-3 py-2 border rounded-lg text-sm" rows={2} placeholder="Details (optional)" value={desc} onChange={(e) => setDesc(e.target.value)} />
+        </div>
+      )}
+      <div className="flex flex-wrap items-center gap-3">
+        <select value={statusF} onChange={(e) => setStatusF(e.target.value)} className="px-3 py-2 border rounded-lg text-sm">
+          <option value="OPEN">Open</option><option value="DONE">Done</option><option value="CANCELLED">Cancelled</option><option value="">All</option>
+        </select>
+        {isAdmin && (
+          <select value={assigneeF} onChange={(e) => setAssigneeF(e.target.value)} className="px-3 py-2 border rounded-lg text-sm">
+            <option value="">Everyone</option>
+            {employees.map((e) => <option key={e.id} value={e.id}>{e.firstName} {e.lastName}</option>)}
+          </select>
+        )}
+      </div>
+      <div className="bg-card border rounded-xl overflow-x-auto">
+        <table className="w-full text-sm">
+          <thead className="bg-muted/50 text-left text-xs uppercase text-muted-foreground">
+            <tr><th className="px-3 py-3">Task</th><th className="px-3 py-3">Lead</th>{isAdmin && <th className="px-3 py-3">Assigned to</th>}<th className="px-3 py-3">Due</th><th className="px-3 py-3">Status</th><th className="px-3 py-3"></th></tr>
+          </thead>
+          <tbody className="divide-y">
+            {rows.length === 0 ? (
+              <tr><td colSpan={6} className="px-4 py-8 text-center text-muted-foreground">{loading ? 'Loading...' : 'No tasks'}</td></tr>
+            ) : rows.map((t) => (
+              <tr key={t.id} className="hover:bg-muted/30">
+                <td className="px-3 py-3"><span className="font-medium">{t.title}</span>{t.description && <p className="text-xs text-muted-foreground">{t.description}</p>}</td>
+                <td className="px-3 py-3 text-xs">{t.lead ? <button onClick={() => onOpenLead(t.lead!.id)} className="text-blue-600 hover:underline">{t.lead.name}</button> : '—'}</td>
+                {isAdmin && <td className="px-3 py-3 text-xs">{t.assignedTo ? `${t.assignedTo.firstName} ${t.assignedTo.lastName}` : '—'}</td>}
+                <td className="px-3 py-3 text-xs whitespace-nowrap">{t.dueAt ? formatDateTime(t.dueAt) : '—'}</td>
+                <td className="px-3 py-3 text-xs">{t.status === 'DONE' ? <span className="text-green-600">Done</span> : t.status === 'CANCELLED' ? <span className="text-muted-foreground">Cancelled</span> : <span className="text-amber-600">Open</span>}</td>
+                <td className="px-3 py-3 whitespace-nowrap space-x-3">
+                  {t.status === 'OPEN' && canEdit && (<>
+                    <button onClick={() => setStatus(t.id, 'DONE')} className="text-xs font-medium text-green-600 hover:underline">Done</button>
+                    <button onClick={() => setStatus(t.id, 'CANCELLED')} className="text-xs text-muted-foreground hover:underline">Cancel</button>
+                  </>)}
+                  {t.status !== 'OPEN' && canEdit && <button onClick={() => setStatus(t.id, 'OPEN')} className="text-xs text-blue-600 hover:underline">Reopen</button>}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+// ── Summaries (Sales Admin): lead assignment, lead stage, source ─────────────
+function SummariesPanel() {
+  const [assignment, setAssignment] = useState<{ employeeId: string | null; name: string; total: number; stages: Record<string, number>; overdue: number; newToday: number }[]>([]);
+  const [stages, setStages] = useState<{ total: number; stages: { stage: LeadStatus; count: number }[]; statuses: { status: string; count: number }[] } | null>(null);
+  const [sources, setSources] = useState<{ source: string; total: number; demo: number; enrolled: number; lost: number; open: number; conversion: number }[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+  useEffect(() => {
+    setLoading(true);
+    Promise.all([api.get('/api/sales/insights/assignment'), api.get('/api/sales/insights/stages'), api.get('/api/sales/insights/sources')])
+      .then(([a, s, so]) => { setAssignment(a.data.data); setStages(s.data.data); setSources(so.data.data); })
+      .catch((err: unknown) => setError((err as { response?: { data?: { message?: string } } }).response?.data?.message || 'Failed to load summaries'))
+      .finally(() => setLoading(false));
+  }, []);
+  const th = 'px-3 py-3';
+  return (
+    <div className="space-y-8">
+      {error && <div className="bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg px-4 py-3">{error}</div>}
+      {loading && <p className="text-sm text-muted-foreground">Loading...</p>}
+
+      <section className="space-y-2">
+        <h3 className="font-semibold text-sm">Lead stage summary {stages ? `· ${stages.total} leads` : ''}</h3>
+        <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-3">
+          {STATUSES.map((s) => (
+            <div key={s} className="border rounded-xl p-3 bg-card">
+              <p className="text-xs text-muted-foreground">{s.replace(/_/g, ' ')}</p>
+              <p className="text-xl font-semibold">{stages?.stages.find((x) => x.stage === s)?.count ?? 0}</p>
+            </div>
+          ))}
+        </div>
+        <div className="flex flex-wrap gap-2 pt-1">
+          {[...ACTIVITY_STATUSES.map((s) => ({ key: s.value as string, label: s.label })), { key: 'NONE', label: 'No status yet' }].map((s) => (
+            <span key={s.key} className="text-xs bg-slate-100 text-slate-700 rounded-full px-3 py-1">{s.label}: <b>{stages?.statuses.find((x) => x.status === s.key)?.count ?? 0}</b></span>
+          ))}
+        </div>
+      </section>
+
+      <section className="space-y-2">
+        <h3 className="font-semibold text-sm">Lead assignment summary</h3>
+        <div className="bg-card border rounded-xl overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead className="bg-muted/50 text-left text-xs uppercase text-muted-foreground">
+              <tr><th className={th}>Salesperson</th><th className={th}>Total</th>{STATUSES.map((s) => <th key={s} className={th}>{s.replace(/_/g, ' ')}</th>)}<th className={th}>Overdue follow-ups</th><th className={th}>New today</th></tr>
+            </thead>
+            <tbody className="divide-y">
+              {assignment.map((r) => (
+                <tr key={r.employeeId || 'none'} className="hover:bg-muted/30">
+                  <td className="px-3 py-3 font-medium whitespace-nowrap">{r.name}</td>
+                  <td className="px-3 py-3 font-semibold">{r.total}</td>
+                  {STATUSES.map((s) => <td key={s} className="px-3 py-3 text-xs">{r.stages[s] || 0}</td>)}
+                  <td className={`px-3 py-3 text-xs ${r.overdue ? 'text-red-600 font-semibold' : ''}`}>{r.overdue}</td>
+                  <td className="px-3 py-3 text-xs">{r.newToday}</td>
+                </tr>
+              ))}
+              {assignment.length === 0 && !loading && <tr><td colSpan={11} className="px-4 py-6 text-center text-muted-foreground">No leads</td></tr>}
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section className="space-y-2">
+        <h3 className="font-semibold text-sm">Source summary</h3>
+        <div className="bg-card border rounded-xl overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead className="bg-muted/50 text-left text-xs uppercase text-muted-foreground">
+              <tr><th className={th}>Source</th><th className={th}>Leads</th><th className={th}>Open</th><th className={th}>Reached demo</th><th className={th}>Enrolled</th><th className={th}>Lost</th><th className={th}>Conversion</th></tr>
+            </thead>
+            <tbody className="divide-y">
+              {sources.map((r) => (
+                <tr key={r.source} className="hover:bg-muted/30">
+                  <td className="px-3 py-3 font-medium">{r.source}</td><td className="px-3 py-3">{r.total}</td><td className="px-3 py-3 text-xs">{r.open}</td>
+                  <td className="px-3 py-3 text-xs">{r.demo}</td><td className="px-3 py-3 text-xs text-green-700">{r.enrolled}</td><td className="px-3 py-3 text-xs text-red-600">{r.lost}</td>
+                  <td className="px-3 py-3 text-xs font-semibold">{r.conversion}%</td>
+                </tr>
+              ))}
+              {sources.length === 0 && !loading && <tr><td colSpan={7} className="px-4 py-6 text-center text-muted-foreground">No leads</td></tr>}
+            </tbody>
+          </table>
+        </div>
+      </section>
+    </div>
+  );
+}
+
+// ── Activity Monitor (Sales Admin): every change on every lead, with who did it ──
+interface FeedRow { id: string; type: string; summary: string; createdAt: string; actor?: EmployeeLite | null; lead?: { id: string; name: string; phone: string } | null }
+const FEED_TYPES: { value: string; label: string }[] = [
+  { value: 'ACTIVITY', label: 'Activities logged' }, { value: 'STATUS', label: 'Status changes' }, { value: 'STAGE', label: 'Stage changes' },
+  { value: 'ASSIGNED', label: 'Assignments' }, { value: 'FOLLOW_UP', label: 'Follow-ups' }, { value: 'EDIT', label: 'Edits' },
+  { value: 'CREATED', label: 'Lead created' }, { value: 'DELETED', label: 'Removed' }, { value: 'DEMO', label: 'Demos' }, { value: 'TASK', label: 'Tasks' },
+];
+
+function ActivityMonitorPanel({ employees, onOpenLead }: { employees: EmployeeLite[]; onOpenLead: (id: string) => void }) {
+  const [rows, setRows] = useState<FeedRow[]>([]);
+  const [perPerson, setPerPerson] = useState<{ employeeId: string | null; name: string; count: number }[]>([]);
+  const [meta, setMeta] = useState<ListMeta | null>(null);
+  const [page, setPage] = useState(1);
+  const [types, setTypes] = useState('');
+  const [emp, setEmp] = useState('');
+  const [from, setFrom] = useState('');
+  const [to, setTo] = useState('');
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+  useEffect(() => { setPage(1); }, [types, emp, from, to]);
+  const load = useCallback(async () => {
+    setLoading(true); setError('');
+    try {
+      const params: Record<string, string> = { page: String(page), limit: '50' };
+      if (types) params.type = types; if (emp) params.employeeId = emp; if (from) params.from = from; if (to) params.to = to;
+      const r = await api.get('/api/sales/activity-feed', { params });
+      setRows(r.data.data); setMeta(r.data.meta); setPerPerson(r.data.perPerson || []);
+    } catch (err: unknown) { setError((err as { response?: { data?: { message?: string } } }).response?.data?.message || 'Failed to load activity'); }
+    finally { setLoading(false); }
+  }, [page, types, emp, from, to]);
+  useEffect(() => { load(); }, [load]);
+
+  return (
+    <div className="space-y-4">
+      {error && <div className="bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg px-4 py-3">{error}</div>}
+      <div className="flex flex-wrap items-center gap-3">
+        <MultiSelect label="Activity type" value={types} onChange={setTypes} options={FEED_TYPES} />
+        <select value={emp} onChange={(e) => setEmp(e.target.value)} className="px-3 py-2 border rounded-lg text-sm">
+          <option value="">Everyone</option>
+          {employees.map((e) => <option key={e.id} value={e.id}>{e.firstName} {e.lastName}</option>)}
+        </select>
+        <label className="text-xs text-muted-foreground flex items-center gap-1">From <input type="date" value={from} onChange={(e) => setFrom(e.target.value)} className="px-2 py-1.5 border rounded-lg text-sm" /></label>
+        <label className="text-xs text-muted-foreground flex items-center gap-1">To <input type="date" value={to} onChange={(e) => setTo(e.target.value)} className="px-2 py-1.5 border rounded-lg text-sm" /></label>
+        <button onClick={load} disabled={loading} className="flex items-center gap-2 px-3 py-2 border rounded-lg text-sm font-medium hover:bg-muted/50 disabled:opacity-50 ml-auto">
+          <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} /> Refresh
+        </button>
+      </div>
+      {perPerson.length > 0 && (
+        <div className="flex flex-wrap gap-2">
+          {perPerson.map((p) => <span key={p.employeeId || 'sys'} className="text-xs bg-slate-100 text-slate-700 rounded-full px-3 py-1">{p.name}: <b>{p.count}</b></span>)}
+        </div>
+      )}
+      <div className="bg-card border rounded-xl overflow-x-auto">
+        <table className="w-full text-sm">
+          <thead className="bg-muted/50 text-left text-xs uppercase text-muted-foreground">
+            <tr><th className="px-3 py-3">When</th><th className="px-3 py-3">Who</th><th className="px-3 py-3">Lead</th><th className="px-3 py-3">Type</th><th className="px-3 py-3">What changed</th></tr>
+          </thead>
+          <tbody className="divide-y">
+            {rows.length === 0 ? (
+              <tr><td colSpan={5} className="px-4 py-8 text-center text-muted-foreground">{loading ? 'Loading...' : 'No activity found'}</td></tr>
+            ) : rows.map((r) => (
+              <tr key={r.id} className="hover:bg-muted/30">
+                <td className="px-3 py-3 text-xs whitespace-nowrap text-muted-foreground">{formatDateTime(r.createdAt)}</td>
+                <td className="px-3 py-3 text-xs whitespace-nowrap">{r.actor ? `${r.actor.firstName} ${r.actor.lastName}` : 'System'}</td>
+                <td className="px-3 py-3 text-xs whitespace-nowrap">{r.lead ? <button onClick={() => onOpenLead(r.lead!.id)} className="text-blue-600 hover:underline">{r.lead.name}</button> : '—'}</td>
+                <td className="px-3 py-3 text-xs whitespace-nowrap">{FEED_TYPES.find((t) => t.value === r.type)?.label || r.type}</td>
+                <td className="px-3 py-3 text-xs">{r.summary}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      {!loading && meta && meta.total > 0 && (
+        <div className="flex items-center justify-between text-sm text-muted-foreground">
+          <span>{meta.total} entries · page {meta.page} of {meta.totalPages}</span>
+          <div className="flex gap-2">
+            <button disabled={page <= 1} onClick={() => setPage((p) => Math.max(p - 1, 1))} className="px-2 py-1.5 border rounded-lg disabled:opacity-40">Prev</button>
+            <button disabled={page >= meta.totalPages} onClick={() => setPage((p) => Math.min(p + 1, meta.totalPages))} className="px-2 py-1.5 border rounded-lg disabled:opacity-40">Next</button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── Live Demos (Sales Admin): watch online demos, approve reopen requests ───
+interface DemoRoomRow {
+  id: string; bookingNumber: string; scheduledAt: string; course?: string | null;
+  state: 'NOT_STARTED' | 'LIVE' | 'CLOSED' | 'REOPEN_REQUESTED';
+  expiresAt?: string | null; closedAt?: string | null; reopenNote?: string | null; reopenCount: number;
+  lead: { id: string; name: string; phone: string }; host?: string | null; participants: number;
+}
+const ROOM_STATE_LABEL: Record<DemoRoomRow['state'], { label: string; cls: string }> = {
+  NOT_STARTED: { label: 'Not started', cls: 'bg-gray-100 text-gray-700' },
+  LIVE: { label: 'Live now', cls: 'bg-green-100 text-green-700' },
+  CLOSED: { label: 'Closed', cls: 'bg-red-100 text-red-700' },
+  REOPEN_REQUESTED: { label: 'Reopen requested', cls: 'bg-amber-100 text-amber-700' },
+};
+
+function LiveDemosPanel() {
+  const [rows, setRows] = useState<DemoRoomRow[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+  const load = useCallback(async () => {
+    setLoading(true); setError('');
+    try { setRows((await api.get('/api/sales/demo-rooms')).data.data); }
+    catch (err: unknown) { setError((err as { response?: { data?: { message?: string } } }).response?.data?.message || 'Failed to load demos'); }
+    finally { setLoading(false); }
+  }, []);
+  useEffect(() => { load(); const t = setInterval(load, 30000); return () => clearInterval(t); }, [load]);
+
+  const decide = async (id: string, approve: boolean) => {
+    try { await api.post(`/api/sales/demos/${id}/room/reopen`, { approve }); load(); }
+    catch (err: unknown) { setError((err as { response?: { data?: { message?: string } } }).response?.data?.message || 'Failed'); }
+  };
+
+  return (
+    <div className="space-y-4">
+      {error && <div className="bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg px-4 py-3">{error}</div>}
+      <div className="flex items-center justify-between">
+        <p className="text-xs text-muted-foreground">Online demos hosted in the portal. Watch any running demo silently, and approve reopen requests once the 60 minutes are over.</p>
+        <button onClick={load} disabled={loading} className="flex items-center gap-2 px-3 py-2 border rounded-lg text-sm font-medium hover:bg-muted/50 disabled:opacity-50">
+          <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} /> Refresh
+        </button>
+      </div>
+      <div className="bg-card border rounded-xl overflow-x-auto">
+        <table className="w-full text-sm">
+          <thead className="bg-muted/50 text-left text-xs uppercase text-muted-foreground">
+            <tr>
+              <th className="px-3 py-3">Booking #</th><th className="px-3 py-3">Lead</th><th className="px-3 py-3">Course</th>
+              <th className="px-3 py-3">Scheduled</th><th className="px-3 py-3">Host</th><th className="px-3 py-3">State</th><th className="px-3 py-3"></th>
+            </tr>
+          </thead>
+          <tbody className="divide-y">
+            {rows.length === 0 ? (
+              <tr><td colSpan={7} className="px-4 py-8 text-center text-muted-foreground">{loading ? 'Loading...' : 'No online demos yet'}</td></tr>
+            ) : rows.map((r) => (
+              <tr key={r.id} className="hover:bg-muted/30">
+                <td className="px-3 py-3 font-mono text-xs">{r.bookingNumber}</td>
+                <td className="px-3 py-3">{r.lead.name}<div className="text-xs text-muted-foreground">{r.lead.phone}</div></td>
+                <td className="px-3 py-3 text-xs">{r.course || '—'}</td>
+                <td className="px-3 py-3 text-xs whitespace-nowrap">{formatDateTime(r.scheduledAt)}</td>
+                <td className="px-3 py-3 text-xs">{r.host || '—'}</td>
+                <td className="px-3 py-3 whitespace-nowrap">
+                  <span className={`text-xs font-medium rounded-full px-2 py-1 ${ROOM_STATE_LABEL[r.state].cls}`}>{ROOM_STATE_LABEL[r.state].label}</span>
+                  {r.state === 'LIVE' && <span className="ml-2 text-xs text-muted-foreground">{r.participants} in room</span>}
+                  {r.reopenCount > 0 && <span className="ml-2 text-[10px] text-muted-foreground">reopened {r.reopenCount}×</span>}
+                  {r.state === 'REOPEN_REQUESTED' && r.reopenNote && <p className="text-[11px] text-muted-foreground mt-1">"{r.reopenNote}"</p>}
+                </td>
+                <td className="px-3 py-3 whitespace-nowrap space-x-3">
+                  {r.state === 'LIVE' && <a href={`/sales-demo/${r.id}?observe=1`} target="_blank" rel="noreferrer" className="text-xs font-medium text-blue-600 hover:underline">Watch live</a>}
+                  {r.state === 'REOPEN_REQUESTED' && (
+                    <>
+                      <button onClick={() => decide(r.id, true)} className="text-xs font-medium text-green-600 hover:underline">Approve</button>
+                      <button onClick={() => decide(r.id, false)} className="text-xs font-medium text-red-600 hover:underline">Reject</button>
+                    </>
+                  )}
+                  {r.state === 'CLOSED' && <button onClick={() => decide(r.id, true)} className="text-xs font-medium text-green-600 hover:underline">Reopen</button>}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
       </div>
     </div>
   );
@@ -2372,8 +3084,11 @@ function CallLogPanel({ onOpenLead }: { onOpenLead: (id: string) => void }) {
         <table className="w-full text-sm">
           <thead className="bg-muted/50 text-left text-xs uppercase text-muted-foreground">
             <tr>
+              <th className="px-3 py-3">Date</th>
               <th className="px-3 py-3">Time</th>
               <th className="px-3 py-3">Phone</th>
+              <th className="px-3 py-3">Activity</th>
+              <th className="px-3 py-3">Status</th>
               <th className="px-3 py-3">Direction</th>
               <th className="px-3 py-3">Duration</th>
               <th className="px-3 py-3">Lead</th>
@@ -2384,14 +3099,15 @@ function CallLogPanel({ onOpenLead }: { onOpenLead: (id: string) => void }) {
           </thead>
           <tbody className="divide-y">
             {loading ? (
-              <tr><td colSpan={8} className="px-4 py-8 text-center text-muted-foreground">Loading...</td></tr>
+              <tr><td colSpan={11} className="px-4 py-8 text-center text-muted-foreground">Loading...</td></tr>
             ) : logs.length === 0 ? (
-              <tr><td colSpan={8} className="px-4 py-8 text-center text-muted-foreground">No calls found</td></tr>
+              <tr><td colSpan={11} className="px-4 py-8 text-center text-muted-foreground">No calls found</td></tr>
             ) : logs.map((c) => {
               const number = c.rawPhoneNumber || c.lead?.phone;
               return (
                 <tr key={c.id} className="hover:bg-muted/30">
-                  <td className="px-3 py-3 text-xs text-muted-foreground whitespace-nowrap">{formatDateTime(c.calledAt)}</td>
+                  <td className="px-3 py-3 text-xs text-muted-foreground whitespace-nowrap">{formatDate(c.calledAt)}</td>
+                  <td className="px-3 py-3 text-xs font-medium whitespace-nowrap">{formatTime(c.calledAt)}</td>
                   <td className="px-3 py-3 whitespace-nowrap">
                     {number ? (
                       <button
@@ -2402,6 +3118,12 @@ function CallLogPanel({ onOpenLead }: { onOpenLead: (id: string) => void }) {
                         <Phone className="w-3 h-3" /> {number}
                       </button>
                     ) : '—'}
+                  </td>
+                  <td className="px-3 py-3 text-xs text-muted-foreground whitespace-nowrap">
+                    {c.activityType === 'MEETING' ? 'Meeting' : 'Call'}
+                  </td>
+                  <td className="px-3 py-3 text-xs whitespace-nowrap">
+                    {c.activityStatus ? ACTIVITY_STATUS_LABEL[c.activityStatus] : '—'}
                   </td>
                   <td className="px-3 py-3 text-xs text-muted-foreground whitespace-nowrap">
                     {c.source === 'AUTO' ? directionLabel(c.direction) : 'Manual'}
