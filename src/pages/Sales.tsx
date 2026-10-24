@@ -127,6 +127,8 @@ const STATUS_STAGE: Record<ActivityStatus, LeadStatus> = {
   DNP: 'CONTACTED', FOLLOW_UP: 'CONTACTED', DEMO_BOOKED: 'DEMO_SCHEDULED', DEMO_OVER: 'DEMO_DONE', NOT_INTERESTED: 'LOST', DISQUALIFIED: 'LOST',
 };
 
+type LeadTab = 'profile' | 'activity' | 'tasks' | 'demo' | 'notes' | 'history';
+
 interface LeadHistoryRow {
   id: string; type: string; summary: string; createdAt: string; actor?: EmployeeLite | null;
 }
@@ -1226,7 +1228,19 @@ function LeadDetailModal({ lead, employees, canEdit, onClose, onChanged, setGlob
   const [loadingHistory, setLoadingHistory] = useState(true);
   const [localError, setLocalError] = useState('');
 
+  const [leadTab, setLeadTab] = useState<LeadTab>('activity');
   const [history, setHistory] = useState<LeadHistoryRow[]>([]);
+  const [leadNotes, setLeadNotes] = useState<{ id: string; body: string; createdAt: string; author?: EmployeeLite | null }[]>([]);
+  const [leadTasks, setLeadTasks] = useState<TaskRow[]>([]);
+  const [noteText, setNoteText] = useState('');
+  const [taskTitle, setTaskTitle] = useState('');
+  const [taskDue, setTaskDue] = useState('');
+  const [savingProfile, setSavingProfile] = useState(false);
+  const [profile, setProfile] = useState({
+    name: lead.name, phone: lead.phone, email: lead.email || '', source: lead.source || '', courseInterest: lead.courseInterest || '',
+    city: lead.city || '', educationQualification: lead.educationQualification || '', collegeName: lead.collegeName || '',
+    passedOutYear: lead.passedOutYear ? String(lead.passedOutYear) : '', currentStatus: lead.currentStatus || '',
+  });
   const [courses, setCourses] = useState<{ id: string; name: string }[]>([]);
   const [callNotes, setCallNotes] = useState('');
   const [callFollowUp, setCallFollowUp] = useState(''); // datetime-local value (date AND time)
@@ -1267,14 +1281,18 @@ function LeadDetailModal({ lead, employees, canEdit, onClose, onChanged, setGlob
     setLoadingHistory(true);
     setLocalError('');
     try {
-      const [callsRes, demosRes, histRes] = await Promise.all([
+      const [callsRes, demosRes, histRes, notesRes, tasksRes] = await Promise.all([
         api.get(`/api/sales/leads/${lead.id}/calls`),
         api.get('/api/sales/demos', { params: { leadId: lead.id } }),
         api.get(`/api/sales/leads/${lead.id}/history`),
+        api.get(`/api/sales/leads/${lead.id}/notes`),
+        api.get('/api/sales/tasks', { params: { leadId: lead.id, limit: '100' } }),
       ]);
       setCallLogs(callsRes.data.data);
       setDemos(demosRes.data.data);
       setHistory(histRes.data.data);
+      setLeadNotes(notesRes.data.data);
+      setLeadTasks(tasksRes.data.data);
     } catch (err: unknown) {
       const e = err as { response?: { data?: { message?: string } } };
       setLocalError(e.response?.data?.message || 'Failed to load lead history');
@@ -1331,6 +1349,34 @@ function LeadDetailModal({ lead, employees, canEdit, onClose, onChanged, setGlob
     } finally {
       setSavingCall(false);
     }
+  };
+
+  const fail = (err: unknown, fallback: string) => {
+    setLocalError((err as { response?: { data?: { message?: string } } }).response?.data?.message || fallback);
+  };
+  const saveProfile = async () => {
+    if (!profile.name.trim() || !profile.phone.trim()) { setLocalError('Name and phone are required'); return; }
+    setSavingProfile(true); setLocalError('');
+    try {
+      await api.put(`/api/sales/leads/${lead.id}`, { ...profile, name: profile.name.trim(), phone: profile.phone.trim() });
+      await load(); onChanged();
+    } catch (err) { fail(err, 'Failed to save'); } finally { setSavingProfile(false); }
+  };
+  const addLeadNote = async () => {
+    if (!noteText.trim()) return;
+    try { await api.post(`/api/sales/leads/${lead.id}/notes`, { body: noteText.trim() }); setNoteText(''); await load(); }
+    catch (err) { fail(err, 'Failed to add note'); }
+  };
+  const addLeadTask = async () => {
+    if (!taskTitle.trim()) { setLocalError('Enter a task title'); return; }
+    try {
+      await api.post('/api/sales/tasks', { title: taskTitle.trim(), leadId: lead.id, dueAt: taskDue ? new Date(taskDue).toISOString() : undefined });
+      setTaskTitle(''); setTaskDue(''); await load();
+    } catch (err) { fail(err, 'Failed to add task'); }
+  };
+  const finishLeadTask = async (id: string) => {
+    try { await api.put(`/api/sales/tasks/${id}`, { status: 'DONE' }); await load(); }
+    catch (err) { fail(err, 'Failed'); }
   };
 
   const reassign = async (assignedToId: string) => {
@@ -1398,7 +1444,7 @@ function LeadDetailModal({ lead, employees, canEdit, onClose, onChanged, setGlob
 
   return (
     <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
-      <div className="bg-white rounded-xl w-full max-w-2xl max-h-[90vh] overflow-y-auto p-6 space-y-6">
+      <div className="bg-white rounded-xl w-full max-w-3xl max-h-[90vh] overflow-y-auto p-6 space-y-6">
         <div className="flex items-start justify-between">
           <div>
             <h2 className="font-semibold text-lg">{lead.name}</h2>
@@ -1438,8 +1484,111 @@ function LeadDetailModal({ lead, employees, canEdit, onClose, onChanged, setGlob
 
         {localError && <div className="bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg px-3 py-2">{localError}</div>}
 
+        {/* Tab bar */}
+        <div className="flex flex-wrap gap-1 border-b -mt-2">
+          {([
+            ['profile', 'Profile'], ['activity', 'Activity'], ['tasks', 'Tasks / Reminders'],
+            ['demo', `Meeting / Demo${demos.length ? ` (${demos.length})` : ''}`], ['notes', 'Notes'], ['history', 'History'],
+          ] as [LeadTab, string][]).map(([id, label]) => (
+            <button key={id} onClick={() => setLeadTab(id)}
+              className={`px-3 py-2 text-sm font-medium border-b-2 -mb-px ${leadTab === id ? 'border-blue-600 text-blue-600' : 'border-transparent text-muted-foreground hover:text-foreground'}`}>
+              {label}
+            </button>
+          ))}
+        </div>
+
+        {/* ── Profile ── */}
+        {leadTab === 'profile' && (
+          <div className="space-y-4">
+            {lead.nextFollowUpAt && (
+              <div className={`text-sm rounded-lg border px-3 py-2 ${reminderColor(lead.nextFollowUpAt)}`}>Next follow-up: <b>{formatDateTime(lead.nextFollowUpAt)}</b></div>
+            )}
+            {canEdit && (
+              <>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  {([
+                    ['name', 'Name'], ['phone', 'Phone'], ['email', 'Email'], ['source', 'Source'],
+                    ['courseInterest', 'Course enquired'], ['city', 'City'], ['educationQualification', 'Education qualification'],
+                    ['collegeName', 'College name'], ['passedOutYear', 'Passed out year'], ['currentStatus', 'Current status'],
+                  ] as [keyof typeof profile, string][]).map(([k, label]) => (
+                    <label key={k} className="text-xs text-muted-foreground space-y-1 block">
+                      {label}
+                      <input className="w-full px-3 py-2 border rounded-lg text-sm text-foreground" value={profile[k]} onChange={(e) => setProfile({ ...profile, [k]: e.target.value })} />
+                    </label>
+                  ))}
+                </div>
+                <div className="flex justify-end">
+                  <button onClick={saveProfile} disabled={savingProfile} className="px-4 py-2 text-sm rounded-lg bg-blue-600 text-white disabled:opacity-50">{savingProfile ? 'Saving...' : 'Save changes'}</button>
+                </div>
+              </>
+            )}
+            {!canEdit && (
+              <dl className="grid grid-cols-2 gap-3 text-sm">
+                {Object.entries(profile).map(([k, v]) => <div key={k}><dt className="text-xs text-muted-foreground">{k}</dt><dd>{v || '—'}</dd></div>)}
+              </dl>
+            )}
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
+              <div><p className="text-muted-foreground">Created</p><p>{formatDateTime(lead.createdAt)}</p></div>
+              <div><p className="text-muted-foreground">Last contact</p><p>{lead.lastContactAt ? formatDateTime(lead.lastContactAt) : 'Never'}</p></div>
+              <div><p className="text-muted-foreground">Lead age</p><p>{leadAgeLabel(lead.createdAt)}</p></div>
+              <div><p className="text-muted-foreground">Activities</p><p>{lead._count?.callLogs ?? 0}</p></div>
+            </div>
+          </div>
+        )}
+
+        {/* ── Tasks / Reminders ── */}
+        {leadTab === 'tasks' && (
+          <div className="space-y-4">
+            {lead.nextFollowUpAt && <div className={`text-sm rounded-lg border px-3 py-2 ${reminderColor(lead.nextFollowUpAt)}`}>Follow-up reminder: <b>{formatDateTime(lead.nextFollowUpAt)}</b> <span className="text-xs text-muted-foreground">(set by Log Activity)</span></div>}
+            {canEdit && (
+              <div className="border rounded-xl p-3 space-y-2 bg-muted/20">
+                <div className="flex flex-wrap gap-2">
+                  <input className="px-3 py-2 border rounded-lg text-sm flex-1 min-w-[200px]" placeholder="New task for this lead *" value={taskTitle} onChange={(e) => setTaskTitle(e.target.value)} />
+                  <input type="datetime-local" className="px-2 py-2 border rounded-lg text-sm" value={taskDue} onChange={(e) => setTaskDue(e.target.value)} />
+                  <button onClick={addLeadTask} className="px-4 py-2 text-sm rounded-lg bg-blue-600 text-white">Add task</button>
+                </div>
+              </div>
+            )}
+            {leadTasks.length === 0 ? <p className="text-sm text-muted-foreground">No tasks on this lead.</p> : (
+              <div className="border rounded-xl divide-y">
+                {leadTasks.map((t) => (
+                  <div key={t.id} className="flex items-center justify-between gap-3 px-3 py-2 text-sm">
+                    <div>
+                      <span className={t.status !== 'OPEN' ? 'line-through text-muted-foreground' : 'font-medium'}>{t.title}</span>
+                      <p className="text-xs text-muted-foreground">{t.assignedTo ? `${t.assignedTo.firstName} ${t.assignedTo.lastName}` : ''}{t.dueAt ? ` · due ${formatDateTime(t.dueAt)}` : ''}</p>
+                    </div>
+                    {canEdit && t.status === 'OPEN' && <button onClick={() => finishLeadTask(t.id)} className="text-xs font-medium text-green-600 hover:underline">Done</button>}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* ── Notes ── */}
+        {leadTab === 'notes' && (
+          <div className="space-y-3">
+            {canEdit && (
+              <div className="space-y-2">
+                <textarea className="w-full px-3 py-2 border rounded-lg text-sm" rows={3} placeholder="Write a note (doesn't change status or follow-up)…" value={noteText} onChange={(e) => setNoteText(e.target.value)} />
+                <div className="flex justify-end"><button onClick={addLeadNote} className="px-4 py-2 text-sm rounded-lg bg-blue-600 text-white">Add note</button></div>
+              </div>
+            )}
+            {leadNotes.length === 0 ? <p className="text-sm text-muted-foreground">No notes yet.</p> : (
+              <div className="space-y-2">
+                {leadNotes.map((n) => (
+                  <div key={n.id} className="border rounded-lg p-3 text-sm">
+                    <div className="flex justify-between text-xs text-muted-foreground mb-1"><span>{n.author ? `${n.author.firstName} ${n.author.lastName}` : 'Unknown'}</span><span>{formatDateTime(n.createdAt)}</span></div>
+                    <p className="whitespace-pre-wrap">{n.body}</p>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
         {/* Log a call */}
-        {canEdit && (
+        {leadTab === 'activity' && canEdit && (
           <div className="border rounded-xl p-4 space-y-3 bg-muted/20">
             <h3 className="font-semibold text-sm flex items-center gap-2"><PhoneCall className="w-4 h-4" /> Log Activity</h3>
 
@@ -1557,7 +1706,7 @@ function LeadDetailModal({ lead, employees, canEdit, onClose, onChanged, setGlob
         )}
 
         {/* Call history */}
-        <div>
+        {leadTab === 'activity' && <div>
           <h3 className="font-semibold text-sm mb-2">Activity History {lead._count?.callLogs ? `(${lead._count.callLogs})` : ''}</h3>
           {loadingHistory ? (
             <p className="text-sm text-muted-foreground">Loading...</p>
@@ -1582,10 +1731,10 @@ function LeadDetailModal({ lead, employees, canEdit, onClose, onChanged, setGlob
               ))}
             </div>
           )}
-        </div>
+        </div>}
 
         {/* Full lead history — from creation, never edited */}
-        <div>
+        {leadTab === 'history' && <div>
           <h3 className="font-semibold text-sm mb-2">Lead History</h3>
           {history.length === 0 ? (
             <p className="text-sm text-muted-foreground">No history yet.</p>
@@ -1600,10 +1749,10 @@ function LeadDetailModal({ lead, employees, canEdit, onClose, onChanged, setGlob
               ))}
             </ol>
           )}
-        </div>
+        </div>}
 
         {/* Demos */}
-        <div>
+        {leadTab === 'demo' && <div>
           <div className="flex items-center justify-between mb-2">
             <h3 className="font-semibold text-sm">Demos</h3>
             <span className="text-xs text-muted-foreground">Book a demo by choosing "Demo booked" in Log Activity</span>
@@ -1748,7 +1897,7 @@ function LeadDetailModal({ lead, employees, canEdit, onClose, onChanged, setGlob
               );})}
             </div>
           )}
-        </div>
+        </div>}
       </div>
     </div>
   );
