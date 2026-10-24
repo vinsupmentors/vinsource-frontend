@@ -1245,13 +1245,10 @@ function LeadDetailModal({ lead, employees, canEdit, onClose, onChanged, setGlob
   const [callCurrentStatus, setCallCurrentStatus] = useState(lead.currentStatus || '');
   const [savingCall, setSavingCall] = useState(false);
 
-  const [showScheduleForm, setShowScheduleForm] = useState(false);
-  const [demoScheduledAt, setDemoScheduledAt] = useState('');
+  // Demo booking happens inside Log Activity (status = Demo booked).
   const [demoMode, setDemoMode] = useState<DemoMode>('ONLINE');
-  const [demoCourse, setDemoCourse] = useState(lead.courseInterest || '');
   const [demoConductedBy, setDemoConductedBy] = useState(lead.assignedTo?.id || '');
   const [demoEmail, setDemoEmail] = useState(lead.email || '');
-  const [savingDemo, setSavingDemo] = useState(false);
 
   const [actingDemo, setActingDemo] = useState<{ id: string; type: 'complete' | 'reschedule' | 'noshow' | 'cancel' } | null>(null);
   const [actionFeedback, setActionFeedback] = useState('');
@@ -1295,9 +1292,22 @@ function LeadDetailModal({ lead, employees, canEdit, onClose, onChanged, setGlob
     if (callActivityStatus !== 'DNP' && !callNotes.trim()) { setLocalError('Notes are required for this status'); return; }
     if (NEEDS_FOLLOW_UP.includes(callActivityStatus) && !callFollowUp) { setLocalError('Pick the follow-up date and time'); return; }
     if (callActivityStatus === 'DEMO_BOOKED' && !callCourse.trim()) { setLocalError('Select the course for the demo'); return; }
+    if (callActivityStatus === 'DEMO_BOOKED' && demoMode === 'ONLINE' && !/^\S+@\S+\.\S+$/.test(demoEmail.trim())) { setLocalError('Enter the student\'s email — the online demo link is sent there'); return; }
     setSavingCall(true);
     setLocalError('');
     try {
+      // Demo booked: the date & time chosen above is the demo slot — book it first so a
+      // failure (e.g. bad email) doesn't leave an activity logged without its demo.
+      if (callActivityStatus === 'DEMO_BOOKED') {
+        await api.post('/api/sales/demos', {
+          leadId: lead.id,
+          scheduledAt: new Date(callFollowUp).toISOString(),
+          mode: demoMode,
+          courseEnquired: callCourse.trim(),
+          conductedById: demoConductedBy || undefined,
+          attendeeEmail: demoMode === 'ONLINE' ? demoEmail.trim() : undefined,
+        });
+      }
       await api.post(`/api/sales/leads/${lead.id}/calls`, {
         activityType: callActivityType,
         activityStatus: callActivityStatus,
@@ -1333,33 +1343,6 @@ function LeadDetailModal({ lead, employees, canEdit, onClose, onChanged, setGlob
       setGlobalError(e.response?.data?.message || 'Failed to reassign lead');
     } finally {
       setReassignSaving(false);
-    }
-  };
-
-  const submitScheduleDemo = async () => {
-    if (!demoScheduledAt) { setLocalError('Pick a date/time for the demo'); return; }
-    if (!demoCourse.trim()) { setLocalError('Select the course for the demo'); return; }
-    if (demoMode === 'ONLINE' && !/^\S+@\S+\.\S+$/.test(demoEmail.trim())) { setLocalError('Enter the student\'s email — the online demo link is sent there'); return; }
-    setSavingDemo(true);
-    setLocalError('');
-    try {
-      await api.post('/api/sales/demos', {
-        leadId: lead.id,
-        scheduledAt: new Date(demoScheduledAt).toISOString(),
-        mode: demoMode,
-        courseEnquired: demoCourse.trim(),
-        conductedById: demoConductedBy || undefined,
-        attendeeEmail: demoMode === 'ONLINE' ? demoEmail.trim() : undefined,
-      });
-      setDemoScheduledAt(''); setDemoMode('ONLINE');
-      setShowScheduleForm(false);
-      await load();
-      onChanged();
-    } catch (err: unknown) {
-      const e = err as { response?: { data?: { message?: string } } };
-      setLocalError(e.response?.data?.message || 'Failed to schedule demo');
-    } finally {
-      setSavingDemo(false);
     }
   };
 
@@ -1483,7 +1466,7 @@ function LeadDetailModal({ lead, employees, canEdit, onClose, onChanged, setGlob
                 {/* Step 2: follow-up date AND time */}
                 {NEEDS_FOLLOW_UP.includes(callActivityStatus) && (
                   <label className="text-xs text-muted-foreground flex items-center gap-2">
-                    2. Follow-up date & time *
+                    {callActivityStatus === 'DEMO_BOOKED' ? '2. Demo date & time *' : '2. Follow-up date & time *'}
                     <input type="datetime-local" className="px-2 py-1 border rounded-lg text-sm" value={callFollowUp} onChange={(e) => setCallFollowUp(e.target.value)} />
                   </label>
                 )}
@@ -1498,6 +1481,25 @@ function LeadDetailModal({ lead, employees, canEdit, onClose, onChanged, setGlob
                       {courses.map((c) => <option key={c.id} value={c.name}>{c.name}</option>)}
                     </select>
                   </label>
+                )}
+
+                {callActivityStatus === 'DEMO_BOOKED' && (
+                  <div className="border rounded-lg p-3 space-y-2 bg-white">
+                    <p className="text-xs font-medium text-muted-foreground">Demo details</p>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                      <select className="px-2 py-1.5 border rounded-lg text-sm" value={demoMode} onChange={(e) => setDemoMode(e.target.value as DemoMode)}>
+                        {DEMO_MODES.map((m) => <option key={m} value={m}>{DEMO_MODE_LABEL[m]} demo</option>)}
+                      </select>
+                      <select className="px-2 py-1.5 border rounded-lg text-sm" value={demoConductedBy} onChange={(e) => setDemoConductedBy(e.target.value)}>
+                        <option value="">Conducted by...</option>
+                        {employees.map((e) => <option key={e.id} value={e.id}>{e.firstName} {e.lastName}</option>)}
+                      </select>
+                      {demoMode === 'ONLINE' && (
+                        <input type="email" className="px-2 py-1.5 border rounded-lg text-sm sm:col-span-2" placeholder="Student email * (online demo link is sent here)" value={demoEmail} onChange={(e) => setDemoEmail(e.target.value)} />
+                      )}
+                    </div>
+                    {demoMode === 'ONLINE' && <p className="text-xs text-muted-foreground">Online demos run inside the portal for 60 minutes. Sales Admin is emailed and can watch it live.</p>}
+                  </div>
                 )}
 
                 {callActivityStatus === 'DISQUALIFIED' && (
@@ -1604,46 +1606,8 @@ function LeadDetailModal({ lead, employees, canEdit, onClose, onChanged, setGlob
         <div>
           <div className="flex items-center justify-between mb-2">
             <h3 className="font-semibold text-sm">Demos</h3>
-            {canEdit && !showScheduleForm && (
-              <button onClick={() => setShowScheduleForm(true)} className="text-xs font-medium text-blue-600 hover:underline">+ Schedule Demo</button>
-            )}
+            <span className="text-xs text-muted-foreground">Book a demo by choosing "Demo booked" in Log Activity</span>
           </div>
-
-          {showScheduleForm && (
-            <div className="border rounded-lg p-3 mb-3 space-y-3 bg-muted/20">
-              <p className="text-xs font-medium text-muted-foreground">Demo slot</p>
-              <div className="flex flex-wrap items-center gap-2">
-                <input type="datetime-local" className="px-2 py-1 border rounded-lg text-sm" value={demoScheduledAt} onChange={(e) => setDemoScheduledAt(e.target.value)} />
-                <select className="px-2 py-1 border rounded-lg text-sm" value={demoMode} onChange={(e) => setDemoMode(e.target.value as DemoMode)}>
-                  {DEMO_MODES.map((m) => <option key={m} value={m}>{DEMO_MODE_LABEL[m]}</option>)}
-                </select>
-              </div>
-
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                <select className="px-2 py-1.5 border rounded-lg text-sm" value={demoCourse} onChange={(e) => setDemoCourse(e.target.value)}>
-                  <option value="">Course *</option>
-                  {demoCourse && !courses.some((c) => c.name === demoCourse) && <option value={demoCourse}>{demoCourse}</option>}
-                  {courses.map((c) => <option key={c.id} value={c.name}>{c.name}</option>)}
-                </select>
-                <select className="px-2 py-1.5 border rounded-lg text-sm" value={demoConductedBy} onChange={(e) => setDemoConductedBy(e.target.value)}>
-                  <option value="">Conducted by...</option>
-                  {employees.map((e) => <option key={e.id} value={e.id}>{e.firstName} {e.lastName}</option>)}
-                </select>
-                {demoMode === 'ONLINE' && (
-                  <input type="email" className="px-2 py-1.5 border rounded-lg text-sm sm:col-span-2" placeholder="Student email * (online demo link is sent here)" value={demoEmail} onChange={(e) => setDemoEmail(e.target.value)} />
-                )}
-              </div>
-              {demoMode === 'ONLINE' && <p className="text-xs text-muted-foreground">Online demos run inside the portal for 60 minutes. Sales Admin is emailed and can watch it live.</p>}
-              <p className="text-xs text-muted-foreground italic">Student details are captured in Log Activity above and carry over automatically.</p>
-
-              <div className="flex gap-2">
-                <button onClick={submitScheduleDemo} disabled={savingDemo} className="px-3 py-1.5 text-xs rounded-lg bg-blue-600 text-white disabled:opacity-50">
-                  {savingDemo ? 'Saving...' : 'Schedule'}
-                </button>
-                <button onClick={() => setShowScheduleForm(false)} className="px-3 py-1.5 text-xs rounded-lg border">Cancel</button>
-              </div>
-            </div>
-          )}
 
           {loadingHistory ? (
             <p className="text-sm text-muted-foreground">Loading...</p>
