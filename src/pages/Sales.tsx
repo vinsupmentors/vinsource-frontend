@@ -9,7 +9,7 @@ import {
   PhoneCall, Video, MapPin, RefreshCw, AlertTriangle, Settings, Trash2, Activity,
   ChevronLeft, ChevronRight, Upload, Download, Percent,
   Smartphone, PhoneIncoming, Link2, UserPlus, Copy, Ban, Check, History,
-  Target as TargetIcon, Trophy, Clock,
+  Target as TargetIcon, Trophy, Clock, PlayCircle,
 } from 'lucide-react';
 
 const PAGE_SIZE = 100;
@@ -74,8 +74,35 @@ interface Lead {
   _count?: { demos: number; callLogs: number };
 }
 
+/** Play button for an auto-captured call recording. The audio is behind a login, so it is fetched
+ *  as a blob through the authenticated API client and played from an object URL. */
+function RecordingPlayer({ url }: { url?: string | null }) {
+  const [src, setSrc] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [err, setErr] = useState('');
+  useEffect(() => () => { if (src) URL.revokeObjectURL(src); }, [src]);
+  if (!url) return <span className="text-xs text-muted-foreground">—</span>;
+  const load = async () => {
+    setLoading(true); setErr('');
+    try {
+      const res = await api.get(url, { responseType: 'blob' });
+      setSrc(URL.createObjectURL(res.data));
+    } catch (e: unknown) {
+      const status = (e as { response?: { status?: number } }).response?.status;
+      setErr(status === 403 ? 'No access' : 'Not available');
+    } finally { setLoading(false); }
+  };
+  if (src) return <audio controls autoPlay src={src} className="h-8 w-56" />;
+  return (
+    <button onClick={load} disabled={loading} className="text-xs font-medium text-blue-600 hover:underline flex items-center gap-1 disabled:opacity-50">
+      <PlayCircle className="w-3.5 h-3.5" /> {loading ? 'Loading…' : err || 'Play recording'}
+    </button>
+  );
+}
+
 interface CallLog {
   id: string;
+  recordingUrl?: string | null;
   notes: string;
   nextFollowUpAt?: string | null;
   calledAt: string;
@@ -134,6 +161,7 @@ interface DeviceRow {
 
 interface UnmatchedCall {
   id: string;
+  recordingUrl?: string | null;
   rawPhoneNumber?: string | null;
   direction?: 'INBOUND' | 'OUTBOUND' | 'MISSED' | null;
   durationSeconds?: number | null;
@@ -173,6 +201,7 @@ interface TargetRow {
 // Global call log — every call (manual or auto-tracked), across all leads.
 interface CallLogRow {
   id: string;
+  recordingUrl?: string | null;
   rawPhoneNumber?: string | null;
   direction?: 'INBOUND' | 'OUTBOUND' | 'MISSED' | null;
   durationSeconds?: number | null;
@@ -1330,6 +1359,7 @@ function LeadDetailModal({ lead, employees, canEdit, onClose, onChanged, setGlob
                     <span>{formatDateTime(c.calledAt)}</span>
                   </div>
                   <p>{c.notes}</p>
+                  {c.recordingUrl && <div className="mt-2"><RecordingPlayer url={c.recordingUrl} /></div>}
                   {c.nextFollowUpAt && <p className="text-xs text-amber-600 mt-1">Next follow-up: {formatDate(c.nextFollowUpAt)}</p>}
                 </div>
               ))}
@@ -1825,6 +1855,75 @@ function DemoListPanel({ status, emptyLabel, onOpenLead }: {
 }
 
 // ── Devices tab: register/manage phones running the SIM call-tracker app ──
+interface MissingRecordingsData {
+  days: number; totalAnsweredCalls: number; missingCount: number;
+  byEmployee: { name: string; missing: number }[];
+  calls: { id: string; rawPhoneNumber?: string | null; durationSeconds?: number | null; calledAt: string; calledBy?: EmployeeLite | null; lead?: { id: string; name: string } | null }[];
+}
+
+/** Answered tracked calls with no recording attached — flags phones where auto-record is off or uploads fail. */
+function MissingRecordingsCard() {
+  const [days, setDays] = useState(7);
+  const [data, setData] = useState<MissingRecordingsData | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+  const [open, setOpen] = useState(false);
+
+  useEffect(() => {
+    setLoading(true); setError('');
+    api.get('/api/sales/missing-recordings', { params: { days } })
+      .then((r) => setData(r.data.data))
+      .catch((e: { response?: { data?: { message?: string } } }) => setError(e.response?.data?.message || 'Failed to load'))
+      .finally(() => setLoading(false));
+  }, [days]);
+
+  const pct = data && data.totalAnsweredCalls ? Math.round(((data.totalAnsweredCalls - data.missingCount) / data.totalAnsweredCalls) * 100) : null;
+  const dur = (s?: number | null) => (s == null ? '—' : `${Math.floor(s / 60)}m ${s % 60}s`);
+
+  return (
+    <div className="border rounded-xl p-4 space-y-3">
+      <div className="flex items-center justify-between flex-wrap gap-2">
+        <div>
+          <h3 className="font-semibold text-sm">Call recording coverage</h3>
+          <p className="text-xs text-muted-foreground">Answered calls captured by the app that have no recording yet (calls from the last 15 minutes are skipped).</p>
+        </div>
+        <select value={days} onChange={(e) => setDays(Number(e.target.value))} className="border rounded-lg px-2 py-1 text-sm">
+          {[1, 7, 14, 30].map((d) => <option key={d} value={d}>Last {d} day{d === 1 ? '' : 's'}</option>)}
+        </select>
+      </div>
+      {error ? <p className="text-sm text-red-600">{error}</p> : loading || !data ? <p className="text-sm text-muted-foreground">Loading…</p> : (
+        <>
+          <div className="flex flex-wrap gap-3 text-sm">
+            <span className="px-3 py-1.5 rounded-lg bg-muted/40">Answered calls: <b>{data.totalAnsweredCalls}</b></span>
+            <span className="px-3 py-1.5 rounded-lg bg-muted/40">With recording: <b>{pct == null ? '—' : `${pct}%`}</b></span>
+            <span className={`px-3 py-1.5 rounded-lg ${data.missingCount ? 'bg-amber-50 text-amber-800' : 'bg-green-50 text-green-800'}`}>Missing: <b>{data.missingCount}</b></span>
+          </div>
+          {data.byEmployee.length > 0 && (
+            <div className="flex flex-wrap gap-2 text-xs">
+              {data.byEmployee.map((e) => <span key={e.name} className="px-2 py-1 rounded-full border">{e.name}: {e.missing} missing</span>)}
+            </div>
+          )}
+          {data.calls.length > 0 && (
+            <>
+              <button onClick={() => setOpen((v) => !v)} className="text-xs text-blue-600 hover:underline">{open ? 'Hide' : 'Show'} the {data.calls.length} calls</button>
+              {open && (
+                <div className="max-h-64 overflow-y-auto border rounded-lg divide-y text-xs">
+                  {data.calls.map((c) => (
+                    <div key={c.id} className="px-3 py-2 flex items-center justify-between gap-3">
+                      <span>{c.rawPhoneNumber || 'Unknown'}{c.lead ? ` · ${c.lead.name}` : ''}</span>
+                      <span className="text-muted-foreground">{c.calledBy ? `${c.calledBy.firstName} ${c.calledBy.lastName}` : '—'} · {dur(c.durationSeconds)} · {formatDateTime(c.calledAt)}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
+
 function DevicesPanel({ employees }: { employees: EmployeeLite[] }) {
   const [devices, setDevices] = useState<DeviceRow[]>([]);
   const [loading, setLoading] = useState(true);
@@ -1983,6 +2082,8 @@ function DevicesPanel({ employees }: { employees: EmployeeLite[] }) {
           </tbody>
         </table>
       </div>
+
+      <MissingRecordingsCard />
     </div>
   );
 }
@@ -2042,14 +2143,15 @@ function UnmatchedCallsPanel({ setGlobalError }: { setGlobalError: (s: string) =
               <th className="px-3 py-3">Duration</th>
               <th className="px-3 py-3">Called By</th>
               <th className="px-3 py-3">When</th>
+              <th className="px-3 py-3">Recording</th>
               <th className="px-3 py-3"></th>
             </tr>
           </thead>
           <tbody className="divide-y">
             {loading ? (
-              <tr><td colSpan={6} className="px-4 py-8 text-center text-muted-foreground">Loading...</td></tr>
+              <tr><td colSpan={7} className="px-4 py-8 text-center text-muted-foreground">Loading...</td></tr>
             ) : calls.length === 0 ? (
-              <tr><td colSpan={6} className="px-4 py-8 text-center text-muted-foreground">Nothing to review — every tracked call matched a lead</td></tr>
+              <tr><td colSpan={7} className="px-4 py-8 text-center text-muted-foreground">Nothing to review — every tracked call matched a lead</td></tr>
             ) : calls.map((c) => (
               <tr key={c.id} className="hover:bg-muted/30">
                 <td className="px-3 py-3 font-medium whitespace-nowrap">
@@ -2059,6 +2161,7 @@ function UnmatchedCallsPanel({ setGlobalError }: { setGlobalError: (s: string) =
                 <td className="px-3 py-3 text-xs text-muted-foreground whitespace-nowrap">{durationLabel(c.durationSeconds)}</td>
                 <td className="px-3 py-3 text-xs text-muted-foreground whitespace-nowrap">{c.calledBy ? `${c.calledBy.firstName} ${c.calledBy.lastName}` : '—'}</td>
                 <td className="px-3 py-3 text-xs text-muted-foreground whitespace-nowrap">{formatDateTime(c.calledAt)}</td>
+                <td className="px-3 py-3 whitespace-nowrap"><RecordingPlayer url={c.recordingUrl} /></td>
                 <td className="px-3 py-3 whitespace-nowrap text-right">
                   <div className="flex items-center justify-end gap-3">
                     <button onClick={() => setLinkingCall(c)} className="text-xs font-medium text-blue-600 hover:underline flex items-center gap-1">
@@ -2275,14 +2378,15 @@ function CallLogPanel({ onOpenLead }: { onOpenLead: (id: string) => void }) {
               <th className="px-3 py-3">Duration</th>
               <th className="px-3 py-3">Lead</th>
               <th className="px-3 py-3">Called By</th>
+              <th className="px-3 py-3">Recording</th>
               <th className="px-3 py-3">Notes</th>
             </tr>
           </thead>
           <tbody className="divide-y">
             {loading ? (
-              <tr><td colSpan={7} className="px-4 py-8 text-center text-muted-foreground">Loading...</td></tr>
+              <tr><td colSpan={8} className="px-4 py-8 text-center text-muted-foreground">Loading...</td></tr>
             ) : logs.length === 0 ? (
-              <tr><td colSpan={7} className="px-4 py-8 text-center text-muted-foreground">No calls found</td></tr>
+              <tr><td colSpan={8} className="px-4 py-8 text-center text-muted-foreground">No calls found</td></tr>
             ) : logs.map((c) => {
               const number = c.rawPhoneNumber || c.lead?.phone;
               return (
@@ -2312,6 +2416,11 @@ function CallLogPanel({ onOpenLead }: { onOpenLead: (id: string) => void }) {
                   </td>
                   <td className="px-3 py-3 text-xs text-muted-foreground whitespace-nowrap">
                     {c.calledBy ? `${c.calledBy.firstName} ${c.calledBy.lastName}` : '—'}
+                  </td>
+                  <td className="px-3 py-3 whitespace-nowrap">
+                    {c.source === 'AUTO' && (c.durationSeconds ?? 0) > 0 && !c.recordingUrl
+                      ? <span className="text-[11px] text-amber-700">Not recorded</span>
+                      : <RecordingPlayer url={c.recordingUrl} />}
                   </td>
                   <td className="px-3 py-3 text-xs text-muted-foreground max-w-[240px] truncate" title={c.notes || ''}>
                     {c.notes || '—'}
