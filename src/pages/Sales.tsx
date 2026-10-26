@@ -3,6 +3,7 @@ import { useSearchParams } from 'react-router-dom';
 import * as XLSX from 'xlsx';
 import api, { BASE_URL } from '@/lib/api';
 import { useModuleAccess } from '@/hooks/useModuleAccess';
+import AdvancedFilter, { type FilterField, type FilterGroup } from '@/components/AdvancedFilter';
 import { formatDate, formatDateTime, formatTime } from '@/lib/utils';
 import {
   Lock, Plus, X, Phone, Mail, Calendar, Users, TrendingUp, CheckCircle2,
@@ -382,6 +383,47 @@ function formatCurrency(n: number): string {
   return `₹${n.toLocaleString('en-IN', { maximumFractionDigits: 0 })}`;
 }
 
+// ── Advanced filter field lists (must match the server whitelists in salesFilterFields.ts) ──
+const empOptions = (emps: EmployeeLite[]) => emps.map((e) => ({ value: e.id, label: `${e.firstName} ${e.lastName}` }));
+const stageOptions = STATUSES_FOR_FILTER();
+function STATUSES_FOR_FILTER() { return ['NEW', 'CONTACTED', 'DEMO_SCHEDULED', 'DEMO_DONE', 'NEGOTIATION', 'ENROLLED', 'LOST'].map((s) => ({ value: s, label: s.replace(/_/g, ' ') })); }
+const activityOptions = ACTIVITY_STATUSES.map((s) => ({ value: s.value as string, label: s.label }));
+
+const leadFilterFields = (emps: EmployeeLite[]): FilterField[] => [
+  { key: 'name', label: 'Name', type: 'text' }, { key: 'phone', label: 'Phone', type: 'text' },
+  { key: 'email', label: 'Email', type: 'text', nullable: true }, { key: 'source', label: 'Source', type: 'text', nullable: true },
+  { key: 'courseInterest', label: 'Course', type: 'text', nullable: true }, { key: 'city', label: 'City', type: 'text', nullable: true },
+  { key: 'educationQualification', label: 'Qualification', type: 'text', nullable: true }, { key: 'collegeName', label: 'College', type: 'text', nullable: true },
+  { key: 'currentStatus', label: 'Current status (job/study)', type: 'text', nullable: true },
+  { key: 'passedOutYear', label: 'Passed out year', type: 'number', nullable: true },
+  { key: 'status', label: 'Lead stage', type: 'select', options: stageOptions },
+  { key: 'activityStatus', label: 'Status', type: 'select', options: activityOptions, nullable: true },
+  { key: 'assignedToId', label: 'Assigned to', type: 'select', options: empOptions(emps), nullable: true },
+  { key: 'createdAt', label: 'Created', type: 'date' }, { key: 'lastContactAt', label: 'Last contact', type: 'date', nullable: true },
+  { key: 'nextFollowUpAt', label: 'Follow-up', type: 'date', nullable: true },
+  { key: 'demoMode', label: 'Demo mode', type: 'select', options: [{ value: 'ONLINE', label: 'Online' }, { value: 'OFFLINE', label: 'Offline' }] },
+  { key: 'demoStatus', label: 'Demo status', type: 'select', options: ['SCHEDULED', 'COMPLETED', 'RESCHEDULED', 'NO_SHOW', 'CANCELLED'].map((s) => ({ value: s, label: s.replace(/_/g, ' ') })) },
+  { key: 'demoDate', label: 'Demo date', type: 'date' },
+];
+const callFilterFields = (emps: EmployeeLite[]): FilterField[] => [
+  { key: 'calledAt', label: 'Date', type: 'date' },
+  { key: 'activityType', label: 'Activity', type: 'select', nullable: true, options: [{ value: 'CALL', label: 'Call' }, { value: 'MEETING', label: 'Meeting' }] },
+  { key: 'activityStatus', label: 'Status', type: 'select', nullable: true, options: activityOptions },
+  { key: 'direction', label: 'Direction', type: 'select', nullable: true, options: [{ value: 'INBOUND', label: 'Inbound' }, { value: 'OUTBOUND', label: 'Outbound' }, { value: 'MISSED', label: 'Missed' }] },
+  { key: 'source', label: 'Logged how', type: 'select', options: [{ value: 'MANUAL', label: 'Manual' }, { value: 'AUTO', label: 'Auto (SIM)' }] },
+  { key: 'durationSeconds', label: 'Duration (seconds)', type: 'number', nullable: true },
+  { key: 'calledById', label: 'Called by', type: 'select', nullable: true, options: empOptions(emps) },
+  { key: 'rawPhoneNumber', label: 'Phone number', type: 'text', nullable: true },
+  { key: 'leadName', label: 'Lead name', type: 'text' }, { key: 'notes', label: 'Notes', type: 'text', nullable: true },
+];
+const feedFilterFields = (emps: EmployeeLite[]): FilterField[] => [
+  { key: 'createdAt', label: 'When', type: 'date' },
+  { key: 'type', label: 'Type', type: 'select', options: ['ACTIVITY', 'STATUS', 'STAGE', 'ASSIGNED', 'FOLLOW_UP', 'EDIT', 'CREATED', 'DELETED', 'DEMO', 'TASK', 'NOTE'].map((s) => ({ value: s, label: s.replace(/_/g, ' ') })) },
+  { key: 'actorId', label: 'Done by', type: 'select', nullable: true, options: empOptions(emps) },
+  { key: 'leadName', label: 'Lead name', type: 'text' }, { key: 'leadPhone', label: 'Lead phone', type: 'text' },
+  { key: 'summary', label: 'What changed', type: 'text' },
+];
+
 /** Dropdown with tick-boxes so several values can be selected at once. `value` is a comma-joined string (what the API takes). */
 function MultiSelect({ label, options, value, onChange }: {
   label: string; options: { value: string; label: string }[]; value: string; onChange: (v: string) => void;
@@ -466,6 +508,7 @@ export default function SalesPage() {
   const [followFrom, setFollowFrom] = useState('');
   const [followTo, setFollowTo] = useState('');
   const [sourceOptions, setSourceOptions] = useState<string[]>([]);
+  const [advFilter, setAdvFilter] = useState<FilterGroup | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [showAdd, setShowAdd] = useState(false);
@@ -481,7 +524,7 @@ export default function SalesPage() {
 
   // Any filter change resets to page 1 — otherwise you can land on a page
   // number that no longer exists once the result set shrinks.
-  useEffect(() => { setPage(1); }, [search, statusFilter, activityFilter, followUpFilter, assignedFilter, sourceFilter, createdFrom, createdTo, followFrom, followTo]);
+  useEffect(() => { setPage(1); }, [search, statusFilter, activityFilter, followUpFilter, assignedFilter, sourceFilter, createdFrom, createdTo, followFrom, followTo, advFilter]);
   useEffect(() => { api.get('/api/sales/sources').then((r) => setSourceOptions(r.data.data)).catch(() => setSourceOptions([])); }, []);
 
   const fetchAll = useCallback(async () => {
@@ -499,6 +542,7 @@ export default function SalesPage() {
       if (followFrom) params.followUpFrom = followFrom;
       if (followTo) params.followUpTo = followTo;
       if (followUpFilter) params.followUp = followUpFilter;
+      if (advFilter) params.filter = JSON.stringify(advFilter);
       const [leadsRes, statsRes] = await Promise.all([
         api.get('/api/sales/leads', { params }),
         api.get('/api/sales/stats'),
@@ -512,7 +556,7 @@ export default function SalesPage() {
     } finally {
       setLoading(false);
     }
-  }, [page, search, statusFilter, activityFilter, followUpFilter, assignedFilter, sourceFilter, createdFrom, createdTo, followFrom, followTo]);
+  }, [page, search, statusFilter, activityFilter, followUpFilter, assignedFilter, sourceFilter, createdFrom, createdTo, followFrom, followTo, advFilter]);
 
   useEffect(() => { if (level && tab === 'leads') fetchAll(); }, [level, tab, fetchAll]);
 
@@ -715,6 +759,7 @@ export default function SalesPage() {
               <input type="date" value={followFrom} onChange={(e) => setFollowFrom(e.target.value)} className="px-2 py-1.5 border rounded-lg text-sm" />
               –<input type="date" value={followTo} onChange={(e) => setFollowTo(e.target.value)} className="px-2 py-1.5 border rounded-lg text-sm" />
             </label>
+            <AdvancedFilter scope="leads" fields={leadFilterFields(employees)} value={advFilter} onChange={setAdvFilter} />
             {(statusFilter || activityFilter || assignedFilter || sourceFilter || createdFrom || createdTo || followFrom || followTo || followUpFilter) && (
               <button onClick={() => { setStatusFilter(''); setActivityFilter(''); setAssignedFilter(''); setSourceFilter(''); setCreatedFrom(''); setCreatedTo(''); setFollowFrom(''); setFollowTo(''); setFollowUpFilter(''); }} className="text-xs text-blue-600 hover:underline">Clear all filters</button>
             )}
@@ -868,7 +913,7 @@ export default function SalesPage() {
 
       {tab === 'tasks' && <TasksPanel isAdmin={isAdmin} canEdit={canEdit} employees={employees} onOpenLead={openLeadDetail} />}
 
-      {tab === 'summaries' && isAdmin && <SummariesPanel />}
+      {tab === 'summaries' && isAdmin && <SummariesPanel employees={employees} />}
 
       {tab === 'activityMonitor' && isAdmin && <ActivityMonitorPanel employees={employees} onOpenLead={openLeadDetail} />}
 
@@ -882,7 +927,7 @@ export default function SalesPage() {
 
       {tab === 'demoConducted' && !isAdmin && <DemoListPanel status="COMPLETED" emptyLabel="No demos conducted yet" onOpenLead={openLeadDetail} />}
 
-      {tab === 'callLog' && <CallLogPanel onOpenLead={openLeadDetail} />}
+      {tab === 'callLog' && <CallLogPanel onOpenLead={openLeadDetail} employees={employees} />}
 
       {tab === 'devices' && isAdmin && <DevicesPanel employees={employees} />}
 
@@ -2105,7 +2150,152 @@ function TasksPanel({ isAdmin, canEdit, employees, onOpenLead }: { isAdmin: bool
 }
 
 // ── Summaries (Sales Admin): lead assignment, lead stage, source ─────────────
-function SummariesPanel() {
+const REPORT_DIMS: { value: string; label: string }[] = [
+  { value: 'source', label: 'Data source' }, { value: 'assignedTo', label: 'Lead assigned to' }, { value: 'stage', label: 'Lead stage' },
+  { value: 'updateStatus', label: 'Update status' }, { value: 'course', label: 'Course' }, { value: 'city', label: 'City' },
+  { value: 'college', label: 'College' }, { value: 'qualification', label: 'Qualification' },
+  { value: 'createdMonth', label: 'Created month' }, { value: 'createdDay', label: 'Created date' },
+  { value: 'createdBy', label: 'Lead created by' }, { value: 'leadAge', label: 'Lead age' }, { value: 'activityCount', label: 'Activity count' },
+  { value: 'lastContact', label: 'Last contact' }, { value: 'followUp', label: 'Follow-up due' },
+];
+const REPORT_MEASURES: { value: string; label: string }[] = [
+  { value: 'leads', label: 'Leads' }, { value: 'activities', label: 'Activities (calls + meetings)' }, { value: 'calls', label: 'Calls' },
+  { value: 'meetings', label: 'Meetings' }, { value: 'demos', label: 'Demos booked' }, { value: 'demosDone', label: 'Demos completed' }, { value: 'openTasks', label: 'Open tasks' },
+];
+interface MetricRow { label: string; total: number; open: number; demoBooked: number; demoOver: number; enrolled: number; lost: number; overdue: number; conversion: number; calls: number; meetings: number; activities: number; avgActivities: number; demos: number; demosDone: number; openTasks: number; noActivity: number; avgAgeDays: number }
+interface PivotRow { label: string; cells: Record<string, number>; total: number }
+type ReportData = { mode: 'metrics'; total: number; rows: MetricRow[] } | { mode: 'pivot'; measure?: string; total: number; cols: string[]; rows: PivotRow[] };
+
+/** Sales report builder: group leads by any field (and optionally split by a second), filter, export. */
+function SalesReportBuilder({ employees }: { employees: EmployeeLite[] }) {
+  const [rowsDim, setRowsDim] = useState('source');
+  const [colsDim, setColsDim] = useState('');
+  const [from, setFrom] = useState('');
+  const [to, setTo] = useState('');
+  const [emp, setEmp] = useState('');
+  const [measure, setMeasure] = useState('leads');
+  const [adv, setAdv] = useState<FilterGroup | null>(null);
+  const [data, setData] = useState<ReportData | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+  const run = useCallback(async () => {
+    setLoading(true); setError('');
+    try {
+      const params: Record<string, string> = { rows: rowsDim };
+      if (colsDim) { params.cols = colsDim; params.measure = measure; } if (from) params.from = from; if (to) params.to = to; if (emp) params.assignedToId = emp;
+      if (adv) params.filter = JSON.stringify(adv);
+      const r = await api.get('/api/sales/insights/report', { params });
+      setData(r.data.data);
+    } catch (err: unknown) { setError((err as { response?: { data?: { message?: string } } }).response?.data?.message || 'Failed to build report'); }
+    finally { setLoading(false); }
+  }, [rowsDim, colsDim, measure, from, to, emp, adv]);
+  useEffect(() => { run(); }, [run]);
+
+  const rowLabel = REPORT_DIMS.find((d) => d.value === rowsDim)?.label || 'Group';
+  const exportXlsx = () => {
+    if (!data) return;
+    let out: Record<string, unknown>[];
+    if (data.mode === 'metrics') {
+      out = data.rows.map((r) => ({ [rowLabel]: r.label, Leads: r.total, Open: r.open, 'Demo booked (status)': r.demoBooked, 'Demo over (status)': r.demoOver, Enrolled: r.enrolled, Lost: r.lost, 'Conversion %': r.conversion, 'Overdue follow-ups': r.overdue, Calls: r.calls, Meetings: r.meetings, 'Avg activities / lead': r.avgActivities, 'Never contacted': r.noActivity, 'Demos booked': r.demos, 'Demos completed': r.demosDone, 'Open tasks': r.openTasks, 'Avg lead age (days)': r.avgAgeDays }));
+    } else {
+      out = data.rows.map((r) => ({ [rowLabel]: r.label, ...Object.fromEntries(data.cols.map((c) => [c, r.cells[c] || 0])), Total: r.total }));
+    }
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(out), 'Sales report');
+    XLSX.writeFile(wb, `sales_report_${rowsDim}${colsDim ? `_by_${colsDim}` : ''}.xlsx`);
+  };
+  const sel = 'border rounded-lg px-2 py-1.5 text-sm bg-background';
+  const th = 'px-3 py-3';
+  return (
+    <section className="space-y-3 border rounded-xl p-4 bg-card">
+      <div className="flex flex-wrap items-end gap-3">
+        <h3 className="font-semibold text-sm w-full">Sales report</h3>
+        <label className="text-xs text-muted-foreground">Group by
+          <select value={rowsDim} onChange={(e) => setRowsDim(e.target.value)} className={`${sel} block mt-1`}>{REPORT_DIMS.map((d) => <option key={d.value} value={d.value}>{d.label}</option>)}</select>
+        </label>
+        <label className="text-xs text-muted-foreground">Split by
+          <select value={colsDim} onChange={(e) => setColsDim(e.target.value)} className={`${sel} block mt-1`}>
+            <option value="">None (show metrics)</option>
+            {REPORT_DIMS.filter((d) => d.value !== rowsDim).map((d) => <option key={d.value} value={d.value}>{d.label}</option>)}
+          </select>
+        </label>
+        {colsDim && (
+          <label className="text-xs text-muted-foreground">Count
+            <select value={measure} onChange={(e) => setMeasure(e.target.value)} className={`${sel} block mt-1`}>{REPORT_MEASURES.map((m) => <option key={m.value} value={m.value}>{m.label}</option>)}</select>
+          </label>
+        )}
+        <label className="text-xs text-muted-foreground">Salesperson
+          <select value={emp} onChange={(e) => setEmp(e.target.value)} className={`${sel} block mt-1`}><option value="">All</option>{employees.map((e) => <option key={e.id} value={e.id}>{e.firstName} {e.lastName}</option>)}</select>
+        </label>
+        <label className="text-xs text-muted-foreground">Created from<input type="date" value={from} onChange={(e) => setFrom(e.target.value)} className={`${sel} block mt-1`} /></label>
+        <label className="text-xs text-muted-foreground">to<input type="date" value={to} onChange={(e) => setTo(e.target.value)} className={`${sel} block mt-1`} /></label>
+        <button onClick={exportXlsx} disabled={!data || data.rows.length === 0} className="text-xs border rounded-lg px-3 py-2 text-blue-600 disabled:text-muted-foreground">Download Excel</button>
+      </div>
+      <AdvancedFilter scope="leads" fields={leadFilterFields(employees)} value={adv} onChange={setAdv} />
+      {error && <div className="bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg px-4 py-3">{error}</div>}
+      {loading && <p className="text-sm text-muted-foreground">Building report...</p>}
+      {data && (
+        <div className="overflow-x-auto border rounded-xl">
+          <table className="w-full text-sm">
+            <thead className="bg-muted/50 text-left text-xs uppercase text-muted-foreground">
+              {data.mode === 'metrics' ? (
+                <tr><th className={th}>{rowLabel}</th><th className={th}>Leads</th><th className={th}>Share</th><th className={th}>Open</th><th className={th}>Demo booked</th><th className={th}>Demo over</th><th className={th}>Enrolled</th><th className={th}>Lost</th><th className={th}>Conversion</th><th className={th}>Overdue follow-ups</th><th className={th}>Calls</th><th className={th}>Meetings</th><th className={th}>Avg act./lead</th><th className={th}>Never contacted</th><th className={th}>Demos booked</th><th className={th}>Demos done</th><th className={th}>Open tasks</th><th className={th}>Avg age (d)</th></tr>
+              ) : (
+                <tr><th className={th}>{rowLabel}</th>{data.cols.map((c) => <th key={c} className={th}>{c}</th>)}<th className={th}>Total</th></tr>
+              )}
+            </thead>
+            <tbody className="divide-y">
+              {data.mode === 'metrics' ? data.rows.map((r) => (
+                <tr key={r.label} className="hover:bg-muted/30">
+                  <td className="px-3 py-2 font-medium">{r.label}</td><td className="px-3 py-2 font-semibold">{r.total}</td>
+                  <td className="px-3 py-2 text-xs">{data.total ? Math.round((r.total / data.total) * 1000) / 10 : 0}%</td>
+                  <td className="px-3 py-2 text-xs">{r.open}</td><td className="px-3 py-2 text-xs">{r.demoBooked}</td><td className="px-3 py-2 text-xs">{r.demoOver}</td>
+                  <td className="px-3 py-2 text-xs text-green-700">{r.enrolled}</td><td className="px-3 py-2 text-xs text-red-600">{r.lost}</td>
+                  <td className="px-3 py-2 text-xs font-semibold">{r.conversion}%</td>
+                  <td className={`px-3 py-2 text-xs ${r.overdue ? 'text-red-600 font-semibold' : ''}`}>{r.overdue}</td>
+                  <td className="px-3 py-2 text-xs">{r.calls}</td><td className="px-3 py-2 text-xs">{r.meetings}</td><td className="px-3 py-2 text-xs">{r.avgActivities}</td>
+                  <td className={`px-3 py-2 text-xs ${r.noActivity ? 'text-amber-700 font-semibold' : ''}`}>{r.noActivity}</td>
+                  <td className="px-3 py-2 text-xs">{r.demos}</td><td className="px-3 py-2 text-xs">{r.demosDone}</td><td className="px-3 py-2 text-xs">{r.openTasks}</td><td className="px-3 py-2 text-xs">{r.avgAgeDays}</td>
+                </tr>
+              )) : data.rows.map((r) => (
+                <tr key={r.label} className="hover:bg-muted/30">
+                  <td className="px-3 py-2 font-medium">{r.label}</td>
+                  {data.cols.map((c) => <td key={c} className="px-3 py-2 text-xs">{r.cells[c] || ''}</td>)}
+                  <td className="px-3 py-2 font-semibold">{r.total}</td>
+                </tr>
+              ))}
+              {data.rows.length === 0 && !loading && <tr><td colSpan={18} className="px-4 py-6 text-center text-muted-foreground">No leads match</td></tr>}
+              {data.rows.length > 0 && (
+                <tr className="bg-muted/40 font-semibold">
+                  <td className="px-3 py-2">Total</td>
+                  {data.mode === 'metrics' ? (<>
+                    <td className="px-3 py-2">{data.total}</td><td className="px-3 py-2 text-xs">100%</td>
+                    <td className="px-3 py-2 text-xs">{data.rows.reduce((s, r) => s + r.open, 0)}</td>
+                    <td className="px-3 py-2 text-xs">{data.rows.reduce((s, r) => s + r.demoBooked, 0)}</td>
+                    <td className="px-3 py-2 text-xs">{data.rows.reduce((s, r) => s + r.demoOver, 0)}</td>
+                    <td className="px-3 py-2 text-xs">{data.rows.reduce((s, r) => s + r.enrolled, 0)}</td>
+                    <td className="px-3 py-2 text-xs">{data.rows.reduce((s, r) => s + r.lost, 0)}</td>
+                    <td className="px-3 py-2 text-xs">{data.total ? Math.round((data.rows.reduce((s, r) => s + r.enrolled, 0) / data.total) * 1000) / 10 : 0}%</td>
+                    <td className="px-3 py-2 text-xs">{data.rows.reduce((s, r) => s + r.overdue, 0)}</td>
+                    {(['calls', 'meetings'] as const).map((k) => <td key={k} className="px-3 py-2 text-xs">{data.rows.reduce((s, r) => s + r[k], 0)}</td>)}
+                    <td className="px-3 py-2 text-xs">{data.total ? Math.round(((data.rows.reduce((s, r) => s + r.calls + r.meetings, 0)) / data.total) * 10) / 10 : 0}</td>
+                    {(['noActivity', 'demos', 'demosDone', 'openTasks'] as const).map((k) => <td key={k} className="px-3 py-2 text-xs">{data.rows.reduce((s, r) => s + r[k], 0)}</td>)}
+                    <td className="px-3 py-2 text-xs">{data.total ? Math.round(data.rows.reduce((s, r) => s + r.avgAgeDays * r.total, 0) / data.total) : 0}</td>
+                  </>) : (<>
+                    {data.cols.map((c) => <td key={c} className="px-3 py-2 text-xs">{data.rows.reduce((s, r) => s + (r.cells[c] || 0), 0)}</td>)}
+                    <td className="px-3 py-2">{data.total}</td>
+                  </>)}
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </section>
+  );
+}
+
+function SummariesPanel({ employees }: { employees: EmployeeLite[] }) {
   const [assignment, setAssignment] = useState<{ employeeId: string | null; name: string; total: number; stages: Record<string, number>; overdue: number; newToday: number }[]>([]);
   const [stages, setStages] = useState<{ total: number; stages: { stage: LeadStatus; count: number }[]; statuses: { status: string; count: number }[] } | null>(null);
   const [sources, setSources] = useState<{ source: string; total: number; demo: number; enrolled: number; lost: number; open: number; conversion: number }[]>([]);
@@ -2122,6 +2312,7 @@ function SummariesPanel() {
   return (
     <div className="space-y-8">
       {error && <div className="bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg px-4 py-3">{error}</div>}
+      <SalesReportBuilder employees={employees} />
       {loading && <p className="text-sm text-muted-foreground">Loading...</p>}
 
       <section className="space-y-2">
@@ -2207,17 +2398,19 @@ function ActivityMonitorPanel({ employees, onOpenLead }: { employees: EmployeeLi
   const [to, setTo] = useState('');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
-  useEffect(() => { setPage(1); }, [types, emp, from, to]);
+  const [advFilter, setAdvFilter] = useState<FilterGroup | null>(null);
+  useEffect(() => { setPage(1); }, [types, emp, from, to, advFilter]);
   const load = useCallback(async () => {
     setLoading(true); setError('');
     try {
       const params: Record<string, string> = { page: String(page), limit: '50' };
       if (types) params.type = types; if (emp) params.employeeId = emp; if (from) params.from = from; if (to) params.to = to;
+      if (advFilter) params.filter = JSON.stringify(advFilter);
       const r = await api.get('/api/sales/activity-feed', { params });
       setRows(r.data.data); setMeta(r.data.meta); setPerPerson(r.data.perPerson || []);
     } catch (err: unknown) { setError((err as { response?: { data?: { message?: string } } }).response?.data?.message || 'Failed to load activity'); }
     finally { setLoading(false); }
-  }, [page, types, emp, from, to]);
+  }, [page, types, emp, from, to, advFilter]);
   useEffect(() => { load(); }, [load]);
 
   return (
@@ -2225,6 +2418,7 @@ function ActivityMonitorPanel({ employees, onOpenLead }: { employees: EmployeeLi
       {error && <div className="bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg px-4 py-3">{error}</div>}
       <div className="flex flex-wrap items-center gap-3">
         <MultiSelect label="Activity type" value={types} onChange={setTypes} options={FEED_TYPES} />
+        <AdvancedFilter scope="activity" fields={feedFilterFields(employees)} value={advFilter} onChange={setAdvFilter} />
         <select value={emp} onChange={(e) => setEmp(e.target.value)} className="px-3 py-2 border rounded-lg text-sm">
           <option value="">Everyone</option>
           {employees.map((e) => <option key={e.id} value={e.id}>{e.firstName} {e.lastName}</option>)}
@@ -3109,7 +3303,8 @@ function LinkCallModal({ call, onClose, onLinked, setError }: {
 // ── Call Log tab: every call across all leads, browsable by day or by
 // number — like a phone's own call log. Non-admins only ever see their own
 // calls (server-scoped), same as the rest of this page.
-function CallLogPanel({ onOpenLead }: { onOpenLead: (id: string) => void }) {
+function CallLogPanel({ onOpenLead, employees }: { onOpenLead: (id: string) => void; employees: EmployeeLite[] }) {
+  const [advFilter, setAdvFilter] = useState<FilterGroup | null>(null);
   const todayISO = () => new Date().toISOString().slice(0, 10);
   const [date, setDate] = useState(todayISO());
   const [phoneSearch, setPhoneSearch] = useState('');
@@ -3137,6 +3332,7 @@ function CallLogPanel({ onOpenLead }: { onOpenLead: (id: string) => void }) {
       const params: Record<string, string> = { page: String(page), limit: '50' };
       if (appliedPhone) params.phone = appliedPhone;
       else params.date = date;
+      if (advFilter) params.filter = JSON.stringify(advFilter);
       const res = await api.get('/api/sales/call-log', { params });
       setLogs(res.data.data);
       setMeta(res.data.meta);
@@ -3146,7 +3342,8 @@ function CallLogPanel({ onOpenLead }: { onOpenLead: (id: string) => void }) {
     } finally {
       setLoading(false);
     }
-  }, [page, date, appliedPhone]);
+  }, [page, date, appliedPhone, advFilter]);
+  useEffect(() => { setPage(1); }, [advFilter]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -3169,10 +3366,11 @@ function CallLogPanel({ onOpenLead }: { onOpenLead: (id: string) => void }) {
             type="date"
             className="px-2 py-1.5 border rounded-lg text-sm"
             value={date}
-            disabled={!!appliedPhone}
+            disabled={!!appliedPhone || !!advFilter}
             onChange={(e) => setDate(e.target.value)}
           />
         </label>
+        <AdvancedFilter scope="callLog" fields={callFilterFields(employees)} value={advFilter} onChange={setAdvFilter} />
         <input
           className="px-3 py-2 border rounded-lg text-sm w-64"
           placeholder="Search a phone number for its full history..."
@@ -3190,7 +3388,7 @@ function CallLogPanel({ onOpenLead }: { onOpenLead: (id: string) => void }) {
       </div>
 
       <p className="text-xs text-muted-foreground">
-        {appliedPhone ? `Full call history for ${appliedPhone}` : `Calls on ${formatDate(date)}`} — {meta?.total ?? 0} call{meta?.total === 1 ? '' : 's'}
+        {advFilter ? 'Filtered call log (all dates unless the filter limits them)' : appliedPhone ? `Full call history for ${appliedPhone}` : `Calls on ${formatDate(date)}`} — {meta?.total ?? 0} call{meta?.total === 1 ? '' : 's'}
       </p>
 
       <div className="bg-card border rounded-xl overflow-x-auto">

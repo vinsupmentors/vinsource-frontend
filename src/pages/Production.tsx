@@ -6,6 +6,7 @@ import api, { BASE_URL } from '@/lib/api';
 import { formatDateTime } from '@/lib/utils';
 import { useModuleAccess } from '@/hooks/useModuleAccess';
 import * as XLSX from 'xlsx';
+import AdvancedFilter, { evalFilter, countConditions, emptyTree, type FilterField, type FilterGroup } from '@/components/AdvancedFilter';
 import {
   Lock, Plus, X, Users, BookOpen, CalendarRange, ChevronDown, ChevronRight,
   GraduationCap, PlayCircle, CalendarClock, Search, Upload, Pencil, ChevronLeft, Download, Trash2, UserPlus,
@@ -5298,6 +5299,7 @@ function ComfortReportPanel({ setError }: { setError: (s: string) => void }) {
   const [session, setSession] = useState('');
   const [colFilters, setColFilters] = useState<Record<string, Set<string> | undefined>>({});
   const [sortBy, setSortBy] = useState<{ key: string; dir: 'asc' | 'desc' } | null>(null);
+  const [advFilter, setAdvFilter] = useState<FilterGroup>(emptyTree());
 
   useEffect(() => {
     setLoading(true);
@@ -5374,14 +5376,44 @@ function ComfortReportPanel({ setError }: { setError: (s: string) => void }) {
     return out;
   }, [cols, baseRows]);
 
+  const advFields: FilterField[] = useMemo(() => {
+    const numeric = new Set(['total', 'present', 'absent', 'modulesDone', 'avgMark', 'attendancePct']);
+    const uniq = (k: string) => (distinct[k] || []).filter(Boolean).slice(0, 200).map((v) => ({ value: v, label: v }));
+    const selects = new Set(['type', 'slot', 'batchCode', 'courseName', 'trainers', 'placementStatus', 'mainProject', 'certificateEligible', 'status']);
+    return cols
+      .filter((c) => c.key !== 'trainerComments' || true)
+      .map((c): FilterField => numeric.has(c.key) || c.key.startsWith('m_')
+        ? { key: c.key, label: c.label, type: 'number' }
+        : selects.has(c.key)
+          ? { key: c.key, label: c.label, type: 'select', options: uniq(c.key) }
+          : { key: c.key, label: c.label, type: 'text' });
+  }, [cols, distinct]);
+
+  const advGet = useCallback((row: ComfortRow, key: string): unknown => {
+    switch (key) {
+      case 'total': return row.total;
+      case 'present': return row.present;
+      case 'absent': return row.absent;
+      case 'modulesDone': return row.modulesDone;
+      case 'avgMark': return row.avgMark;
+      case 'attendancePct': return row.attendancePct;
+      default: {
+        if (key.startsWith('m_')) { const s = row.moduleMarks[key.slice(2)]; return s ? Math.round(s.got * 10) / 10 : null; }
+        const c = cols.find((x) => x.key === key);
+        return c ? c.get(row) : '';
+      }
+    }
+  }, [cols]);
+
   const visible = useMemo(() => {
     let out = baseRows.filter((r) => cols.every((c) => { const sel = colFilters[c.key]; return !sel || sel.has(c.get(r)); }));
+    if (countConditions(advFilter) > 0) out = out.filter((r) => evalFilter(r, advFilter, advFields, advGet));
     if (sortBy) {
       const col = cols.find((c) => c.key === sortBy.key);
       if (col) out = [...out].sort((a, b) => col.get(a).localeCompare(col.get(b), undefined, { numeric: true }) * (sortBy.dir === 'asc' ? 1 : -1));
     }
     return out;
-  }, [baseRows, cols, colFilters, sortBy]);
+  }, [baseRows, cols, colFilters, sortBy, advFilter, advFields, advGet]);
 
   const downloadExcel = () => {
     exportRowsToExcel('comfort_report.xlsx', visible.map((r) => {
@@ -5415,6 +5447,7 @@ function ComfortReportPanel({ setError }: { setError: (s: string) => void }) {
         placeholder="Search by student ID, name, phone number, email…"
         className="w-full max-w-md border rounded-lg px-3 py-2 text-sm"
       />
+      <AdvancedFilter scope="comfort" fields={advFields} value={advFilter} onChange={(t) => setAdvFilter(t ?? emptyTree())} />
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="flex flex-wrap items-center gap-2">
           <ReportFilterBar filters={filters} onChange={setFilters} showTrainer />
