@@ -647,7 +647,7 @@ export default function SalesPage() {
   const detailLead = (detailLeadId && leads.find((l) => l.id === detailLeadId)) || fetchedDetailLead;
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 min-w-0 max-w-full">
       <div className="flex items-start justify-between">
         <div>
           <h1 className="text-2xl font-bold">Sales</h1>
@@ -671,7 +671,7 @@ export default function SalesPage() {
         )}
       </div>
 
-      <div className="flex items-center gap-1 border-b">
+      <div className="flex flex-wrap items-center gap-x-1 border-b max-w-full">
         {(isAdmin
           ? [
               { id: 'leads' as Tab, label: 'Leads', icon: Users },
@@ -704,7 +704,7 @@ export default function SalesPage() {
             <button
               key={t.id}
               onClick={() => setTab(t.id)}
-              className={`flex items-center gap-2 px-4 py-2 text-sm font-medium border-b-2 -mb-px transition-colors ${
+              className={`flex items-center gap-1.5 whitespace-nowrap px-3 py-2 text-sm font-medium border-b-2 -mb-px transition-colors ${
                 tab === t.id ? 'border-blue-600 text-blue-600' : 'border-transparent text-muted-foreground hover:text-foreground'
               }`}
             >
