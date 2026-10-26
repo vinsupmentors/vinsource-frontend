@@ -10,7 +10,7 @@ import {
   PhoneCall, Video, MapPin, RefreshCw, AlertTriangle, Settings, Trash2, Activity,
   ChevronLeft, ChevronRight, Upload, Download, Percent,
   Smartphone, PhoneIncoming, Link2, UserPlus, Copy, Ban, Check, History,
-  Target as TargetIcon, Trophy, Clock, PlayCircle, Bell, ListChecks, BarChart3, Eye,
+  Target as TargetIcon, Trophy, Clock, PlayCircle, Bell, ListChecks, BarChart3, Eye, Inbox, Layers, ShieldCheck, Sun, MessageCircle, Send,
 } from 'lucide-react';
 
 const PAGE_SIZE = 100;
@@ -66,6 +66,10 @@ interface Lead {
   courseInterest?: string | null;
   status: LeadStatus;
   activityStatus?: ActivityStatus | null;
+  stageKey?: string | null;
+  statusKey?: string | null;
+  scoutKey?: string | null;
+  lostReasonKey?: string | null;
   lostReason?: LeadLostReason | null;
   notes?: string | null;
   lastContactAt?: string | null;
@@ -110,22 +114,56 @@ function RecordingPlayer({ url }: { url?: string | null }) {
   );
 }
 
-type ActivityStatus = 'DNP' | 'FOLLOW_UP' | 'DEMO_BOOKED' | 'DEMO_OVER' | 'NOT_INTERESTED' | 'DISQUALIFIED';
+// A status is either a built-in value (DNP, FOLLOW_UP…) or a custom key (CUSTOM_xxx) created in Config.
+type ActivityStatus = string;
 type ActivityType = 'CALL' | 'MEETING';
-const ACTIVITY_STATUSES: { value: ActivityStatus; label: string }[] = [
-  { value: 'DNP', label: 'DNP' },
-  { value: 'FOLLOW_UP', label: 'Follow-up' },
-  { value: 'DEMO_BOOKED', label: 'Demo booked' },
-  { value: 'DEMO_OVER', label: 'Demo over' },
-  { value: 'NOT_INTERESTED', label: 'Not interested' },
-  { value: 'DISQUALIFIED', label: 'Disqualified' },
+
+// ── Config (stages / update statuses / lost reasons / sources / lead scouts) ──
+interface CfgItem {
+  id: string; kind: string; key: string; label: string; base: string | null; color: string | null;
+  system: boolean; active: boolean; sortOrder: number;
+  targetStageKey?: string | null; needsFollowUp?: boolean; notesRequired?: boolean;
+}
+interface CfgData { stages: CfgItem[]; statuses: CfgItem[]; lostReasons: CfgItem[]; sources: CfgItem[]; scouts: CfgItem[]; colors: string[] }
+const EMPTY_CFG: CfgData = { stages: [], statuses: [], lostReasons: [], sources: [], scouts: [], colors: [] };
+const DEFAULT_STATUSES: { value: string; label: string }[] = [
+  { value: 'DNP', label: 'DNP' }, { value: 'FOLLOW_UP', label: 'Follow-up' }, { value: 'DEMO_BOOKED', label: 'Demo booked' },
+  { value: 'DEMO_OVER', label: 'Demo over' }, { value: 'NOT_INTERESTED', label: 'Not interested' }, { value: 'DISQUALIFIED', label: 'Disqualified' },
 ];
-const ACTIVITY_STATUS_LABEL = Object.fromEntries(ACTIVITY_STATUSES.map((s) => [s.value, s.label])) as Record<ActivityStatus, string>;
+// Module-level snapshot so label helpers work everywhere; SalesPage re-renders once it loads.
+let CFG: CfgData = EMPTY_CFG;
+const cfgStatus = (key?: string | null) => CFG.statuses.find((s) => s.key === key);
+const cfgStage = (key?: string | null) => CFG.stages.find((s) => s.key === key);
+const ACTIVITY_STATUSES_LIVE = (): { value: string; label: string }[] =>
+  CFG.statuses.length ? CFG.statuses.map((s) => ({ value: s.key, label: s.label })) : DEFAULT_STATUSES;
+const ACTIVITY_STATUS_LABEL = new Proxy({} as Record<string, string>, {
+  get: (_t, k: string) => cfgStatus(k)?.label ?? DEFAULT_STATUSES.find((s) => s.value === k)?.label ?? String(k).replace(/^CUSTOM_/, '').replace(/_/g, ' '),
+});
 // Statuses that keep the lead open, so a follow-up date AND time must be given.
-const NEEDS_FOLLOW_UP: ActivityStatus[] = ['DNP', 'FOLLOW_UP', 'DEMO_BOOKED', 'DEMO_OVER'];
-// Stage each status moves the lead into (mirrors the server; shown as a preview).
-const STATUS_STAGE: Record<ActivityStatus, LeadStatus> = {
-  DNP: 'CONTACTED', FOLLOW_UP: 'CONTACTED', DEMO_BOOKED: 'DEMO_SCHEDULED', DEMO_OVER: 'DEMO_DONE', NOT_INTERESTED: 'LOST', DISQUALIFIED: 'LOST',
+const needsFollowUp = (key: string): boolean => {
+  const c = cfgStatus(key);
+  return c ? !!c.needsFollowUp : ['DNP', 'FOLLOW_UP', 'DEMO_BOOKED', 'DEMO_OVER'].includes(key);
+};
+/** Built-in behaviour a status copies (DEMO_BOOKED, DISQUALIFIED…). */
+const statusBase = (key: string): string => cfgStatus(key)?.base ?? key;
+/** Stage a status moves the lead into (shown as a preview). */
+const statusStageLabel = (key: string): string => {
+  const c = cfgStatus(key);
+  if (c?.targetStageKey) return cfgStage(c.targetStageKey)?.label ?? c.targetStageKey.replace(/_/g, ' ');
+  const m: Record<string, string> = { DNP: 'Contacted', FOLLOW_UP: 'Contacted', DEMO_BOOKED: 'Demo scheduled', DEMO_OVER: 'Demo done', NOT_INTERESTED: 'Lost', DISQUALIFIED: 'Lost' };
+  return m[key] ?? '';
+};
+const statusGoesToLost = (key: string): boolean => {
+  const c = cfgStatus(key);
+  if (c?.targetStageKey) return (cfgStage(c.targetStageKey)?.base ?? c.targetStageKey) === 'LOST';
+  return key === 'NOT_INTERESTED' || key === 'DISQUALIFIED';
+};
+const statusNeedsLostReason = (key: string): boolean => statusBase(key) === 'DISQUALIFIED';
+const notesNeeded = (key: string): boolean => { const c = cfgStatus(key); return c ? c.notesRequired !== false : key !== 'DNP'; };
+const scoutLabel = (key?: string | null) => (key ? CFG.scouts.find((s) => s.key === key)?.label ?? key.replace(/^SCOUT_/, '').replace(/_/g, ' ') : '');
+const CFG_COLOR: Record<string, string> = {
+  slate: 'bg-slate-100 text-slate-700', blue: 'bg-blue-100 text-blue-700', green: 'bg-green-100 text-green-700', amber: 'bg-amber-100 text-amber-700',
+  orange: 'bg-orange-100 text-orange-700', red: 'bg-red-100 text-red-700', purple: 'bg-purple-100 text-purple-700', pink: 'bg-pink-100 text-pink-700', teal: 'bg-teal-100 text-teal-700',
 };
 
 type LeadTab = 'profile' | 'activity' | 'tasks' | 'demo' | 'notes' | 'history';
@@ -305,6 +343,25 @@ const LOST_REASONS: { value: LeadLostReason; label: string }[] = [
 ];
 const LOST_REASON_LABEL: Record<LeadLostReason, string> = Object.fromEntries(LOST_REASONS.map((r) => [r.value, r.label])) as Record<LeadLostReason, string>;
 
+// Config-aware helpers (fall back to the built-in lists until /config loads).
+/** Active stages (plus the lead's current one even if switched off). */
+const stageOptionsLive = (current?: string): { value: string; label: string }[] => {
+  if (!CFG.stages.length) return STATUSES.map((s) => ({ value: s, label: s.replace(/_/g, ' ') }));
+  const list = CFG.stages.filter((s) => s.active || s.key === current).map((s) => ({ value: s.key, label: s.label }));
+  return list;
+};
+const stageBase = (key: string): string => cfgStage(key)?.base ?? key;
+const stageLabel = (key: string): string => cfgStage(key)?.label ?? key.replace(/^CUSTOM_/, '').replace(/_/g, ' ');
+const stageChipClass = (key: string): string => {
+  const c = cfgStage(key);
+  return (c?.color && CFG_COLOR[c.color]) || STATUS_COLOR[(c?.base ?? key) as LeadStatus] || 'bg-slate-100 text-slate-700';
+};
+/** Lost reasons the user can pick (active ones). */
+const lostReasonsLive = (): { value: string; label: string; base: string }[] =>
+  CFG.lostReasons.length ? CFG.lostReasons.filter((r) => r.active).map((r) => ({ value: r.key, label: r.label, base: r.base ?? 'OTHER' })) : LOST_REASONS.map((r) => ({ ...r, base: r.value }));
+const lostReasonLabel = (key?: string | null, base?: string | null): string =>
+  (key && CFG.lostReasons.find((r) => r.key === key)?.label) || (base && LOST_REASON_LABEL[base as LeadLostReason]) || '';
+
 const DEMO_MODES: DemoMode[] = ['ONLINE', 'OFFLINE'];
 const DEMO_MODE_LABEL: Record<DemoMode, string> = { ONLINE: 'Online', OFFLINE: 'Offline' };
 const DEMO_STATUS_LABEL: Record<DemoStatus, string> = {
@@ -387,7 +444,7 @@ function formatCurrency(n: number): string {
 const empOptions = (emps: EmployeeLite[]) => emps.map((e) => ({ value: e.id, label: `${e.firstName} ${e.lastName}` }));
 const stageOptions = STATUSES_FOR_FILTER();
 function STATUSES_FOR_FILTER() { return ['NEW', 'CONTACTED', 'DEMO_SCHEDULED', 'DEMO_DONE', 'NEGOTIATION', 'ENROLLED', 'LOST'].map((s) => ({ value: s, label: s.replace(/_/g, ' ') })); }
-const activityOptions = ACTIVITY_STATUSES.map((s) => ({ value: s.value as string, label: s.label }));
+const activityOptions = DEFAULT_STATUSES.map((s) => ({ value: s.value, label: s.label }));
 
 const leadFilterFields = (emps: EmployeeLite[]): FilterField[] => [
   { key: 'name', label: 'Name', type: 'text' }, { key: 'phone', label: 'Phone', type: 'text' },
@@ -399,6 +456,7 @@ const leadFilterFields = (emps: EmployeeLite[]): FilterField[] => [
   { key: 'status', label: 'Lead stage', type: 'select', options: stageOptions },
   { key: 'activityStatus', label: 'Status', type: 'select', options: activityOptions, nullable: true },
   { key: 'assignedToId', label: 'Assigned to', type: 'select', options: empOptions(emps), nullable: true },
+  { key: 'scoutKey', label: 'Lead Scout', type: 'select', options: CFG.scouts.map((s) => ({ value: s.key, label: s.label })), nullable: true },
   { key: 'createdAt', label: 'Created', type: 'date' }, { key: 'lastContactAt', label: 'Last contact', type: 'date', nullable: true },
   { key: 'nextFollowUpAt', label: 'Follow-up', type: 'date', nullable: true },
   { key: 'demoMode', label: 'Demo mode', type: 'select', options: [{ value: 'ONLINE', label: 'Online' }, { value: 'OFFLINE', label: 'Offline' }] },
@@ -418,7 +476,7 @@ const callFilterFields = (emps: EmployeeLite[]): FilterField[] => [
 ];
 const feedFilterFields = (emps: EmployeeLite[]): FilterField[] => [
   { key: 'createdAt', label: 'When', type: 'date' },
-  { key: 'type', label: 'Type', type: 'select', options: ['ACTIVITY', 'STATUS', 'STAGE', 'ASSIGNED', 'FOLLOW_UP', 'EDIT', 'CREATED', 'DELETED', 'DEMO', 'TASK', 'NOTE'].map((s) => ({ value: s, label: s.replace(/_/g, ' ') })) },
+  { key: 'type', label: 'Type', type: 'select', options: ['ACTIVITY', 'STATUS', 'STAGE', 'ASSIGNED', 'FOLLOW_UP', 'EDIT', 'CREATED', 'DELETED', 'DEMO', 'TASK', 'NOTE', 'MESSAGE'].map((s) => ({ value: s, label: s.replace(/_/g, ' ') })) },
   { key: 'actorId', label: 'Done by', type: 'select', nullable: true, options: empOptions(emps) },
   { key: 'leadName', label: 'Lead name', type: 'text' }, { key: 'leadPhone', label: 'Lead phone', type: 'text' },
   { key: 'summary', label: 'What changed', type: 'text' },
@@ -456,8 +514,8 @@ function MultiSelect({ label, options, value, onChange }: {
 }
 
 // ── Main page ────────────────────────────────────────────────────────────
-type Tab = 'leads' | 'reminders' | 'tasks' | 'summaries' | 'activityMonitor' | 'pulse' | 'leadQuality' | 'liveDemos' | 'demoBooked' | 'demoRescheduled' | 'demoConducted' | 'devices' | 'unmatchedCalls' | 'callLog' | 'leaderboard' | 'targets';
-const VALID_TABS: Tab[] = ['leads', 'reminders', 'tasks', 'summaries', 'activityMonitor', 'pulse', 'leadQuality', 'liveDemos', 'demoBooked', 'demoRescheduled', 'demoConducted', 'devices', 'unmatchedCalls', 'callLog', 'leaderboard', 'targets'];
+type Tab = 'leads' | 'reminders' | 'tasks' | 'summaries' | 'activityMonitor' | 'pulse' | 'leadQuality' | 'liveDemos' | 'demoBooked' | 'demoRescheduled' | 'demoConducted' | 'devices' | 'unmatchedCalls' | 'callLog' | 'leaderboard' | 'targets' | 'myBase' | 'batches' | 'leadControl' | 'today' | 'callAnalytics' | 'config' | 'transcripts';
+const VALID_TABS: Tab[] = ['transcripts', 'config', 'leads', 'reminders', 'tasks', 'summaries', 'activityMonitor', 'pulse', 'leadQuality', 'liveDemos', 'demoBooked', 'demoRescheduled', 'demoConducted', 'devices', 'unmatchedCalls', 'callLog', 'leaderboard', 'targets', 'myBase', 'batches', 'leadControl', 'today', 'callAnalytics'];
 // Sales Pulse / Lead Quality are aggregate, cross-rep views — admin only.
 // BDAs get Demo Booked/Rescheduled/Conducted instead, scoped to their own leads.
 // Devices (issuing call-tracking tokens) is admin-only too. Unmatched Calls
@@ -465,7 +523,7 @@ const VALID_TABS: Tab[] = ['leads', 'reminders', 'tasks', 'summaries', 'activity
 // and BDAs can see and work it. Leaderboard/Targets are management-level KPI
 // views, same access tier as Pulse/Lead Quality. "My Students" lives on its
 // own top-level page (see MyStudents.tsx), not as a Sales tab.
-const ADMIN_ONLY_TABS: Tab[] = ['summaries', 'activityMonitor', 'pulse', 'leadQuality', 'liveDemos', 'devices', 'leaderboard', 'targets'];
+const ADMIN_ONLY_TABS: Tab[] = ['config', 'myBase', 'batches', 'leadControl', 'summaries', 'activityMonitor', 'pulse', 'leadQuality', 'liveDemos', 'devices', 'leaderboard', 'targets'];
 const BDA_ONLY_TABS: Tab[] = ['demoBooked', 'demoRescheduled', 'demoConducted'];
 const EDIT_REQUIRED_TABS: Tab[] = ['unmatchedCalls'];
 
@@ -477,7 +535,7 @@ export default function SalesPage() {
 
   const [searchParams, setSearchParams] = useSearchParams();
   const tabFromUrl = searchParams.get('tab') as Tab | null;
-  const [tab, setTabState] = useState<Tab>(tabFromUrl && VALID_TABS.includes(tabFromUrl) ? tabFromUrl : 'leads');
+  const [tab, setTabState] = useState<Tab>(tabFromUrl && VALID_TABS.includes(tabFromUrl) ? tabFromUrl : 'today');
   const setTab = (t: Tab) => { setTabState(t); setSearchParams({ tab: t }, { replace: true }); };
   useEffect(() => {
     if (tabFromUrl && VALID_TABS.includes(tabFromUrl) && tabFromUrl !== tab) setTabState(tabFromUrl);
@@ -520,12 +578,25 @@ export default function SalesPage() {
   // live-refreshed off fetchAll for the Leads tab's own click-through.
   const [fetchedDetailLead, setFetchedDetailLead] = useState<Lead | null>(null);
   const [lostReasonLead, setLostReasonLead] = useState<Lead | null>(null);
+  const [lostStage, setLostStage] = useState('LOST');
   const [saving, setSaving] = useState(false);
 
   // Any filter change resets to page 1 — otherwise you can land on a page
   // number that no longer exists once the result set shrinks.
   useEffect(() => { setPage(1); }, [search, statusFilter, activityFilter, followUpFilter, assignedFilter, sourceFilter, createdFrom, createdTo, followFrom, followTo, advFilter]);
   useEffect(() => { api.get('/api/sales/sources').then((r) => setSourceOptions(r.data.data)).catch(() => setSourceOptions([])); }, []);
+  // Config lists (stages, statuses, lost reasons, sources, scouts) — kept in a module snapshot so every sub-component can read labels.
+  const [cfg, setCfgState] = useState<CfgData>(CFG);
+  const [scoutFilter, setScoutFilter] = useState('');
+  const loadConfig = useCallback(async () => {
+    try {
+      const r = await api.get('/api/sales/config');
+      CFG = r.data.data as CfgData;
+      setCfgState(CFG);
+    } catch { /* keep built-in defaults */ }
+  }, []);
+  useEffect(() => { if (level) loadConfig(); }, [level, loadConfig]);
+  useEffect(() => { setPage(1); }, [scoutFilter]);
 
   const fetchAll = useCallback(async () => {
     setLoading(true);
@@ -537,6 +608,7 @@ export default function SalesPage() {
       if (activityFilter) params.activityStatus = activityFilter;
       if (assignedFilter) params.assignedToId = assignedFilter;
       if (sourceFilter) params.source = sourceFilter;
+      if (scoutFilter) params.scoutKey = scoutFilter;
       if (createdFrom) params.createdFrom = createdFrom;
       if (createdTo) params.createdTo = createdTo;
       if (followFrom) params.followUpFrom = followFrom;
@@ -556,7 +628,7 @@ export default function SalesPage() {
     } finally {
       setLoading(false);
     }
-  }, [page, search, statusFilter, activityFilter, followUpFilter, assignedFilter, sourceFilter, createdFrom, createdTo, followFrom, followTo, advFilter]);
+  }, [page, search, statusFilter, activityFilter, followUpFilter, assignedFilter, sourceFilter, scoutFilter, createdFrom, createdTo, followFrom, followTo, advFilter]);
 
   useEffect(() => { if (level && tab === 'leads') fetchAll(); }, [level, tab, fetchAll]);
 
@@ -603,9 +675,10 @@ export default function SalesPage() {
     }
   };
 
-  const updateLeadStatus = async (id: string, status: LeadStatus, lostReason?: LeadLostReason) => {
+  const updateLeadStatus = async (id: string, status: string, lostReason?: string) => {
     try {
-      await api.put(`/api/sales/leads/${id}`, { status, lostReason });
+      const isBuiltIn = (STATUSES as string[]).includes(status);
+      await api.put(`/api/sales/leads/${id}`, isBuiltIn ? { status, lostReason } : { stageKey: status, lostReason });
       fetchAll();
     } catch (err: unknown) {
       const e = err as { response?: { data?: { message?: string } } };
@@ -615,8 +688,8 @@ export default function SalesPage() {
 
   // Marking a lead LOST requires picking a reason first — every other status
   // change applies immediately.
-  const onStatusChange = (lead: Lead, status: LeadStatus) => {
-    if (status === 'LOST') { setLostReasonLead(lead); return; }
+  const onStatusChange = (lead: Lead, status: string) => {
+    if (stageBase(status) === 'LOST') { setLostStage(status); setLostReasonLead(lead); return; }
     updateLeadStatus(lead.id, status);
   };
 
@@ -674,10 +747,17 @@ export default function SalesPage() {
       <div className="flex flex-wrap items-center gap-x-1 border-b max-w-full">
         {(isAdmin
           ? [
+              { id: 'today' as Tab, label: 'Today', icon: Sun },
               { id: 'leads' as Tab, label: 'Leads', icon: Users },
               { id: 'reminders' as Tab, label: 'My Reminders', icon: Bell },
               { id: 'tasks' as Tab, label: 'Manage Tasks', icon: ListChecks },
+              { id: 'myBase' as Tab, label: 'My Base', icon: Inbox },
+              { id: 'batches' as Tab, label: 'Batches', icon: Layers },
+              { id: 'leadControl' as Tab, label: 'Lead Tools', icon: ShieldCheck },
+              { id: 'config' as Tab, label: 'Config', icon: Settings },
               { id: 'callLog' as Tab, label: 'Call Log', icon: History },
+              { id: 'callAnalytics' as Tab, label: 'Call Analytics', icon: BarChart3 },
+              { id: 'transcripts' as Tab, label: 'Transcripts', icon: MessageCircle },
               { id: 'summaries' as Tab, label: 'Summaries', icon: BarChart3 },
               { id: 'activityMonitor' as Tab, label: 'Activity Monitor', icon: Eye },
               { id: 'pulse' as Tab, label: 'Sales Pulse', icon: Activity },
@@ -689,10 +769,13 @@ export default function SalesPage() {
               { id: 'devices' as Tab, label: 'Devices', icon: Smartphone },
             ]
           : [
+              { id: 'today' as Tab, label: 'Today', icon: Sun },
               { id: 'leads' as Tab, label: 'Leads', icon: Users },
               { id: 'reminders' as Tab, label: 'My Reminders', icon: Bell },
               { id: 'tasks' as Tab, label: 'My Tasks', icon: ListChecks },
               { id: 'callLog' as Tab, label: 'Call Log', icon: History },
+              { id: 'callAnalytics' as Tab, label: 'My Call Stats', icon: BarChart3 },
+              { id: 'transcripts' as Tab, label: 'Transcripts', icon: MessageCircle },
               { id: 'demoBooked' as Tab, label: 'Demo Booked', icon: Calendar },
               { id: 'demoRescheduled' as Tab, label: 'Demo Rescheduled', icon: RefreshCw },
               { id: 'demoConducted' as Tab, label: 'Demo Conducted', icon: CheckCircle2 },
@@ -737,15 +820,17 @@ export default function SalesPage() {
               className="px-3 py-2 border rounded-lg text-sm w-64"
             />
             <MultiSelect label="Lead stage" value={statusFilter} onChange={setStatusFilter}
-              options={STATUSES.map((s) => ({ value: s, label: s.replace(/_/g, ' ') }))} />
+              options={stageOptionsLive().map((s) => ({ value: s.value, label: s.label }))} />
             <MultiSelect label="Status" value={activityFilter} onChange={setActivityFilter}
-              options={[...ACTIVITY_STATUSES.map((s) => ({ value: s.value, label: s.label })), { value: 'NONE', label: 'No status yet' }]} />
+              options={[...ACTIVITY_STATUSES_LIVE(), { value: 'NONE', label: 'No status yet' }]} />
             {isAdmin && (
               <MultiSelect label="Assigned to" value={assignedFilter} onChange={setAssignedFilter}
                 options={[{ value: 'NONE', label: 'Unassigned' }, ...employees.map((e) => ({ value: e.id, label: `${e.firstName} ${e.lastName}` }))]} />
             )}
             <MultiSelect label="Source" value={sourceFilter} onChange={setSourceFilter}
-              options={[...sourceOptions.map((s) => ({ value: s, label: s })), { value: 'Unknown', label: 'Unknown' }]} />
+              options={[...Array.from(new Set([...cfg.sources.map((s) => s.label), ...sourceOptions])).map((s) => ({ value: s, label: s })), { value: 'Unknown', label: 'Unknown' }]} />
+            <MultiSelect label="Lead Scout" value={scoutFilter} onChange={setScoutFilter}
+              options={[...cfg.scouts.map((s) => ({ value: s.key, label: s.label })), { value: 'NONE', label: 'No scout' }]} />
             <select value={followUpFilter} onChange={(e) => setFollowUpFilter(e.target.value)} className="px-3 py-2 border rounded-lg text-sm">
               <option value="">All reminders</option>
               <option value="today">Due today</option>
@@ -760,8 +845,8 @@ export default function SalesPage() {
               –<input type="date" value={followTo} onChange={(e) => setFollowTo(e.target.value)} className="px-2 py-1.5 border rounded-lg text-sm" />
             </label>
             <AdvancedFilter scope="leads" fields={leadFilterFields(employees)} value={advFilter} onChange={setAdvFilter} />
-            {(statusFilter || activityFilter || assignedFilter || sourceFilter || createdFrom || createdTo || followFrom || followTo || followUpFilter) && (
-              <button onClick={() => { setStatusFilter(''); setActivityFilter(''); setAssignedFilter(''); setSourceFilter(''); setCreatedFrom(''); setCreatedTo(''); setFollowFrom(''); setFollowTo(''); setFollowUpFilter(''); }} className="text-xs text-blue-600 hover:underline">Clear all filters</button>
+            {(statusFilter || activityFilter || assignedFilter || sourceFilter || scoutFilter || createdFrom || createdTo || followFrom || followTo || followUpFilter) && (
+              <button onClick={() => { setStatusFilter(''); setActivityFilter(''); setAssignedFilter(''); setSourceFilter(''); setScoutFilter(''); setCreatedFrom(''); setCreatedTo(''); setFollowFrom(''); setFollowTo(''); setFollowUpFilter(''); }} className="text-xs text-blue-600 hover:underline">Clear all filters</button>
             )}
           </div>
 
@@ -778,6 +863,7 @@ export default function SalesPage() {
                   <th className="px-3 py-3">Lead Stage</th>
                   <th className="px-3 py-3">Assigned</th>
                   <th className="px-3 py-3">Source</th>
+                  <th className="px-3 py-3">Lead Scout</th>
                   <th className="px-3 py-3">Demo</th>
                   <th className="px-3 py-3">Reminder</th>
                   <th className="px-3 py-3">Last Contact</th>
@@ -789,9 +875,9 @@ export default function SalesPage() {
               </thead>
               <tbody className="divide-y">
                 {loading ? (
-                  <tr><td colSpan={15} className="px-4 py-8 text-center text-muted-foreground">Loading...</td></tr>
+                  <tr><td colSpan={16} className="px-4 py-8 text-center text-muted-foreground">Loading...</td></tr>
                 ) : leads.length === 0 ? (
-                  <tr><td colSpan={15} className="px-4 py-8 text-center text-muted-foreground">No leads found</td></tr>
+                  <tr><td colSpan={16}className="px-4 py-8 text-center text-muted-foreground">No leads found</td></tr>
                 ) : leads.map((lead, i) => {
                   const latestDemo = lead.demos?.[0];
                   return (
@@ -812,23 +898,23 @@ export default function SalesPage() {
                       </td>
                       <td className="px-3 py-3 whitespace-nowrap">
                         {lead.activityStatus
-                          ? <span className="text-xs font-medium rounded-full px-2 py-1 bg-slate-100 text-slate-700">{ACTIVITY_STATUS_LABEL[lead.activityStatus]}</span>
+                          ? <span className="text-xs font-medium rounded-full px-2 py-1 bg-slate-100 text-slate-700">{ACTIVITY_STATUS_LABEL[lead.statusKey || lead.activityStatus]}</span>
                           : <span className="text-xs text-muted-foreground">—</span>}
                       </td>
                       <td className="px-3 py-3">
                         {canEdit ? (
                           <select
-                            value={lead.status}
-                            onChange={(e) => onStatusChange(lead, e.target.value as LeadStatus)}
-                            className={`text-xs font-medium rounded-full px-2 py-1 border-0 ${STATUS_COLOR[lead.status]}`}
+                            value={lead.stageKey || lead.status}
+                            onChange={(e) => onStatusChange(lead, e.target.value)}
+                            className={`text-xs font-medium rounded-full px-2 py-1 border-0 ${stageChipClass(lead.stageKey || lead.status)}`}
                           >
-                            {STATUSES.map((s) => <option key={s} value={s}>{s.replace(/_/g, ' ')}</option>)}
+                            {stageOptionsLive(lead.stageKey || lead.status).map((s) => <option key={s.value} value={s.value}>{s.label}</option>)}
                           </select>
                         ) : (
-                          <span className={`text-xs font-medium rounded-full px-2 py-1 ${STATUS_COLOR[lead.status]}`}>{lead.status.replace(/_/g, ' ')}</span>
+                          <span className={`text-xs font-medium rounded-full px-2 py-1 ${stageChipClass(lead.stageKey || lead.status)}`}>{stageLabel(lead.stageKey || lead.status)}</span>
                         )}
-                        {lead.status === 'LOST' && lead.lostReason && (
-                          <p className="text-[10px] text-muted-foreground mt-1">{LOST_REASON_LABEL[lead.lostReason]}</p>
+                        {lead.status === 'LOST' && (lead.lostReasonKey || lead.lostReason) && (
+                          <p className="text-[10px] text-muted-foreground mt-1">{lostReasonLabel(lead.lostReasonKey, lead.lostReason)}</p>
                         )}
                       </td>
                       <td className="px-3 py-3 whitespace-nowrap">
@@ -846,6 +932,7 @@ export default function SalesPage() {
                         )}
                       </td>
                       <td className="px-3 py-3 text-muted-foreground whitespace-nowrap">{lead.source || '—'}</td>
+                      <td className="px-3 py-3 text-muted-foreground whitespace-nowrap">{lead.scoutKey ? scoutLabel(lead.scoutKey) : '—'}</td>
                       <td className="px-3 py-3 whitespace-nowrap">
                         {latestDemo ? (
                           <span
@@ -913,6 +1000,13 @@ export default function SalesPage() {
 
       {tab === 'tasks' && <TasksPanel isAdmin={isAdmin} canEdit={canEdit} employees={employees} onOpenLead={openLeadDetail} />}
 
+      {tab === 'today' && <TodayPanel isAdmin={isAdmin} employees={employees} onOpenLead={openLeadDetail} />}
+      {tab === 'callAnalytics' && <CallAnalyticsPanel isAdmin={isAdmin} employees={employees} />}
+      {tab === 'batches' && isAdmin && <BatchesPanel />}
+      {tab === 'leadControl' && isAdmin && <LeadControlPanel onOpenLead={openLeadDetail} />}
+      {tab === 'transcripts' && <TranscriptsPanel onOpenLead={openLeadDetail} />}
+      {tab === 'config' && isAdmin && <ConfigPanel cfg={cfg} reload={loadConfig} />}
+      {tab === 'myBase' && isAdmin && <MyBasePanel employees={employees} onOpenLead={openLeadDetail} />}
       {tab === 'summaries' && isAdmin && <SummariesPanel employees={employees} />}
 
       {tab === 'activityMonitor' && isAdmin && <ActivityMonitorPanel employees={employees} onOpenLead={openLeadDetail} />}
@@ -960,7 +1054,7 @@ export default function SalesPage() {
           onClose={() => setLostReasonLead(null)}
           onConfirm={async (reason) => {
             setSaving(true);
-            await updateLeadStatus(lostReasonLead.id, 'LOST', reason);
+            await updateLeadStatus(lostReasonLead.id, lostStage, reason);
             setSaving(false);
             setLostReasonLead(null);
           }}
@@ -1006,15 +1100,17 @@ interface ModalProps {
 
 function AddLeadModal({ employees, saving, setSaving, onClose, onSaved, setError }: ModalProps) {
   const [form, setForm] = useState({
-    name: '', phone: '', email: '', source: '', courseInterest: '', assignedToId: '', notes: '',
+    name: '', phone: '', email: '', source: '', scoutKey: '', courseInterest: '', assignedToId: '', notes: '',
   });
+  const activeSources = CFG.sources.filter((s) => s.active);
+  const activeScouts = CFG.scouts.filter((s) => s.active);
 
   const submit = async () => {
     if (!form.name || !form.phone) { setError('Name and phone are required'); return; }
     setSaving(true);
     setError('');
     try {
-      await api.post('/api/sales/leads', { ...form, assignedToId: form.assignedToId || undefined });
+      await api.post('/api/sales/leads', { ...form, assignedToId: form.assignedToId || undefined, scoutKey: form.scoutKey || undefined });
       onSaved();
     } catch (err: unknown) {
       const e = err as { response?: { data?: { message?: string } } };
@@ -1035,7 +1131,20 @@ function AddLeadModal({ employees, saving, setSaving, onClose, onSaved, setError
           <input className="w-full px-3 py-2 border rounded-lg text-sm" placeholder="Name *" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
           <input className="w-full px-3 py-2 border rounded-lg text-sm" placeholder="Phone *" value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} />
           <input className="w-full px-3 py-2 border rounded-lg text-sm" placeholder="Email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} />
-          <input className="w-full px-3 py-2 border rounded-lg text-sm" placeholder="Source (e.g. Instagram, Referral)" value={form.source} onChange={(e) => setForm({ ...form, source: e.target.value })} />
+          {activeSources.length ? (
+            <select className="w-full px-3 py-2 border rounded-lg text-sm" value={form.source} onChange={(e) => setForm({ ...form, source: e.target.value })}>
+              <option value="">Source…</option>
+              {activeSources.map((s) => <option key={s.key} value={s.label}>{s.label}</option>)}
+            </select>
+          ) : (
+            <input className="w-full px-3 py-2 border rounded-lg text-sm" placeholder="Source (e.g. Instagram, Referral)" value={form.source} onChange={(e) => setForm({ ...form, source: e.target.value })} />
+          )}
+          {activeScouts.length > 0 && (
+            <select className="w-full px-3 py-2 border rounded-lg text-sm" value={form.scoutKey} onChange={(e) => setForm({ ...form, scoutKey: e.target.value })}>
+              <option value="">Lead Scout (who gave this lead)…</option>
+              {activeScouts.map((s) => <option key={s.key} value={s.key}>{s.label}</option>)}
+            </select>
+          )}
           <input className="w-full px-3 py-2 border rounded-lg text-sm" placeholder="Course Interest" value={form.courseInterest} onChange={(e) => setForm({ ...form, courseInterest: e.target.value })} />
           {employees.length > 0 && (
             <select className="w-full px-3 py-2 border rounded-lg text-sm" value={form.assignedToId} onChange={(e) => setForm({ ...form, assignedToId: e.target.value })}>
@@ -1228,9 +1337,9 @@ function BulkUploadLeadsModal({ onClose, setError, onSaved }: {
 }
 
 function LostReasonModal({ lead, saving, setSaving, onClose, onConfirm }: {
-  lead: Lead; saving: boolean; setSaving: (v: boolean) => void; onClose: () => void; onConfirm: (reason: LeadLostReason) => void;
+  lead: Lead; saving: boolean; setSaving: (v: boolean) => void; onClose: () => void; onConfirm: (reason: string) => void;
 }) {
-  const [reason, setReason] = useState<LeadLostReason | ''>('');
+  const [reason, setReason] = useState('');
 
   return (
     <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
@@ -1244,10 +1353,10 @@ function LostReasonModal({ lead, saving, setSaving, onClose, onConfirm }: {
           autoFocus
           className="w-full px-3 py-2 border rounded-lg text-sm"
           value={reason}
-          onChange={(e) => setReason(e.target.value as LeadLostReason)}
+          onChange={(e) => setReason(e.target.value)}
         >
           <option value="">Select a reason...</option>
-          {LOST_REASONS.map((r) => <option key={r.value} value={r.value}>{r.label}</option>)}
+          {lostReasonsLive().map((r) => <option key={r.value} value={r.value}>{r.label}</option>)}
         </select>
         <div className="flex justify-end gap-2">
           <button onClick={onClose} className="px-4 py-2 text-sm rounded-lg border">Cancel</button>
@@ -1282,7 +1391,7 @@ function LeadDetailModal({ lead, employees, canEdit, onClose, onChanged, setGlob
   const [taskDue, setTaskDue] = useState('');
   const [savingProfile, setSavingProfile] = useState(false);
   const [profile, setProfile] = useState({
-    name: lead.name, phone: lead.phone, email: lead.email || '', source: lead.source || '', courseInterest: lead.courseInterest || '',
+    name: lead.name, phone: lead.phone, email: lead.email || '', source: lead.source || '', scoutKey: lead.scoutKey || '', courseInterest: lead.courseInterest || '',
     city: lead.city || '', educationQualification: lead.educationQualification || '', collegeName: lead.collegeName || '',
     passedOutYear: lead.passedOutYear ? String(lead.passedOutYear) : '', currentStatus: lead.currentStatus || '',
   });
@@ -1291,9 +1400,9 @@ function LeadDetailModal({ lead, employees, canEdit, onClose, onChanged, setGlob
   const [callFollowUp, setCallFollowUp] = useState(''); // datetime-local value (date AND time)
   const [callActivityType, setCallActivityType] = useState<ActivityType>('CALL');
   const [callActivityStatus, setCallActivityStatus] = useState<ActivityStatus | ''>('');
-  const [callStage, setCallStage] = useState<LeadStatus | ''>(''); // optional manual stage override
+  const [callStage, setCallStage] = useState(''); // optional manual stage override
   const [callCourse, setCallCourse] = useState(lead.courseInterest || '');
-  const [callLostReason, setCallLostReason] = useState<LeadLostReason | ''>('');
+  const [callLostReason, setCallLostReason] = useState('');
   // Student intake — collected during the call itself, pre-filled with
   // whatever's already on file for this lead so a BDA only has to fill in
   // what's missing/changed rather than retype everything each call.
@@ -1303,6 +1412,7 @@ function LeadDetailModal({ lead, employees, canEdit, onClose, onChanged, setGlob
   const [callPassedOutYear, setCallPassedOutYear] = useState(lead.passedOutYear ? String(lead.passedOutYear) : '');
   const [callCurrentStatus, setCallCurrentStatus] = useState(lead.currentStatus || '');
   const [savingCall, setSavingCall] = useState(false);
+  const [msgChannel, setMsgChannel] = useState<'WHATSAPP' | 'EMAIL' | null>(null);
 
   // Demo booking happens inside Log Activity (status = Demo booked).
   const [demoMode, setDemoMode] = useState<DemoMode>('ONLINE');
@@ -1352,16 +1462,16 @@ function LeadDetailModal({ lead, employees, canEdit, onClose, onChanged, setGlob
   const submitCall = async () => {
     if (!callActivityStatus) { setLocalError('Choose the Update Status first'); return; }
     // DNP (did not pick) needs no notes; every other status does.
-    if (callActivityStatus !== 'DNP' && !callNotes.trim()) { setLocalError('Notes are required for this status'); return; }
-    if (NEEDS_FOLLOW_UP.includes(callActivityStatus) && !callFollowUp) { setLocalError('Pick the follow-up date and time'); return; }
-    if (callActivityStatus === 'DEMO_BOOKED' && !callCourse.trim()) { setLocalError('Select the course for the demo'); return; }
-    if (callActivityStatus === 'DEMO_BOOKED' && demoMode === 'ONLINE' && !/^\S+@\S+\.\S+$/.test(demoEmail.trim())) { setLocalError('Enter the student\'s email — the online demo link is sent there'); return; }
+    if (notesNeeded(callActivityStatus) && !callNotes.trim()) { setLocalError('Notes are required for this status'); return; }
+    if (needsFollowUp(callActivityStatus) && !callFollowUp) { setLocalError('Pick the follow-up date and time'); return; }
+    if (statusBase(callActivityStatus) === 'DEMO_BOOKED' && !callCourse.trim()) { setLocalError('Select the course for the demo'); return; }
+    if (statusBase(callActivityStatus) === 'DEMO_BOOKED' && demoMode === 'ONLINE' && !/^\S+@\S+\.\S+$/.test(demoEmail.trim())) { setLocalError('Enter the student\'s email — the online demo link is sent there'); return; }
     setSavingCall(true);
     setLocalError('');
     try {
       // Demo booked: the date & time chosen above is the demo slot — book it first so a
       // failure (e.g. bad email) doesn't leave an activity logged without its demo.
-      if (callActivityStatus === 'DEMO_BOOKED') {
+      if (statusBase(callActivityStatus) === 'DEMO_BOOKED') {
         await api.post('/api/sales/demos', {
           leadId: lead.id,
           scheduledAt: new Date(callFollowUp).toISOString(),
@@ -1375,10 +1485,10 @@ function LeadDetailModal({ lead, employees, canEdit, onClose, onChanged, setGlob
         activityType: callActivityType,
         activityStatus: callActivityStatus,
         notes: callNotes.trim() || undefined,
-        nextFollowUpAt: NEEDS_FOLLOW_UP.includes(callActivityStatus) ? new Date(callFollowUp).toISOString() : undefined,
+        nextFollowUpAt: needsFollowUp(callActivityStatus) ? new Date(callFollowUp).toISOString() : undefined,
         status: callStage || undefined,
         courseInterest: callCourse.trim() || undefined,
-        lostReason: callActivityStatus === 'DISQUALIFIED' ? (callLostReason || undefined) : undefined,
+        lostReason: statusNeedsLostReason(callActivityStatus) ? (callLostReason || undefined) : undefined,
         city: callCity.trim(),
         educationQualification: callEducation.trim(),
         collegeName: callCollege.trim(),
@@ -1504,6 +1614,18 @@ function LeadDetailModal({ lead, employees, canEdit, onClose, onChanged, setGlob
           <button onClick={onClose}><X className="w-4 h-4" /></button>
         </div>
 
+        <div className="flex flex-wrap items-center gap-2">
+          <a href={`tel:${lead.phone.replace(/\s+/g, '')}`} className="flex items-center gap-1.5 px-3 py-1.5 border rounded-lg text-sm hover:bg-muted/50"><Phone className="w-3.5 h-3.5" /> Call</a>
+          {canEdit && <button onClick={() => setMsgChannel('WHATSAPP')} className="flex items-center gap-1.5 px-3 py-1.5 border rounded-lg text-sm text-green-700 border-green-300 hover:bg-green-50"><MessageCircle className="w-3.5 h-3.5" /> WhatsApp</button>}
+          {canEdit && <button onClick={() => setMsgChannel('EMAIL')} disabled={!lead.email} title={lead.email ? '' : 'No email on this lead'} className="flex items-center gap-1.5 px-3 py-1.5 border rounded-lg text-sm hover:bg-muted/50 disabled:opacity-40"><Mail className="w-3.5 h-3.5" /> Email</button>}
+        </div>
+        {msgChannel && (
+          <SendMessageModal
+            lead={lead} channel={msgChannel} onClose={() => setMsgChannel(null)}
+            onSent={async () => { try { const h = await api.get(`/api/sales/leads/${lead.id}/history`); setHistory(h.data.data); } catch { /* history refreshes on next open */ } }}
+          />
+        )}
+
         <div className="flex flex-wrap items-center gap-4">
           <span className={`text-xs font-medium rounded-full px-2 py-1 ${STATUS_COLOR[lead.status]}`}>{lead.status.replace(/_/g, ' ')}</span>
           {lead.status === 'LOST' && lead.lostReason && (
@@ -1561,6 +1683,13 @@ function LeadDetailModal({ lead, employees, canEdit, onClose, onChanged, setGlob
                       <input className="w-full px-3 py-2 border rounded-lg text-sm text-foreground" value={profile[k]} onChange={(e) => setProfile({ ...profile, [k]: e.target.value })} />
                     </label>
                   ))}
+                  <label className="text-xs text-muted-foreground space-y-1 block">
+                    Lead Scout
+                    <select className="w-full px-3 py-2 border rounded-lg text-sm text-foreground" value={profile.scoutKey} onChange={(e) => setProfile({ ...profile, scoutKey: e.target.value })}>
+                      <option value="">— None —</option>
+                      {CFG.scouts.filter((s) => s.active || s.key === profile.scoutKey).map((s) => <option key={s.key} value={s.key}>{s.label}</option>)}
+                    </select>
+                  </label>
                 </div>
                 <div className="flex justify-end">
                   <button onClick={saveProfile} disabled={savingProfile} className="px-4 py-2 text-sm rounded-lg bg-blue-600 text-white disabled:opacity-50">{savingProfile ? 'Saving...' : 'Save changes'}</button>
@@ -1569,7 +1698,7 @@ function LeadDetailModal({ lead, employees, canEdit, onClose, onChanged, setGlob
             )}
             {!canEdit && (
               <dl className="grid grid-cols-2 gap-3 text-sm">
-                {Object.entries(profile).map(([k, v]) => <div key={k}><dt className="text-xs text-muted-foreground">{k}</dt><dd>{v || '—'}</dd></div>)}
+                {Object.entries(profile).map(([k, v]) => <div key={k}><dt className="text-xs text-muted-foreground">{k === 'scoutKey' ? 'Lead Scout' : k}</dt><dd>{(k === 'scoutKey' ? scoutLabel(v) : v) || '—'}</dd></div>)}
               </dl>
             )}
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
@@ -1648,9 +1777,9 @@ function LeadDetailModal({ lead, employees, canEdit, onClose, onChanged, setGlob
               {/* Step 1: update status */}
               <label className="text-xs text-muted-foreground flex items-center gap-2">
                 1. Update status *
-                <select className="px-2 py-1 border rounded-lg text-sm" value={callActivityStatus} onChange={(e) => { setCallActivityStatus(e.target.value as ActivityStatus | ''); setCallStage(''); }}>
+                <select className="px-2 py-1 border rounded-lg text-sm" value={callActivityStatus} onChange={(e) => { setCallActivityStatus(e.target.value); setCallStage(''); }}>
                   <option value="">Select...</option>
-                  {ACTIVITY_STATUSES.map((s) => <option key={s.value} value={s.value}>{s.label}</option>)}
+                  {ACTIVITY_STATUSES_LIVE().map((s) => <option key={s.value} value={s.value}>{s.label}</option>)}
                 </select>
               </label>
             </div>
@@ -1658,15 +1787,15 @@ function LeadDetailModal({ lead, employees, canEdit, onClose, onChanged, setGlob
             {callActivityStatus && (
               <div className="space-y-3">
                 {/* Step 2: follow-up date AND time */}
-                {NEEDS_FOLLOW_UP.includes(callActivityStatus) && (
+                {needsFollowUp(callActivityStatus) && (
                   <label className="text-xs text-muted-foreground flex items-center gap-2">
-                    {callActivityStatus === 'DEMO_BOOKED' ? '2. Demo date & time *' : '2. Follow-up date & time *'}
+                    {statusBase(callActivityStatus) === 'DEMO_BOOKED' ?'2. Demo date & time *' : '2. Follow-up date & time *'}
                     <input type="datetime-local" className="px-2 py-1 border rounded-lg text-sm" value={callFollowUp} onChange={(e) => setCallFollowUp(e.target.value)} />
                   </label>
                 )}
 
                 {/* Demo booked needs the course */}
-                {callActivityStatus === 'DEMO_BOOKED' && (
+                {statusBase(callActivityStatus) === 'DEMO_BOOKED' && (
                   <label className="text-xs text-muted-foreground flex items-center gap-2">
                     Course for the demo *
                     <select className="px-2 py-1 border rounded-lg text-sm" value={callCourse} onChange={(e) => setCallCourse(e.target.value)}>
@@ -1677,7 +1806,7 @@ function LeadDetailModal({ lead, employees, canEdit, onClose, onChanged, setGlob
                   </label>
                 )}
 
-                {callActivityStatus === 'DEMO_BOOKED' && (
+                {statusBase(callActivityStatus) === 'DEMO_BOOKED' && (
                   <div className="border rounded-lg p-3 space-y-2 bg-white">
                     <p className="text-xs font-medium text-muted-foreground">Demo details</p>
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
@@ -1696,10 +1825,10 @@ function LeadDetailModal({ lead, employees, canEdit, onClose, onChanged, setGlob
                   </div>
                 )}
 
-                {callActivityStatus === 'DISQUALIFIED' && (
-                  <select className="px-2 py-1 border rounded-lg text-sm" value={callLostReason} onChange={(e) => setCallLostReason(e.target.value as LeadLostReason | '')}>
+                {statusNeedsLostReason(callActivityStatus) && (
+                  <select className="px-2 py-1 border rounded-lg text-sm" value={callLostReason} onChange={(e) => setCallLostReason(e.target.value)}>
                     <option value="">Reason (optional)...</option>
-                    {LOST_REASONS.filter((r) => r.value !== 'NOT_INTERESTED').map((r) => <option key={r.value} value={r.value}>{r.label}</option>)}
+                    {lostReasonsLive().filter((r) => r.base !== 'NOT_INTERESTED').map((r) => <option key={r.value} value={r.value}>{r.label}</option>)}
                   </select>
                 )}
 
@@ -1710,16 +1839,16 @@ function LeadDetailModal({ lead, employees, canEdit, onClose, onChanged, setGlob
                     className="px-2 py-1 border rounded-lg text-sm"
                     value={callStage}
                     onChange={(e) => setCallStage(e.target.value as LeadStatus | '')}
-                    disabled={STATUS_STAGE[callActivityStatus] === 'LOST'}
+                    disabled={statusGoesToLost(callActivityStatus)}
                   >
-                    <option value="">Auto → {STATUS_STAGE[callActivityStatus].replace(/_/g, ' ')}</option>
-                    {STATUS_STAGE[callActivityStatus] !== 'LOST' && STATUSES.filter((s) => s !== 'LOST' && s !== 'NEW').map((s) => <option key={s} value={s}>{s.replace(/_/g, ' ')}</option>)}
+                    <option value="">Auto → {statusStageLabel(callActivityStatus)}</option>
+                    {!statusGoesToLost(callActivityStatus) && stageOptionsLive().filter((s) => !['LOST', 'NEW'].includes(stageBase(s.value))).map((s) => <option key={s.value} value={s.value}>{s.label}</option>)}
                   </select>
                   <span className="text-[11px]">Set automatically from the status; change only if needed.</span>
                 </label>
 
                 {/* DNP = did not pick, so no notes to write */}
-                {callActivityStatus !== 'DNP' ? (
+                {notesNeeded(callActivityStatus) ? (
                   <textarea
                     className="w-full px-3 py-2 border rounded-lg text-sm"
                     placeholder={callActivityType === 'MEETING' ? 'What was discussed in the meeting? *' : 'What happened on this call? *'}
@@ -1770,7 +1899,7 @@ function LeadDetailModal({ lead, employees, canEdit, onClose, onChanged, setGlob
                     <span>{formatDateTime(c.calledAt)}</span>
                   </div>
                   {c.notes ? <p>{c.notes}</p> : <p className="text-xs text-muted-foreground italic">No notes</p>}
-                  {c.recordingUrl && <div className="mt-2"><RecordingPlayer url={c.recordingUrl} /></div>}
+                  {c.recordingUrl && <div className="mt-2 flex flex-wrap items-center gap-4"><RecordingPlayer url={c.recordingUrl} /><TranscriptButton type="CALL" id={c.id} /></div>}
                   {c.nextFollowUpAt && <p className="text-xs text-amber-600 mt-1">Next follow-up: {formatDateTime(c.nextFollowUpAt)}</p>}
                 </div>
               ))}
@@ -1851,6 +1980,7 @@ function LeadDetailModal({ lead, employees, canEdit, onClose, onChanged, setGlob
                       {d.accessCode && <span className="text-muted-foreground">Code: <span className="font-mono">{d.accessCode}</span> · link emailed to student</span>}
                     </div>
                   )}
+                  {d.mode === 'ONLINE' && d.roomName && d.startedAt && <div><TranscriptButton type="DEMO" id={d.id} label="Demo transcript" /></div>}
                   {d.outcome && (
                     <span className={`inline-block text-xs font-medium rounded-full px-2 py-1 ${DEMO_OUTCOME_COLOR[d.outcome]}`}>{DEMO_OUTCOME_LABEL[d.outcome]}</span>
                   )}
@@ -2149,10 +2279,823 @@ function TasksPanel({ isAdmin, canEdit, employees, onOpenLead }: { isAdmin: bool
   );
 }
 
+// ── My Base (Sales Admin): pool of unassigned leads — bulk hand-out and pull-back ──
+interface BaseSummary { pool: number; sources: { source: string; count: number }[]; batches: { label: string; count: number; lastAssignedAt: string | null }[] }
+function MyBasePanel({ employees, onOpenLead }: { employees: EmployeeLite[]; onOpenLead: (id: string) => void }) {
+  const monthLabel = new Date().toLocaleDateString('en-IN', { month: 'short', year: 'numeric' });
+  const [rows, setRows] = useState<Lead[]>([]);
+  const [meta, setMeta] = useState<ListMeta | null>(null);
+  const [summary, setSummary] = useState<BaseSummary | null>(null);
+  const [page, setPage] = useState(1);
+  const [search, setSearch] = useState('');
+  const [source, setSource] = useState('');
+  const [from, setFrom] = useState('');
+  const [to, setTo] = useState('');
+  const [picked, setPicked] = useState<Set<string>>(new Set());
+  const [allMatching, setAllMatching] = useState(false);
+  const [targets, setTargets] = useState<Set<string>>(new Set());
+  const [batch, setBatch] = useState(`${monthLabel} batch`);
+  const [showHistory, setShowHistory] = useState(false);
+  const [pullFrom, setPullFrom] = useState('');
+  const [pullStage, setPullStage] = useState('');
+  const [pullStatus, setPullStatus] = useState('');
+  const [pullCount, setPullCount] = useState<number | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+  const [notice, setNotice] = useState('');
+  const errOf = (err: unknown, fb: string) => (err as { response?: { data?: { message?: string } } }).response?.data?.message || fb;
+
+  const criteria = useCallback(() => ({
+    search: search || undefined, source: source ? source.split(',') : undefined, createdFrom: from || undefined, createdTo: to || undefined,
+  }), [search, source, from, to]);
+
+  const load = useCallback(async () => {
+    setLoading(true); setError('');
+    try {
+      const params: Record<string, string> = { page: String(page), limit: '50', assignedToId: 'NONE' };
+      if (search) params.search = search; if (source) params.source = source; if (from) params.createdFrom = from; if (to) params.createdTo = to;
+      const [l, s] = await Promise.all([api.get('/api/sales/leads', { params }), api.get('/api/sales/mybase/summary')]);
+      setRows(l.data.data); setMeta(l.data.meta); setSummary(s.data.data);
+    } catch (err) { setError(errOf(err, 'Failed to load My Base')); }
+    finally { setLoading(false); }
+  }, [page, search, source, from, to]);
+  useEffect(() => { setPage(1); setPicked(new Set()); setAllMatching(false); }, [search, source, from, to]);
+  useEffect(() => { load(); }, [load]);
+
+  const pageAllPicked = rows.length > 0 && rows.every((r) => picked.has(r.id));
+  const togglePage = () => setPicked((p) => { const n = new Set(p); if (pageAllPicked) rows.forEach((r) => n.delete(r.id)); else rows.forEach((r) => n.add(r.id)); return n; });
+  const toggleOne = (id: string) => { setAllMatching(false); setPicked((p) => { const n = new Set(p); if (n.has(id)) n.delete(id); else n.add(id); return n; }); };
+  const selectedCount = allMatching ? (meta?.total ?? 0) : picked.size;
+  const toggleTarget = (id: string) => setTargets((t) => { const n = new Set(t); if (n.has(id)) n.delete(id); else n.add(id); return n; });
+
+  const assign = async () => {
+    setError(''); setNotice('');
+    if (!selectedCount) { setError('Select leads first'); return; }
+    if (!targets.size) { setError('Choose at least one salesperson'); return; }
+    if (!window.confirm(`Assign ${selectedCount} lead${selectedCount === 1 ? '' : 's'} to ${targets.size} salesperson${targets.size === 1 ? '' : 's'}${targets.size > 1 ? ' (split evenly)' : ''}?\nPast history will be ${showHistory ? 'SHOWN' : 'HIDDEN'} to the new owner${targets.size > 1 ? 's' : ''}.`)) return;
+    setBusy(true);
+    try {
+      const body = { employeeIds: Array.from(targets), showHistory, batchLabel: batch, ...(allMatching ? { criteria: criteria() } : { leadIds: Array.from(picked) }) };
+      const r = await api.post('/api/sales/mybase/assign', body);
+      const d = r.data.data as { assigned: number; perPerson: { name: string; count: number }[] };
+      setNotice(`Assigned ${d.assigned} leads: ${d.perPerson.map((x) => `${x.name} ${x.count}`).join(', ')}`);
+      setPicked(new Set()); setAllMatching(false);
+      await load();
+    } catch (err) { setError(errOf(err, 'Assignment failed')); }
+    finally { setBusy(false); }
+  };
+
+  const pullCriteria = useCallback(() => ({ fromEmployeeId: pullFrom, status: pullStage ? pullStage.split(',') : undefined, activityStatus: pullStatus ? pullStatus.split(',') : undefined }), [pullFrom, pullStage, pullStatus]);
+  useEffect(() => {
+    setPullCount(null);
+    if (!pullFrom) return;
+    api.post('/api/sales/mybase/count', { criteria: pullCriteria() }).then((r) => setPullCount(r.data.data.count)).catch(() => setPullCount(null));
+  }, [pullFrom, pullCriteria]);
+  const pull = async () => {
+    setError(''); setNotice('');
+    if (!pullFrom || !pullCount) return;
+    const who = employees.find((e) => e.id === pullFrom);
+    if (!window.confirm(`Pull ${pullCount} lead${pullCount === 1 ? '' : 's'} back from ${who ? `${who.firstName} ${who.lastName}` : 'this person'} into My Base?`)) return;
+    setBusy(true);
+    try {
+      const r = await api.post('/api/sales/mybase/pull', { criteria: pullCriteria() });
+      setNotice(`Pulled ${r.data.data.pulled} leads back into My Base`);
+      setPullFrom('');
+      await load();
+    } catch (err) { setError(errOf(err, 'Pull back failed')); }
+    finally { setBusy(false); }
+  };
+
+  const inp = 'border rounded-lg px-3 py-2 text-sm bg-background';
+  return (
+    <div className="space-y-5">
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+        <StatCard icon={Inbox} label="In My Base" value={summary?.pool ?? '—'} />
+        {(summary?.sources || []).slice(0, 3).map((s) => <StatCard key={s.source} icon={Users} label={s.source} value={s.count} />)}
+      </div>
+      {error && <div className="bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg px-4 py-3">{error}</div>}
+      {notice && <div className="bg-green-50 border border-green-200 text-green-700 text-sm rounded-lg px-4 py-3">{notice}</div>}
+
+      <div className="grid lg:grid-cols-2 gap-4">
+        <section className="border rounded-xl p-4 bg-card space-y-3">
+          <h3 className="font-semibold text-sm">Assign selected leads <span className="text-muted-foreground font-normal">· {selectedCount} selected</span></h3>
+          <div>
+            <p className="text-xs text-muted-foreground mb-1">Give to (tick several to split evenly)</p>
+            <div className="flex flex-wrap gap-2 max-h-32 overflow-y-auto">
+              {employees.map((e) => (
+                <label key={e.id} className={`flex items-center gap-1.5 text-sm border rounded-full px-3 py-1 cursor-pointer ${targets.has(e.id) ? 'border-blue-400 bg-blue-50 text-blue-700' : ''}`}>
+                  <input type="checkbox" checked={targets.has(e.id)} onChange={() => toggleTarget(e.id)} /> {e.firstName} {e.lastName}
+                </label>
+              ))}
+            </div>
+          </div>
+          <label className="text-xs text-muted-foreground block">Batch name
+            <input value={batch} onChange={(e) => setBatch(e.target.value)} className={`${inp} block w-full mt-1`} placeholder="e.g. October batch" />
+          </label>
+          <label className="flex items-start gap-2 text-sm cursor-pointer">
+            <input type="checkbox" checked={showHistory} onChange={(e) => setShowHistory(e.target.checked)} className="mt-1" />
+            <span><b>Show history to the new owner</b><br /><span className="text-xs text-muted-foreground">Unticked: they start fresh and only see what happens from now. Nothing is deleted — you always see everything.</span></span>
+          </label>
+          <button onClick={assign} disabled={busy || !selectedCount || !targets.size} className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium disabled:opacity-50">
+            {busy ? 'Working…' : `Assign ${selectedCount || ''} lead${selectedCount === 1 ? '' : 's'}`}
+          </button>
+        </section>
+
+        <section className="border rounded-xl p-4 bg-card space-y-3">
+          <h3 className="font-semibold text-sm">Pull back into My Base</h3>
+          <div className="flex flex-wrap items-end gap-2">
+            <label className="text-xs text-muted-foreground">From salesperson
+              <select value={pullFrom} onChange={(e) => setPullFrom(e.target.value)} className={`${inp} block mt-1`}>
+                <option value="">Choose…</option>{employees.map((e) => <option key={e.id} value={e.id}>{e.firstName} {e.lastName}</option>)}
+              </select>
+            </label>
+            <MultiSelect label="Lead stage" options={stageOptions.filter((o) => o.value !== 'ENROLLED')} value={pullStage} onChange={setPullStage} />
+            <MultiSelect label="Status" options={[...activityOptions, { value: 'NONE', label: 'No status yet' }]} value={pullStatus} onChange={setPullStatus} />
+          </div>
+          <p className="text-xs text-muted-foreground">Enrolled leads are never pulled. {pullFrom ? (pullCount === null ? 'Counting…' : `${pullCount} lead${pullCount === 1 ? '' : 's'} match.`) : 'Pick a salesperson to see how many match.'}</p>
+          <button onClick={pull} disabled={busy || !pullFrom || !pullCount} className="px-4 py-2 border border-red-300 text-red-700 rounded-lg text-sm font-medium disabled:opacity-50">
+            Pull {pullCount || ''} back to My Base
+          </button>
+          {summary && summary.batches.length > 0 && (
+            <div className="pt-2 border-t">
+              <p className="text-xs text-muted-foreground mb-1">Recent hand-out batches</p>
+              <div className="flex flex-wrap gap-2">{summary.batches.slice(0, 6).map((b) => <span key={b.label} className="text-xs bg-slate-100 rounded-full px-3 py-1">{b.label}: <b>{b.count}</b></span>)}</div>
+            </div>
+          )}
+        </section>
+      </div>
+
+      <div className="flex flex-wrap items-center gap-2">
+        <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search name, phone, email…" className={`${inp} w-64`} />
+        <MultiSelect label="Source" options={(summary?.sources || []).map((s) => ({ value: s.source, label: `${s.source} (${s.count})` }))} value={source} onChange={setSource} />
+        <label className="text-xs text-muted-foreground flex items-center gap-1">Created <input type="date" value={from} onChange={(e) => setFrom(e.target.value)} className={inp} /> – <input type="date" value={to} onChange={(e) => setTo(e.target.value)} className={inp} /></label>
+      </div>
+
+      {picked.size > 0 && meta && meta.total > rows.length && !allMatching && pageAllPicked && (
+        <div className="text-sm bg-blue-50 border border-blue-200 rounded-lg px-4 py-2">
+          {picked.size} on this page selected. <button onClick={() => setAllMatching(true)} className="text-blue-700 font-medium underline">Select all {meta.total} leads matching this filter</button>
+        </div>
+      )}
+      {allMatching && <div className="text-sm bg-blue-50 border border-blue-200 rounded-lg px-4 py-2">All {meta?.total} leads matching this filter are selected. <button onClick={() => { setAllMatching(false); setPicked(new Set()); }} className="text-blue-700 font-medium underline">Clear</button></div>}
+
+      <div className="bg-card border rounded-xl overflow-x-auto">
+        <table className="w-full text-sm">
+          <thead className="bg-muted/50 text-left text-xs uppercase text-muted-foreground">
+            <tr>
+              <th className="px-3 py-3 w-8"><input type="checkbox" checked={pageAllPicked || allMatching} onChange={togglePage} /></th>
+              <th className="px-3 py-3">Name</th><th className="px-3 py-3">Phone</th><th className="px-3 py-3">Source</th><th className="px-3 py-3">Course</th><th className="px-3 py-3">Lead stage</th><th className="px-3 py-3">Created</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y">
+            {rows.map((r) => (
+              <tr key={r.id} className="hover:bg-muted/30">
+                <td className="px-3 py-2"><input type="checkbox" checked={allMatching || picked.has(r.id)} onChange={() => toggleOne(r.id)} /></td>
+                <td className="px-3 py-2"><button onClick={() => onOpenLead(r.id)} className="text-blue-600 hover:underline font-medium">{r.name}</button></td>
+                <td className="px-3 py-2 text-xs">{r.phone}</td><td className="px-3 py-2 text-xs">{r.source || '—'}</td><td className="px-3 py-2 text-xs">{r.courseInterest || '—'}</td>
+                <td className="px-3 py-2 text-xs">{String(r.status).replace(/_/g, ' ')}</td><td className="px-3 py-2 text-xs text-muted-foreground">{formatDate(r.createdAt)}</td>
+              </tr>
+            ))}
+            {rows.length === 0 && !loading && <tr><td colSpan={7} className="px-4 py-8 text-center text-muted-foreground">My Base is empty</td></tr>}
+          </tbody>
+        </table>
+      </div>
+      {meta && meta.totalPages > 1 && (
+        <div className="flex items-center justify-between text-sm">
+          <span className="text-muted-foreground">{meta.total} leads · page {meta.page} of {meta.totalPages}</span>
+          <div className="flex gap-2">
+            <button disabled={page <= 1} onClick={() => setPage((x) => x - 1)} className="px-3 py-1.5 border rounded-lg disabled:opacity-40">Previous</button>
+            <button disabled={page >= meta.totalPages} onClick={() => setPage((x) => x + 1)} className="px-3 py-1.5 border rounded-lg disabled:opacity-40">Next</button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── Batches (Sales Admin): how every hand-out batch is performing ──
+interface BatchStat { total: number; contacted: number; neverContacted: number; calls: number; demos: number; enrolled: number; lost: number; notInterested: number; open: number; overdue: number }
+interface BatchRow { label: string; assignedFrom: string | null; assignedTo: string | null; totals: BatchStat; people: (BatchStat & { name: string })[] }
+function BatchesPanel() {
+  const [rows, setRows] = useState<BatchRow[]>([]);
+  const [open, setOpen] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+  useEffect(() => {
+    api.get('/api/sales/mybase/batches').then((r) => { setRows(r.data.data); if (r.data.data[0]) setOpen(r.data.data[0].label); })
+      .catch((err: unknown) => setError((err as { response?: { data?: { message?: string } } }).response?.data?.message || 'Failed to load batches'))
+      .finally(() => setLoading(false));
+  }, []);
+  const pct = (n: number, t: number) => (t ? `${Math.round((n / t) * 1000) / 10}%` : '0%');
+  const exportXlsx = () => {
+    const out: Record<string, unknown>[] = [];
+    for (const b of rows) for (const p of b.people) out.push({ Batch: b.label, Salesperson: p.name, Leads: p.total, Contacted: p.contacted, 'Never contacted': p.neverContacted, Calls: p.calls, 'Reached demo': p.demos, Enrolled: p.enrolled, 'Conversion %': p.total ? Math.round((p.enrolled / p.total) * 1000) / 10 : 0, 'Not interested': p.notInterested, 'Lost / disqualified': p.lost, 'Still open': p.open, 'Overdue follow-ups': p.overdue });
+    const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(out), 'Batches'); XLSX.writeFile(wb, 'batch_tracking.xlsx');
+  };
+  const th = 'px-3 py-2';
+  const cells = (s: BatchStat) => (<>
+    <td className="px-3 py-2 font-semibold">{s.total}</td><td className="px-3 py-2 text-xs">{s.contacted} <span className="text-muted-foreground">({pct(s.contacted, s.total)})</span></td>
+    <td className={`px-3 py-2 text-xs ${s.neverContacted ? 'text-amber-700 font-semibold' : ''}`}>{s.neverContacted}</td><td className="px-3 py-2 text-xs">{s.calls}</td>
+    <td className="px-3 py-2 text-xs">{s.demos}</td><td className="px-3 py-2 text-xs text-green-700">{s.enrolled} <span className="text-muted-foreground">({pct(s.enrolled, s.total)})</span></td>
+    <td className="px-3 py-2 text-xs">{s.notInterested}</td><td className="px-3 py-2 text-xs text-red-600">{s.lost}</td><td className="px-3 py-2 text-xs">{s.open}</td>
+    <td className={`px-3 py-2 text-xs ${s.overdue ? 'text-red-600 font-semibold' : ''}`}>{s.overdue}</td>
+  </>);
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between">
+        <p className="text-sm text-muted-foreground">How each hand-out batch is doing, overall and per salesperson. A lead pulled back into My Base leaves its batch.</p>
+        <button onClick={exportXlsx} disabled={!rows.length} className="text-xs border rounded-lg px-3 py-2 text-blue-600 disabled:text-muted-foreground">Download Excel</button>
+      </div>
+      {error && <div className="bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg px-4 py-3">{error}</div>}
+      {loading && <p className="text-sm text-muted-foreground">Loading...</p>}
+      {!loading && rows.length === 0 && <p className="text-sm text-muted-foreground border rounded-xl p-8 text-center">No batches yet. Assign leads from My Base and they will appear here.</p>}
+      {rows.map((b) => (
+        <section key={b.label} className="border rounded-xl bg-card overflow-hidden">
+          <button onClick={() => setOpen(open === b.label ? null : b.label)} className="w-full flex flex-wrap items-center justify-between gap-2 px-4 py-3 text-left hover:bg-muted/30">
+            <div>
+              <p className="font-semibold text-sm">{b.label}</p>
+              <p className="text-xs text-muted-foreground">{b.assignedFrom ? `Assigned ${formatDate(b.assignedFrom)}${b.assignedTo && formatDate(b.assignedTo) !== formatDate(b.assignedFrom) ? ` – ${formatDate(b.assignedTo)}` : ''}` : ''} · {b.people.length} salesperson{b.people.length === 1 ? '' : 's'}</p>
+            </div>
+            <div className="flex flex-wrap gap-2 text-xs">
+              <span className="bg-slate-100 rounded-full px-3 py-1">{b.totals.total} leads</span>
+              <span className="bg-blue-50 text-blue-700 rounded-full px-3 py-1">{pct(b.totals.contacted, b.totals.total)} contacted</span>
+              <span className="bg-green-50 text-green-700 rounded-full px-3 py-1">{b.totals.enrolled} enrolled ({pct(b.totals.enrolled, b.totals.total)})</span>
+              {b.totals.neverContacted > 0 && <span className="bg-amber-50 text-amber-700 rounded-full px-3 py-1">{b.totals.neverContacted} untouched</span>}
+            </div>
+          </button>
+          {open === b.label && (
+            <div className="overflow-x-auto border-t">
+              <table className="w-full text-sm">
+                <thead className="bg-muted/50 text-left text-xs uppercase text-muted-foreground">
+                  <tr><th className={th}>Salesperson</th><th className={th}>Leads</th><th className={th}>Contacted</th><th className={th}>Never contacted</th><th className={th}>Calls</th><th className={th}>Reached demo</th><th className={th}>Enrolled</th><th className={th}>Not interested</th><th className={th}>Lost</th><th className={th}>Open</th><th className={th}>Overdue</th></tr>
+                </thead>
+                <tbody className="divide-y">
+                  {b.people.map((p) => <tr key={p.name} className="hover:bg-muted/30"><td className="px-3 py-2 font-medium whitespace-nowrap">{p.name}</td>{cells(p)}</tr>)}
+                  <tr className="bg-muted/40 font-semibold"><td className="px-3 py-2">Total</td>{cells(b.totals)}</tr>
+                </tbody>
+              </table>
+            </div>
+          )}
+        </section>
+      ))}
+    </div>
+  );
+}
+
+// ── Send a WhatsApp message / email to a lead from a template ──
+interface MsgTemplate { id: string; name: string; channel: 'WHATSAPP' | 'EMAIL'; category: string | null; subject: string | null; body: string; active: boolean }
+function SendMessageModal({ lead, channel, onClose, onSent }: { lead: Lead; channel: 'WHATSAPP' | 'EMAIL'; onClose: () => void; onSent: () => void }) {
+  const [templates, setTemplates] = useState<MsgTemplate[]>([]);
+  const [templateId, setTemplateId] = useState('');
+  const [subject, setSubject] = useState('');
+  const [body, setBody] = useState('');
+  const [waPhone, setWaPhone] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  const errOf = (err: unknown, fb: string) => (err as { response?: { data?: { message?: string } } }).response?.data?.message || fb;
+  useEffect(() => { api.get('/api/sales/message-templates', { params: { channel } }).then((r) => setTemplates(r.data.data)).catch((e) => setError(errOf(e, 'Could not load templates'))); }, [channel]);
+  const pick = async (id: string) => {
+    setTemplateId(id); setError('');
+    if (!id) { setSubject(''); setBody(''); return; }
+    try {
+      const r = await api.get(`/api/sales/leads/${lead.id}/message-preview`, { params: { templateId: id } });
+      setSubject(r.data.data.subject || ''); setBody(r.data.data.body); setWaPhone(r.data.data.waPhone);
+    } catch (e) { setError(errOf(e, 'Could not prepare the message')); }
+  };
+  const send = async () => {
+    setError('');
+    if (!body.trim()) { setError('Write or pick a message first'); return; }
+    const name = templates.find((t) => t.id === templateId)?.name;
+    const key = lead.phone.replace(/\D/g, '').slice(-10);
+    if (channel === 'WHATSAPP') window.open(`https://wa.me/91${waPhone || key}?text=${encodeURIComponent(body)}`, '_blank', 'noopener');
+    setBusy(true);
+    try { await api.post(`/api/sales/leads/${lead.id}/message`, { channel, body, subject, templateName: name }); onSent(); onClose(); }
+    catch (e) { setError(errOf(e, 'Could not record the message')); }
+    finally { setBusy(false); }
+  };
+  const inp = 'border rounded-lg px-3 py-2 text-sm bg-background w-full';
+  return (
+    <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-[60] p-4">
+      <div className="bg-white rounded-xl w-full max-w-lg p-5 space-y-3">
+        <div className="flex items-center justify-between">
+          <h3 className="font-semibold">{channel === 'WHATSAPP' ? 'WhatsApp' : 'Email'} — {lead.name}</h3>
+          <button onClick={onClose}><X className="w-4 h-4" /></button>
+        </div>
+        {error && <div className="bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg px-3 py-2">{error}</div>}
+        <label className="text-xs text-muted-foreground block">Template
+          <select value={templateId} onChange={(e) => pick(e.target.value)} className={`${inp} mt-1`}>
+            <option value="">Write my own…</option>
+            {templates.map((t) => <option key={t.id} value={t.id}>{t.category ? `${t.category} · ` : ''}{t.name}</option>)}
+          </select>
+        </label>
+        {channel === 'EMAIL' && <label className="text-xs text-muted-foreground block">Subject<input value={subject} onChange={(e) => setSubject(e.target.value)} className={`${inp} mt-1`} /></label>}
+        <label className="text-xs text-muted-foreground block">Message (you can edit before sending)
+          <textarea value={body} onChange={(e) => setBody(e.target.value)} rows={8} className={`${inp} mt-1`} />
+        </label>
+        <p className="text-xs text-muted-foreground">{channel === 'WHATSAPP' ? `Opens WhatsApp for ${lead.phone} with this text ready to send. ` : `Sent from the portal to ${lead.email}, with you in copy. `}It is recorded in the lead's history.</p>
+        <div className="flex justify-end gap-2">
+          <button onClick={onClose} className="px-4 py-2 border rounded-lg text-sm">Cancel</button>
+          <button onClick={send} disabled={busy} className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium disabled:opacity-50 flex items-center gap-1.5"><Send className="w-3.5 h-3.5" /> {channel === 'WHATSAPP' ? 'Open WhatsApp' : 'Send email'}</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── Today view: what to do next, in priority order ──
+interface TodayItem { key: string; lead: { id: string; name: string; phone: string; status: string; activityStatus: string | null; lastContactAt: string | null; courseInterest: string | null } | null; taskId: string | null; title: string | null; reasons: { type: string; label: string; at: string | null }[]; score: number }
+const REASON_STYLE: Record<string, string> = {
+  DEMO: 'bg-purple-100 text-purple-700', DEMO_PENDING: 'bg-purple-100 text-purple-700', OVERDUE: 'bg-red-100 text-red-700',
+  FOLLOW_UP: 'bg-amber-100 text-amber-700', TASK: 'bg-slate-100 text-slate-700', NEW: 'bg-blue-100 text-blue-700',
+};
+function TodayPanel({ isAdmin, employees, onOpenLead }: { isAdmin: boolean; employees: EmployeeLite[]; onOpenLead: (id: string) => void }) {
+  const [emp, setEmp] = useState('');
+  const [data, setData] = useState<{ summary: { overdue: number; dueToday: number; demosToday: number; demosPending: number; tasks: number; untouched: number; total: number }; items: TodayItem[] } | null>(null);
+  const [filter, setFilter] = useState('');
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+  const load = useCallback(async () => {
+    setLoading(true); setError('');
+    try { const r = await api.get('/api/sales/today', { params: emp ? { employeeId: emp } : {} }); setData(r.data.data); }
+    catch (err: unknown) { setError((err as { response?: { data?: { message?: string } } }).response?.data?.message || 'Failed to load Today'); }
+    finally { setLoading(false); }
+  }, [emp]);
+  useEffect(() => { load(); }, [load]);
+  const s = data?.summary;
+  const chips: { key: string; label: string; n: number }[] = s ? [
+    { key: 'DEMO', label: 'Demos today', n: s.demosToday }, { key: 'DEMO_PENDING', label: 'Demo outcome pending', n: s.demosPending },
+    { key: 'OVERDUE', label: 'Overdue follow-ups', n: s.overdue }, { key: 'FOLLOW_UP', label: 'Follow-ups today', n: s.dueToday },
+    { key: 'TASK', label: 'Tasks due', n: s.tasks }, { key: 'NEW', label: 'New, not contacted', n: s.untouched },
+  ] : [];
+  const items = (data?.items || []).filter((i) => !filter || i.reasons.some((r) => r.type === filter));
+  return (
+    <div className="space-y-4">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <p className="text-sm text-muted-foreground">Your day in priority order — start at the top.</p>
+        <div className="flex items-center gap-2">
+          {isAdmin && (
+            <select value={emp} onChange={(e) => setEmp(e.target.value)} className="border rounded-lg px-2 py-1.5 text-sm bg-background">
+              <option value="">My day</option>{employees.map((e) => <option key={e.id} value={e.id}>{e.firstName} {e.lastName}</option>)}
+            </select>
+          )}
+          <button onClick={load} className="text-xs border rounded-lg px-3 py-2 flex items-center gap-1"><RefreshCw className="w-3 h-3" /> Refresh</button>
+        </div>
+      </div>
+      {error && <div className="bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg px-4 py-3">{error}</div>}
+      <div className="flex flex-wrap gap-2">
+        <button onClick={() => setFilter('')} className={`text-xs rounded-full px-3 py-1.5 border ${!filter ? 'bg-blue-600 text-white border-blue-600' : ''}`}>All {s?.total ?? ''}</button>
+        {chips.map((c) => <button key={c.key} onClick={() => setFilter(filter === c.key ? '' : c.key)} className={`text-xs rounded-full px-3 py-1.5 border ${filter === c.key ? 'bg-blue-600 text-white border-blue-600' : ''}`}>{c.label}: <b>{c.n}</b></button>)}
+      </div>
+      {loading && <p className="text-sm text-muted-foreground">Loading...</p>}
+      {!loading && items.length === 0 && <p className="text-sm text-muted-foreground border rounded-xl p-10 text-center">Nothing pending right now. 🎉</p>}
+      <div className="space-y-2">
+        {items.map((it, i) => (
+          <div key={it.key} className="border rounded-xl bg-card p-3 flex flex-wrap items-center gap-3">
+            <span className="w-7 h-7 rounded-full bg-slate-100 text-xs font-semibold flex items-center justify-center">{i + 1}</span>
+            <div className="min-w-[180px] flex-1">
+              {it.lead ? <button onClick={() => onOpenLead(it.lead!.id)} className="text-blue-600 hover:underline font-medium text-sm">{it.lead.name}</button> : <span className="font-medium text-sm">{it.title}</span>}
+              {it.lead && <div className="text-xs text-muted-foreground">{it.lead.phone}{it.lead.courseInterest ? ` · ${it.lead.courseInterest}` : ''} · {it.lead.status.replace(/_/g, ' ')}{it.lead.activityStatus ? ` · ${it.lead.activityStatus.replace(/_/g, ' ')}` : ''}</div>}
+              <div className="flex flex-wrap gap-1.5 mt-1.5">{it.reasons.map((r, k) => <span key={k} className={`text-[11px] rounded-full px-2 py-0.5 ${REASON_STYLE[r.type] || 'bg-slate-100'}`}>{r.label}</span>)}</div>
+            </div>
+            {it.lead && (
+              <div className="flex gap-2">
+                <a href={`tel:${it.lead.phone.replace(/\s+/g, '')}`} className="flex items-center gap-1 px-3 py-1.5 border rounded-lg text-xs hover:bg-muted/50"><Phone className="w-3 h-3" /> Call</a>
+                <a href={`https://wa.me/91${it.lead.phone.replace(/\D/g, '').slice(-10)}`} target="_blank" rel="noopener noreferrer" className="flex items-center gap-1 px-3 py-1.5 border rounded-lg text-xs text-green-700 border-green-300 hover:bg-green-50"><MessageCircle className="w-3 h-3" /> WhatsApp</a>
+                <button onClick={() => onOpenLead(it.lead!.id)} className="px-3 py-1.5 border rounded-lg text-xs hover:bg-muted/50">Log activity</button>
+              </div>
+            )}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// ── Call analytics ──
+interface CallAnalytics {
+  totals: { calls: number; connected: number; notConnected: number; connectRate: number; talkSeconds: number; avgTalkSeconds: number; callsPerDay: number; missed: number; inbound: number; outbound: number };
+  perPerson: { employeeId: string; name: string; calls: number; connected: number; connectRate: number; talkSeconds: number; avgTalkSeconds: number; missed: number; activeDays: number; callsPerDay: number }[];
+  days: { date: string; calls: number; connected: number; talkSeconds: number }[];
+  hours: { hour: number; calls: number; connected: number; connectRate: number }[];
+  weekdays: { dow: number; calls: number; connected: number; connectRate: number }[];
+}
+const fmtDur = (sec: number) => { const h = Math.floor(sec / 3600), m = Math.floor((sec % 3600) / 60), s = sec % 60; return h ? `${h}h ${m}m` : m ? `${m}m ${s}s` : `${s}s`; };
+const hourText = (h: number) => `${h % 12 === 0 ? 12 : h % 12}${h < 12 ? 'a' : 'p'}`;
+function CallAnalyticsPanel({ isAdmin, employees }: { isAdmin: boolean; employees: EmployeeLite[] }) {
+  const today = new Date().toISOString().slice(0, 10);
+  const monthAgo = new Date(Date.now() - 29 * 86400000).toISOString().slice(0, 10);
+  const [from, setFrom] = useState(monthAgo);
+  const [to, setTo] = useState(today);
+  const [emp, setEmp] = useState('');
+  const [data, setData] = useState<CallAnalytics | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+  useEffect(() => {
+    setLoading(true); setError('');
+    api.get('/api/sales/call-analytics', { params: { from, to, ...(emp ? { employeeId: emp } : {}) } })
+      .then((r) => setData(r.data.data))
+      .catch((err: unknown) => setError((err as { response?: { data?: { message?: string } } }).response?.data?.message || 'Failed to load call analytics'))
+      .finally(() => setLoading(false));
+  }, [from, to, emp]);
+  const t = data?.totals;
+  const maxDay = Math.max(1, ...(data?.days || []).map((d) => d.calls));
+  const hours = data?.hours || [];
+  const best = [...hours].filter((h) => h.calls >= 5).sort((a, b) => b.connectRate - a.connectRate || b.calls - a.calls).slice(0, 3).map((h) => h.hour);
+  const dowName = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+  const inp = 'border rounded-lg px-2 py-1.5 text-sm bg-background';
+  const th = 'px-3 py-3';
+  const card = (label: string, value: string | number, sub?: string) => (
+    <div className="border rounded-xl p-3 bg-card"><p className="text-xs text-muted-foreground">{label}</p><p className="text-xl font-semibold">{value}</p>{sub && <p className="text-[11px] text-muted-foreground">{sub}</p>}</div>
+  );
+  return (
+    <div className="space-y-5">
+      <div className="flex flex-wrap items-end gap-3">
+        <label className="text-xs text-muted-foreground">From<input type="date" value={from} onChange={(e) => setFrom(e.target.value)} className={`${inp} block mt-1`} /></label>
+        <label className="text-xs text-muted-foreground">To<input type="date" value={to} onChange={(e) => setTo(e.target.value)} className={`${inp} block mt-1`} /></label>
+        {isAdmin && (
+          <label className="text-xs text-muted-foreground">Salesperson
+            <select value={emp} onChange={(e) => setEmp(e.target.value)} className={`${inp} block mt-1`}><option value="">Everyone</option>{employees.map((e) => <option key={e.id} value={e.id}>{e.firstName} {e.lastName}</option>)}</select>
+          </label>
+        )}
+      </div>
+      {error && <div className="bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg px-4 py-3">{error}</div>}
+      {loading && <p className="text-sm text-muted-foreground">Loading...</p>}
+      {t && data && (<>
+        <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-3">
+          {card('Calls', t.calls, `${t.callsPerDay} per day`)}
+          {card('Connected', t.connected, `${t.connectRate}% connect rate`)}
+          {card('Not connected', t.notConnected, `${t.missed} missed`)}
+          {card('Talk time', fmtDur(t.talkSeconds), 'auto-tracked calls')}
+          {card('Avg talk time', fmtDur(t.avgTalkSeconds), 'per connected call')}
+          {card('Outbound / inbound', `${t.outbound} / ${t.inbound}`)}
+        </div>
+        <p className="text-xs text-muted-foreground -mt-2">Connected = tracked calls with talk time (not missed), and manually logged calls not marked DNP.</p>
+
+        <section className="border rounded-xl p-4 bg-card space-y-2">
+          <h3 className="font-semibold text-sm">Calls per day</h3>
+          <div className="flex items-end gap-[3px] h-32 overflow-x-auto">
+            {data.days.map((d) => (
+              <div key={d.date} className="flex flex-col justify-end items-center min-w-[10px] flex-1 h-full group relative" title={`${d.date}: ${d.calls} calls, ${d.connected} connected, ${fmtDur(d.talkSeconds)} talk`}>
+                <div className="w-full bg-blue-200 rounded-t relative" style={{ height: `${(d.calls / maxDay) * 100}%`, minHeight: d.calls ? 2 : 0 }}>
+                  <div className="absolute bottom-0 w-full bg-blue-600 rounded-t" style={{ height: d.calls ? `${(d.connected / d.calls) * 100}%` : 0 }} />
+                </div>
+              </div>
+            ))}
+          </div>
+          <p className="text-[11px] text-muted-foreground">Light bar = all calls, dark = connected. Hover a bar for details.</p>
+        </section>
+
+        <section className="border rounded-xl p-4 bg-card space-y-3">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <h3 className="font-semibold text-sm">Best time to reach leads</h3>
+            {best.length > 0 && <p className="text-xs text-green-700">Highest connect rates: {best.map((h) => `${hourText(h)}–${hourText((h + 1) % 24)}`).join(', ')}</p>}
+          </div>
+          <div className="grid grid-cols-12 md:grid-cols-24 gap-1" style={{ gridTemplateColumns: 'repeat(24, minmax(0, 1fr))' }}>
+            {hours.map((h) => (
+              <div key={h.hour} className="text-center" title={`${hourText(h.hour)}: ${h.calls} calls, ${h.connectRate}% connected`}>
+                <div className="h-14 rounded flex items-end bg-slate-100 overflow-hidden"><div className={`w-full ${best.includes(h.hour) ? 'bg-green-500' : 'bg-blue-400'}`} style={{ height: `${h.calls ? Math.max(8, h.connectRate) : 0}%` }} /></div>
+                <p className="text-[10px] text-muted-foreground mt-1">{hourText(h.hour)}</p>
+                <p className="text-[10px]">{h.calls ? `${Math.round(h.connectRate)}%` : ''}</p>
+              </div>
+            ))}
+          </div>
+          <div className="flex flex-wrap gap-2 text-xs">
+            {data.weekdays.map((w) => <span key={w.dow} className="bg-slate-100 rounded-full px-3 py-1">{dowName[w.dow]}: <b>{w.calls ? `${Math.round(w.connectRate)}%` : '—'}</b> <span className="text-muted-foreground">({w.calls})</span></span>)}
+          </div>
+          <p className="text-[11px] text-muted-foreground">Bars show the connect rate for each hour of the day (IST). Hours with fewer than 5 calls are not ranked.</p>
+        </section>
+
+        {isAdmin && (
+          <section className="space-y-2">
+            <h3 className="font-semibold text-sm">By salesperson</h3>
+            <div className="bg-card border rounded-xl overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead className="bg-muted/50 text-left text-xs uppercase text-muted-foreground"><tr><th className={th}>Salesperson</th><th className={th}>Calls</th><th className={th}>Connected</th><th className={th}>Connect rate</th><th className={th}>Talk time</th><th className={th}>Avg talk</th><th className={th}>Missed</th><th className={th}>Active days</th><th className={th}>Calls / day</th></tr></thead>
+                <tbody className="divide-y">
+                  {data.perPerson.map((p) => (
+                    <tr key={p.employeeId} className="hover:bg-muted/30"><td className="px-3 py-2 font-medium whitespace-nowrap">{p.name}</td><td className="px-3 py-2 font-semibold">{p.calls}</td><td className="px-3 py-2 text-xs">{p.connected}</td>
+                      <td className={`px-3 py-2 text-xs font-semibold ${p.connectRate >= 50 ? 'text-green-700' : p.connectRate < 30 ? 'text-red-600' : ''}`}>{p.connectRate}%</td>
+                      <td className="px-3 py-2 text-xs">{fmtDur(p.talkSeconds)}</td><td className="px-3 py-2 text-xs">{fmtDur(p.avgTalkSeconds)}</td><td className="px-3 py-2 text-xs">{p.missed}</td><td className="px-3 py-2 text-xs">{p.activeDays}</td><td className="px-3 py-2 text-xs">{p.callsPerDay}</td></tr>
+                  ))}
+                  {data.perPerson.length === 0 && <tr><td colSpan={9} className="px-4 py-6 text-center text-muted-foreground">No calls in this range</td></tr>}
+                </tbody>
+              </table>
+            </div>
+          </section>
+        )}
+      </>)}
+    </div>
+  );
+}
+
+// ── Message templates (Sales Admin) ──
+function TemplatesView() {
+  const [rows, setRows] = useState<MsgTemplate[]>([]);
+  const [form, setForm] = useState<Partial<MsgTemplate> | null>(null);
+  const [error, setError] = useState('');
+  const errOf = (err: unknown, fb: string) => (err as { response?: { data?: { message?: string } } }).response?.data?.message || fb;
+  const load = useCallback(async () => { try { const r = await api.get('/api/sales/message-templates', { params: { all: 1 } }); setRows(r.data.data); } catch (e) { setError(errOf(e, 'Failed to load templates')); } }, []);
+  useEffect(() => { load(); }, [load]);
+  const save = async () => {
+    if (!form) return; setError('');
+    try { if (form.id) await api.put(`/api/sales/message-templates/${form.id}`, form); else await api.post('/api/sales/message-templates', form); setForm(null); await load(); }
+    catch (e) { setError(errOf(e, 'Could not save')); }
+  };
+  const del = async (t: MsgTemplate) => { if (!window.confirm(`Delete "${t.name}"?`)) return; try { await api.delete(`/api/sales/message-templates/${t.id}`); await load(); } catch (e) { setError(errOf(e, 'Failed')); } };
+  const inp = 'border rounded-lg px-3 py-2 text-sm bg-background w-full';
+  return (
+    <div className="space-y-4">
+      <div className="flex items-start justify-between gap-3">
+        <p className="text-sm text-muted-foreground">Salespeople pick these from the lead screen (WhatsApp / Email buttons) and can edit the text before sending. Placeholders: <code className="text-xs">{'{{name}} {{firstName}} {{course}} {{phone}} {{city}} {{salesperson}} {{demoDate}} {{demoTime}} {{demoMode}}'}</code></p>
+        <button onClick={() => setForm({ channel: 'WHATSAPP', name: '', body: '', active: true })} className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium whitespace-nowrap">+ New template</button>
+      </div>
+      {error && <div className="bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg px-4 py-3">{error}</div>}
+      {form && (
+        <section className="border rounded-xl p-4 bg-card space-y-3">
+          <div className="grid md:grid-cols-3 gap-3">
+            <label className="text-xs text-muted-foreground">Name<input value={form.name || ''} onChange={(e) => setForm({ ...form, name: e.target.value })} className={`${inp} mt-1`} /></label>
+            <label className="text-xs text-muted-foreground">Channel
+              <select value={form.channel} onChange={(e) => setForm({ ...form, channel: e.target.value as 'WHATSAPP' | 'EMAIL' })} className={`${inp} mt-1`}><option value="WHATSAPP">WhatsApp</option><option value="EMAIL">Email</option></select>
+            </label>
+            <label className="text-xs text-muted-foreground">Category (Demo, Fees, Brochure…)<input value={form.category || ''} onChange={(e) => setForm({ ...form, category: e.target.value })} className={`${inp} mt-1`} /></label>
+          </div>
+          {form.channel === 'EMAIL' && <label className="text-xs text-muted-foreground block">Subject<input value={form.subject || ''} onChange={(e) => setForm({ ...form, subject: e.target.value })} className={`${inp} mt-1`} /></label>}
+          <label className="text-xs text-muted-foreground block">Message<textarea rows={7} value={form.body || ''} onChange={(e) => setForm({ ...form, body: e.target.value })} className={`${inp} mt-1`} /></label>
+          <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={form.active !== false} onChange={(e) => setForm({ ...form, active: e.target.checked })} /> Available to salespeople</label>
+          <div className="flex gap-2"><button onClick={save} className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium">Save template</button><button onClick={() => setForm(null)} className="px-4 py-2 border rounded-lg text-sm">Cancel</button></div>
+        </section>
+      )}
+      <div className="grid md:grid-cols-2 gap-3">
+        {rows.map((t) => (
+          <section key={t.id} className={`border rounded-xl p-4 bg-card space-y-2 ${t.active ? '' : 'opacity-60'}`}>
+            <div className="flex items-start justify-between gap-2">
+              <div><p className="font-semibold text-sm">{t.name}</p><p className="text-xs text-muted-foreground">{t.channel === 'WHATSAPP' ? 'WhatsApp' : 'Email'}{t.category ? ` · ${t.category}` : ''}{t.active ? '' : ' · off'}</p></div>
+              <div className="flex gap-2 text-xs"><button onClick={() => setForm(t)} className="px-3 py-1 border rounded-lg">Edit</button><button onClick={() => del(t)} className="px-3 py-1 border rounded-lg text-red-600">Delete</button></div>
+            </div>
+            {t.subject && <p className="text-xs"><b>Subject:</b> {t.subject}</p>}
+            <p className="text-xs text-muted-foreground whitespace-pre-wrap line-clamp-5">{t.body}</p>
+          </section>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// ── Target vs achievement alerts (Sales Admin) ──
+interface TargetCfg { id: string; active: boolean; checkDays: string; behindPercent: number; notifyOwner: boolean; notifyAdmins: boolean; adminEmails: string | null; sendHour: number; lastSentOn: string | null }
+interface TargetStatusRow { employeeId: string; name: string; enrollGoal: number; enrolled: number; enrollExpected: number; revenueGoal: number; revenue: number; revenueExpected: number; behindEnroll: boolean; behindRevenue: boolean }
+function TargetAlertsView() {
+  const [cfg, setCfg] = useState<TargetCfg | null>(null);
+  const [status, setStatus] = useState<{ day: number; daysInMonth: number; monthLabel: string; rows: TargetStatusRow[] } | null>(null);
+  const [error, setError] = useState('');
+  const [notice, setNotice] = useState('');
+  const errOf = (err: unknown, fb: string) => (err as { response?: { data?: { message?: string } } }).response?.data?.message || fb;
+  const load = useCallback(async () => { try { const r = await api.get('/api/sales/target-alerts'); setCfg(r.data.data.config); setStatus(r.data.data.status); } catch (e) { setError(errOf(e, 'Failed to load')); } }, []);
+  useEffect(() => { load(); }, [load]);
+  const save = async () => { if (!cfg) return; setError(''); setNotice(''); try { await api.put('/api/sales/target-alerts', cfg); setNotice('Saved'); await load(); } catch (e) { setError(errOf(e, 'Could not save')); } };
+  const sendNow = async () => { if (!window.confirm('Email everyone who is currently behind pace?')) return; setError(''); setNotice(''); try { const r = await api.post('/api/sales/target-alerts/send-now'); setNotice(`${r.data.data.behind} behind pace · ${r.data.data.emails} email${r.data.data.emails === 1 ? '' : 's'} sent`); } catch (e) { setError(errOf(e, 'Send failed')); } };
+  const inp = 'border rounded-lg px-3 py-2 text-sm bg-background w-full';
+  if (!cfg) return <p className="text-sm text-muted-foreground">Loading...{error}</p>;
+  return (
+    <div className="space-y-4">
+      <p className="text-sm text-muted-foreground">On the chosen days of the month, anyone below the set percentage of their pro-rata target (goal × days elapsed ÷ days in month) gets an email and notification, and admins get one summary. Targets are set on the Targets tab.</p>
+      {error && <div className="bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg px-4 py-3">{error}</div>}
+      {notice && <div className="bg-green-50 border border-green-200 text-green-700 text-sm rounded-lg px-4 py-3">{notice}</div>}
+      <section className="border rounded-xl p-4 bg-card space-y-3">
+        <div className="grid md:grid-cols-4 gap-3">
+          <label className="text-xs text-muted-foreground">Check on days of month<input value={cfg.checkDays} onChange={(e) => setCfg({ ...cfg, checkDays: e.target.value })} className={`${inp} mt-1`} placeholder="10,15,20,25" /></label>
+          <label className="text-xs text-muted-foreground">Alert when below (% of pace)<input type="number" min={1} max={100} value={cfg.behindPercent} onChange={(e) => setCfg({ ...cfg, behindPercent: Number(e.target.value) })} className={`${inp} mt-1`} /></label>
+          <label className="text-xs text-muted-foreground">Send at
+            <select value={cfg.sendHour} onChange={(e) => setCfg({ ...cfg, sendHour: Number(e.target.value) })} className={`${inp} mt-1`}>{Array.from({ length: 24 }, (_, h) => <option key={h} value={h}>{hourLabel(h)}</option>)}</select>
+          </label>
+          <label className="text-xs text-muted-foreground">Admin emails (blank = report recipients)<input value={cfg.adminEmails || ''} onChange={(e) => setCfg({ ...cfg, adminEmails: e.target.value })} className={`${inp} mt-1`} /></label>
+        </div>
+        <div className="flex flex-wrap gap-5 text-sm">
+          <label className="flex items-center gap-2"><input type="checkbox" checked={cfg.active} onChange={(e) => setCfg({ ...cfg, active: e.target.checked })} /> Alerts on</label>
+          <label className="flex items-center gap-2"><input type="checkbox" checked={cfg.notifyOwner} onChange={(e) => setCfg({ ...cfg, notifyOwner: e.target.checked })} /> Email + notify the salesperson</label>
+          <label className="flex items-center gap-2"><input type="checkbox" checked={cfg.notifyAdmins} onChange={(e) => setCfg({ ...cfg, notifyAdmins: e.target.checked })} /> Email admins</label>
+        </div>
+        <div className="flex gap-2"><button onClick={save} className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium">Save</button><button onClick={sendNow} className="px-4 py-2 border rounded-lg text-sm">Send now</button></div>
+      </section>
+      {status && (
+        <section className="space-y-2">
+          <h3 className="font-semibold text-sm">{status.monthLabel} — day {status.day} of {status.daysInMonth}</h3>
+          <div className="bg-card border rounded-xl overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead className="bg-muted/50 text-left text-xs uppercase text-muted-foreground"><tr><th className="px-3 py-3">Salesperson</th><th className="px-3 py-3">Enrolments</th><th className="px-3 py-3">Expected by now</th><th className="px-3 py-3">Revenue</th><th className="px-3 py-3">Expected by now</th><th className="px-3 py-3">Status</th></tr></thead>
+              <tbody className="divide-y">
+                {status.rows.map((r) => {
+                  const behind = r.behindEnroll || r.behindRevenue;
+                  return (
+                    <tr key={r.employeeId}><td className="px-3 py-2 font-medium">{r.name}</td>
+                      <td className="px-3 py-2 text-xs">{r.enrollGoal ? `${r.enrolled} / ${r.enrollGoal}` : '—'}</td><td className="px-3 py-2 text-xs text-muted-foreground">{r.enrollGoal ? r.enrollExpected.toFixed(1) : '—'}</td>
+                      <td className="px-3 py-2 text-xs">{r.revenueGoal ? `₹${Math.round(r.revenue).toLocaleString('en-IN')} / ₹${Math.round(r.revenueGoal).toLocaleString('en-IN')}` : '—'}</td><td className="px-3 py-2 text-xs text-muted-foreground">{r.revenueGoal ? `₹${Math.round(r.revenueExpected).toLocaleString('en-IN')}` : '—'}</td>
+                      <td className="px-3 py-2"><span className={`text-xs rounded-full px-2 py-0.5 ${behind ? 'bg-red-100 text-red-700' : 'bg-green-100 text-green-700'}`}>{behind ? 'Behind' : 'On track'}</span></td></tr>
+                  );
+                })}
+                {status.rows.length === 0 && <tr><td colSpan={6} className="px-4 py-6 text-center text-muted-foreground">No targets set for this month</td></tr>}
+              </tbody>
+            </table>
+          </div>
+        </section>
+      )}
+    </div>
+  );
+}
+
+// ── Duplicates & email alert rules (Sales Admin) ──
+function LeadControlPanel({ onOpenLead }: { onOpenLead: (id: string) => void }) {
+  const [view, setView] = useState<'templates' | 'alerts' | 'targets' | 'duplicates'>('templates');
+  return (
+    <div className="space-y-4">
+      <div className="flex gap-2">
+        {([['templates', 'Message templates'], ['alerts', 'Lead alert rules'], ['targets', 'Target alerts'], ['duplicates', 'Duplicate leads']] as const).map(([k, label]) => (
+          <button key={k} onClick={() => setView(k)} className={`px-4 py-1.5 rounded-full text-sm border ${view === k ? 'bg-blue-600 text-white border-blue-600' : 'hover:bg-muted/50'}`}>{label}</button>
+        ))}
+      </div>
+      {view === 'templates' ? <TemplatesView /> : view === 'alerts' ? <AlertRulesView /> : view === 'targets' ? <TargetAlertsView /> : <DuplicatesView onOpenLead={onOpenLead} />}
+    </div>
+  );
+}
+
+interface DupLead { id: string; name: string; phone: string; email: string | null; source: string | null; status: string; activityStatus: string | null; createdAt: string; owner: string; _count: { callLogs: number; demos: number; leadNotes: number; tasks: number; collections: number; students: number } }
+function DuplicatesView({ onOpenLead }: { onOpenLead: (id: string) => void }) {
+  const [groups, setGroups] = useState<{ phoneKey: string; leads: DupLead[] }[]>([]);
+  const [total, setTotal] = useState(0);
+  const [keep, setKeep] = useState<Record<string, string>>({});
+  const [loading, setLoading] = useState(true);
+  const [busy, setBusy] = useState('');
+  const [error, setError] = useState('');
+  const [notice, setNotice] = useState('');
+  const errOf = (err: unknown, fb: string) => (err as { response?: { data?: { message?: string } } }).response?.data?.message || fb;
+  const weight = (l: DupLead) => (l.status === 'ENROLLED' ? 1000 : 0) + l._count.callLogs + l._count.demos * 3 + l._count.leadNotes + l._count.collections * 50 + l._count.students * 50;
+  const load = useCallback(async () => {
+    setLoading(true); setError('');
+    try {
+      const r = await api.get('/api/sales/duplicates');
+      const g = r.data.data.groups as { phoneKey: string; leads: DupLead[] }[];
+      setGroups(g); setTotal(r.data.data.totalGroups);
+      setKeep(Object.fromEntries(g.map((x) => [x.phoneKey, [...x.leads].sort((a, b) => weight(b) - weight(a))[0].id])));
+    } catch (err) { setError(errOf(err, 'Failed to load duplicates')); }
+    finally { setLoading(false); }
+  }, []);
+  useEffect(() => { load(); }, [load]);
+  const merge = async (g: { phoneKey: string; leads: DupLead[] }) => {
+    const keepId = keep[g.phoneKey]; const others = g.leads.filter((l) => l.id !== keepId);
+    if (!window.confirm(`Merge ${others.length} duplicate${others.length === 1 ? '' : 's'} into "${g.leads.find((l) => l.id === keepId)?.name}"?\nAll calls, demos, notes, tasks and payments move to the kept lead.`)) return;
+    setBusy(g.phoneKey); setError(''); setNotice('');
+    try { await api.post('/api/sales/duplicates/merge', { keepId, mergeIds: others.map((l) => l.id) }); setNotice('Merged'); await load(); }
+    catch (err) { setError(errOf(err, 'Merge failed')); } finally { setBusy(''); }
+  };
+  const dismiss = async (g: { phoneKey: string }) => {
+    setBusy(g.phoneKey); setError('');
+    try { await api.post('/api/sales/duplicates/dismiss', { phoneKey: g.phoneKey }); await load(); }
+    catch (err) { setError(errOf(err, 'Failed')); } finally { setBusy(''); }
+  };
+  return (
+    <div className="space-y-4">
+      <p className="text-sm text-muted-foreground">New leads with a phone number that already exists are blocked automatically (+91, spaces and a leading 0 are ignored). These are older duplicates already in the system — {total} group{total === 1 ? '' : 's'}.</p>
+      {error && <div className="bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg px-4 py-3">{error}</div>}
+      {notice && <div className="bg-green-50 border border-green-200 text-green-700 text-sm rounded-lg px-4 py-3">{notice}</div>}
+      {loading && <p className="text-sm text-muted-foreground">Loading...</p>}
+      {!loading && groups.length === 0 && <p className="text-sm text-muted-foreground border rounded-xl p-8 text-center">No duplicate phone numbers found.</p>}
+      {groups.map((g) => (
+        <section key={g.phoneKey} className="border rounded-xl bg-card overflow-hidden">
+          <div className="flex flex-wrap items-center justify-between gap-2 px-4 py-2 bg-muted/40">
+            <p className="text-sm font-semibold">{g.phoneKey} <span className="text-muted-foreground font-normal">· {g.leads.length} leads</span></p>
+            <div className="flex gap-2">
+              <button disabled={busy === g.phoneKey} onClick={() => merge(g)} className="px-3 py-1.5 bg-blue-600 text-white rounded-lg text-xs font-medium disabled:opacity-50">Merge into selected</button>
+              <button disabled={busy === g.phoneKey} onClick={() => dismiss(g)} className="px-3 py-1.5 border rounded-lg text-xs disabled:opacity-50">Not duplicates</button>
+            </div>
+          </div>
+          <table className="w-full text-sm">
+            <tbody className="divide-y">
+              {g.leads.map((l) => (
+                <tr key={l.id} className={keep[g.phoneKey] === l.id ? 'bg-blue-50/50' : ''}>
+                  <td className="px-3 py-2 w-24"><label className="flex items-center gap-1 text-xs"><input type="radio" name={`keep-${g.phoneKey}`} checked={keep[g.phoneKey] === l.id} onChange={() => setKeep((k) => ({ ...k, [g.phoneKey]: l.id }))} /> Keep</label></td>
+                  <td className="px-3 py-2"><button onClick={() => onOpenLead(l.id)} className="text-blue-600 hover:underline font-medium">{l.name}</button><div className="text-xs text-muted-foreground">{l.phone}{l.email ? ` · ${l.email}` : ''}</div></td>
+                  <td className="px-3 py-2 text-xs">{l.owner}</td>
+                  <td className="px-3 py-2 text-xs">{l.status.replace(/_/g, ' ')}{l.activityStatus ? ` · ${l.activityStatus.replace(/_/g, ' ')}` : ''}</td>
+                  <td className="px-3 py-2 text-xs text-muted-foreground">{l._count.callLogs} calls · {l._count.demos} demos · {l._count.leadNotes} notes</td>
+                  <td className="px-3 py-2 text-xs text-muted-foreground whitespace-nowrap">{formatDate(l.createdAt)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </section>
+      ))}
+    </div>
+  );
+}
+
+interface AlertRule { id: string; name: string; type: string; days: number; activityStatus: string | null; includeMyBase: boolean; notifyOwner: boolean; notifyAdmins: boolean; adminEmails: string | null; sendHour: number; active: boolean; lastSentOn: string | null; lastSentCount: number | null; description: string }
+const hourLabel = (h: number) => `${h % 12 === 0 ? 12 : h % 12}:00 ${h < 12 ? 'AM' : 'PM'}`;
+function AlertRulesView() {
+  const [rules, setRules] = useState<AlertRule[]>([]);
+  const [types, setTypes] = useState<Record<string, string>>({});
+  const [form, setForm] = useState<Partial<AlertRule> | null>(null);
+  const [preview, setPreview] = useState<{ id: string; total: number; perOwner: { name: string; count: number }[] } | null>(null);
+  const [busy, setBusy] = useState('');
+  const [error, setError] = useState('');
+  const [notice, setNotice] = useState('');
+  const errOf = (err: unknown, fb: string) => (err as { response?: { data?: { message?: string } } }).response?.data?.message || fb;
+  const load = useCallback(async () => {
+    try { const r = await api.get('/api/sales/alert-rules'); setRules(r.data.data.rules); setTypes(r.data.data.types); }
+    catch (err) { setError(errOf(err, 'Failed to load rules')); }
+  }, []);
+  useEffect(() => { load(); }, [load]);
+  const save = async () => {
+    if (!form) return; setError(''); setBusy('save');
+    try { if (form.id) await api.put(`/api/sales/alert-rules/${form.id}`, form); else await api.post('/api/sales/alert-rules', form); setForm(null); await load(); }
+    catch (err) { setError(errOf(err, 'Could not save rule')); } finally { setBusy(''); }
+  };
+  const toggle = async (r: AlertRule) => { try { await api.put(`/api/sales/alert-rules/${r.id}`, { ...r, active: !r.active }); await load(); } catch (err) { setError(errOf(err, 'Failed')); } };
+  const del = async (r: AlertRule) => { if (!window.confirm(`Delete rule "${r.name}"?`)) return; try { await api.delete(`/api/sales/alert-rules/${r.id}`); await load(); } catch (err) { setError(errOf(err, 'Failed')); } };
+  const doPreview = async (r: AlertRule) => { setBusy(r.id); setError(''); try { const x = await api.get(`/api/sales/alert-rules/${r.id}/preview`); setPreview({ id: r.id, ...x.data.data }); } catch (err) { setError(errOf(err, 'Preview failed')); } finally { setBusy(''); } };
+  const sendNow = async (r: AlertRule) => {
+    if (!window.confirm(`Send "${r.name}" emails right now?`)) return; setBusy(r.id); setError(''); setNotice('');
+    try { const x = await api.post(`/api/sales/alert-rules/${r.id}/send-now`); setNotice(`${x.data.data.matched} leads matched · ${x.data.data.emails} email${x.data.data.emails === 1 ? '' : 's'} sent`); }
+    catch (err) { setError(errOf(err, 'Send failed')); } finally { setBusy(''); }
+  };
+  const inp = 'border rounded-lg px-3 py-2 text-sm bg-background w-full';
+  const blank: Partial<AlertRule> = { name: '', type: 'NO_ACTIVITY', days: 14, includeMyBase: true, notifyOwner: true, notifyAdmins: true, sendHour: 9, active: true, adminEmails: '' };
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between gap-2">
+        <p className="text-sm text-muted-foreground">Each rule emails a daily digest at its send time: every owner gets their own leads, admins get one combined list. Leads in My Base are included when ticked. Enrolled, lost, not-interested and disqualified leads are never listed.</p>
+        <button onClick={() => setForm(blank)} className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium whitespace-nowrap">+ New rule</button>
+      </div>
+      {error && <div className="bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg px-4 py-3">{error}</div>}
+      {notice && <div className="bg-green-50 border border-green-200 text-green-700 text-sm rounded-lg px-4 py-3">{notice}</div>}
+
+      {form && (
+        <section className="border rounded-xl p-4 bg-card space-y-3">
+          <h3 className="font-semibold text-sm">{form.id ? 'Edit rule' : 'New rule'}</h3>
+          <div className="grid md:grid-cols-3 gap-3">
+            <label className="text-xs text-muted-foreground">Name<input value={form.name || ''} onChange={(e) => setForm({ ...form, name: e.target.value })} className={`${inp} mt-1`} /></label>
+            <label className="text-xs text-muted-foreground">When
+              <select value={form.type} onChange={(e) => setForm({ ...form, type: e.target.value })} className={`${inp} mt-1`}>{Object.entries(types).map(([k, v]) => <option key={k} value={k}>{v}</option>)}</select>
+            </label>
+            <label className="text-xs text-muted-foreground">Days (N)<input type="number" min={1} max={365} value={form.days ?? 14} onChange={(e) => setForm({ ...form, days: Number(e.target.value) })} className={`${inp} mt-1`} /></label>
+            {form.type === 'STATUS_STALE' && (
+              <label className="text-xs text-muted-foreground">Status watched
+                <select value={form.activityStatus || ''} onChange={(e) => setForm({ ...form, activityStatus: e.target.value })} className={`${inp} mt-1`}><option value="">Choose…</option>{activityOptions.filter((o) => ['DNP', 'FOLLOW_UP', 'DEMO_BOOKED', 'DEMO_OVER'].includes(o.value)).map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}</select>
+              </label>
+            )}
+            <label className="text-xs text-muted-foreground">Send daily at
+              <select value={form.sendHour ?? 9} onChange={(e) => setForm({ ...form, sendHour: Number(e.target.value) })} className={`${inp} mt-1`}>{Array.from({ length: 24 }, (_, h) => <option key={h} value={h}>{hourLabel(h)}</option>)}</select>
+            </label>
+            <label className="text-xs text-muted-foreground md:col-span-2">Admin emails (comma separated — blank uses the Sales report recipients)
+              <input value={form.adminEmails || ''} onChange={(e) => setForm({ ...form, adminEmails: e.target.value })} className={`${inp} mt-1`} placeholder="admin@company.com, head@company.com" />
+            </label>
+          </div>
+          <div className="flex flex-wrap gap-5 text-sm">
+            <label className="flex items-center gap-2"><input type="checkbox" checked={form.includeMyBase !== false} onChange={(e) => setForm({ ...form, includeMyBase: e.target.checked })} /> Include leads in My Base</label>
+            <label className="flex items-center gap-2"><input type="checkbox" checked={form.notifyOwner !== false} onChange={(e) => setForm({ ...form, notifyOwner: e.target.checked })} /> Email each owner</label>
+            <label className="flex items-center gap-2"><input type="checkbox" checked={form.notifyAdmins !== false} onChange={(e) => setForm({ ...form, notifyAdmins: e.target.checked })} /> Email admins</label>
+          </div>
+          <div className="flex gap-2">
+            <button onClick={save} disabled={busy === 'save'} className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium disabled:opacity-50">Save rule</button>
+            <button onClick={() => setForm(null)} className="px-4 py-2 border rounded-lg text-sm">Cancel</button>
+          </div>
+        </section>
+      )}
+
+      <div className="space-y-3">
+        {rules.map((r) => (
+          <section key={r.id} className={`border rounded-xl p-4 bg-card ${r.active ? '' : 'opacity-60'}`}>
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div>
+                <p className="font-semibold text-sm">{r.name}</p>
+                <p className="text-xs text-muted-foreground">Leads with {r.description}{r.includeMyBase ? ' · includes My Base' : ''}</p>
+                <p className="text-xs text-muted-foreground mt-1">Daily {hourLabel(r.sendHour)} → {[r.notifyOwner && 'each owner', r.notifyAdmins && 'admins'].filter(Boolean).join(' + ') || 'nobody'}{r.lastSentOn ? ` · last run ${r.lastSentOn} (${r.lastSentCount ?? 0} leads)` : ''}</p>
+              </div>
+              <div className="flex flex-wrap gap-2 text-xs">
+                <button onClick={() => toggle(r)} className={`px-3 py-1.5 rounded-lg border ${r.active ? 'text-green-700 border-green-300' : ''}`}>{r.active ? 'On' : 'Off'}</button>
+                <button onClick={() => doPreview(r)} disabled={busy === r.id} className="px-3 py-1.5 border rounded-lg">Preview</button>
+                <button onClick={() => sendNow(r)} disabled={busy === r.id} className="px-3 py-1.5 border rounded-lg">Send now</button>
+                <button onClick={() => setForm(r)} className="px-3 py-1.5 border rounded-lg">Edit</button>
+                <button onClick={() => del(r)} className="px-3 py-1.5 border rounded-lg text-red-600">Delete</button>
+              </div>
+            </div>
+            {preview?.id === r.id && (
+              <div className="mt-3 pt-3 border-t text-sm">
+                <p><b>{preview.total}</b> lead{preview.total === 1 ? '' : 's'} match right now.</p>
+                <div className="flex flex-wrap gap-2 mt-2">{preview.perOwner.map((o) => <span key={o.name} className="text-xs bg-slate-100 rounded-full px-3 py-1">{o.name}: <b>{o.count}</b></span>)}</div>
+              </div>
+            )}
+          </section>
+        ))}
+        {rules.length === 0 && <p className="text-sm text-muted-foreground border rounded-xl p-8 text-center">No rules yet.</p>}
+      </div>
+    </div>
+  );
+}
+
 // ── Summaries (Sales Admin): lead assignment, lead stage, source ─────────────
 const REPORT_DIMS: { value: string; label: string }[] = [
   { value: 'source', label: 'Data source' }, { value: 'assignedTo', label: 'Lead assigned to' }, { value: 'stage', label: 'Lead stage' },
-  { value: 'updateStatus', label: 'Update status' }, { value: 'course', label: 'Course' }, { value: 'city', label: 'City' },
+  { value: 'scout', label: 'Lead Scout' }, { value: 'updateStatus', label: 'Update status' }, { value: 'course', label: 'Course' }, { value: 'city', label: 'City' },
   { value: 'college', label: 'College' }, { value: 'qualification', label: 'Qualification' },
   { value: 'createdMonth', label: 'Created month' }, { value: 'createdDay', label: 'Created date' },
   { value: 'createdBy', label: 'Lead created by' }, { value: 'leadAge', label: 'Lead age' }, { value: 'activityCount', label: 'Activity count' },
@@ -2209,7 +3152,12 @@ function SalesReportBuilder({ employees }: { employees: EmployeeLite[] }) {
   return (
     <section className="space-y-3 border rounded-xl p-4 bg-card">
       <div className="flex flex-wrap items-end gap-3">
-        <h3 className="font-semibold text-sm w-full">Sales report</h3>
+        <h3 className="font-semibold text-sm w-full flex flex-wrap items-center gap-2">Sales report
+          <span className="text-xs font-normal text-muted-foreground">Quick views:</span>
+          <button onClick={() => { setRowsDim('scout'); setColsDim(''); setAdv(null); }} className="text-xs border rounded-full px-2.5 py-1 text-blue-600 hover:bg-blue-50">Lead Scout scorecard</button>
+          <button onClick={() => { setRowsDim('scout'); setColsDim('source'); setMeasure('leads'); setAdv(null); }} className="text-xs border rounded-full px-2.5 py-1 text-blue-600 hover:bg-blue-50">Scout × Source</button>
+          <button onClick={() => { setRowsDim('source'); setColsDim(''); setAdv(null); }} className="text-xs border rounded-full px-2.5 py-1 text-blue-600 hover:bg-blue-50">Source performance</button>
+        </h3>
         <label className="text-xs text-muted-foreground">Group by
           <select value={rowsDim} onChange={(e) => setRowsDim(e.target.value)} className={`${sel} block mt-1`}>{REPORT_DIMS.map((d) => <option key={d.value} value={d.value}>{d.label}</option>)}</select>
         </label>
@@ -2326,7 +3274,7 @@ function SummariesPanel({ employees }: { employees: EmployeeLite[] }) {
           ))}
         </div>
         <div className="flex flex-wrap gap-2 pt-1">
-          {[...ACTIVITY_STATUSES.map((s) => ({ key: s.value as string, label: s.label })), { key: 'NONE', label: 'No status yet' }].map((s) => (
+          {[...DEFAULT_STATUSES.map((s) => ({ key: s.value, label: s.label })),{ key: 'NONE', label: 'No status yet' }].map((s) => (
             <span key={s.key} className="text-xs bg-slate-100 text-slate-700 rounded-full px-3 py-1">{s.label}: <b>{stages?.statuses.find((x) => x.status === s.key)?.count ?? 0}</b></span>
           ))}
         </div>
@@ -3453,7 +4401,7 @@ function CallLogPanel({ onOpenLead, employees }: { onOpenLead: (id: string) => v
                   <td className="px-3 py-3 whitespace-nowrap">
                     {c.source === 'AUTO' && (c.durationSeconds ?? 0) > 0 && !c.recordingUrl
                       ? <span className="text-[11px] text-amber-700">Not recorded</span>
-                      : <RecordingPlayer url={c.recordingUrl} />}
+                      : <div className="flex items-center gap-3"><RecordingPlayer url={c.recordingUrl} />{c.recordingUrl && <TranscriptButton type="CALL" id={c.id} />}</div>}
                   </td>
                   <td className="px-3 py-3 text-xs text-muted-foreground max-w-[240px] truncate" title={c.notes || ''}>
                     {c.notes || '—'}
@@ -3778,6 +4726,399 @@ function TargetsPanel({ employees }: { employees: EmployeeLite[] }) {
           </tbody>
         </table>
       </div>
+    </div>
+  );
+}
+
+// ── Config: lead scouts, sources, stages, update statuses, lost reasons ───────
+type CfgKindUrl = 'scout' | 'source' | 'stage' | 'status' | 'lost-reason';
+const CFG_SECTIONS: { id: CfgKindUrl; kind: 'SCOUT' | 'SOURCE' | 'STAGE' | 'STATUS' | 'LOST_REASON'; label: string; hint: string; listKey: keyof CfgData }[] = [
+  { id: 'scout', kind: 'SCOUT', label: 'Lead Scouts', hint: 'The people who bring in leads (e.g. the four members working Meta leads). Pick one on each lead to see how many of their leads enrol.', listKey: 'scouts' },
+  { id: 'source', kind: 'SOURCE', label: 'Lead sources', hint: 'Where a lead came from (Meta, Instagram, Referral…). Renaming a source also renames it on existing leads.', listKey: 'sources' },
+  { id: 'stage', kind: 'STAGE', label: 'Lead stages', hint: 'Pipeline stages. A custom stage must count as one of the built-in stages so reports and targets keep working.', listKey: 'stages' },
+  { id: 'status', kind: 'STATUS', label: 'Update statuses', hint: 'The status chosen when logging a call or meeting. Choose which stage it moves the lead to and what it behaves like.', listKey: 'statuses' },
+  { id: 'lost-reason', kind: 'LOST_REASON', label: 'Lost / not-interested reasons', hint: 'Reasons offered when a lead is marked lost.', listKey: 'lostReasons' },
+];
+const BASE_STAGE_OPTS = ['NEW', 'CONTACTED', 'DEMO_SCHEDULED', 'DEMO_DONE', 'NEGOTIATION', 'ENROLLED', 'LOST'];
+const BASE_STATUS_OPTS = [{ v: 'DNP', l: 'DNP (did not pick)' }, { v: 'FOLLOW_UP', l: 'Follow-up' }, { v: 'DEMO_BOOKED', l: 'Demo booked (books a demo)' }, { v: 'DEMO_OVER', l: 'Demo over' }, { v: 'NOT_INTERESTED', l: 'Not interested (closes lead)' }, { v: 'DISQUALIFIED', l: 'Disqualified (asks a reason)' }];
+const BASE_REASON_OPTS = [{ v: 'NOT_INTERESTED', l: 'Not interested' }, { v: 'INVALID_NUMBER', l: 'Invalid number' }, { v: 'UNREACHABLE', l: 'Unreachable' }, { v: 'DUPLICATE', l: 'Duplicate' }, { v: 'OTHER', l: 'Other' }];
+
+function ConfigPanel({ cfg, reload }: { cfg: CfgData; reload: () => Promise<void> }) {
+  const [section, setSection] = useState<CfgKindUrl>('scout');
+  const [all, setAll] = useState<CfgData>(EMPTY_CFG);
+  const [error, setError] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [editing, setEditing] = useState<CfgItem | 'new' | null>(null);
+  const [form, setForm] = useState({ label: '', base: '', color: '', targetStageKey: '', needsFollowUp: true, notesRequired: true });
+  const sec = CFG_SECTIONS.find((s) => s.id === section)!;
+  const items: CfgItem[] = (all[sec.listKey] as CfgItem[]) || [];
+  const hasColor = section === 'stage' || section === 'status' || section === 'scout';
+  const msg = (err: unknown, fallback: string) => (err as { response?: { data?: { message?: string } } }).response?.data?.message || fallback;
+
+  const loadAll = useCallback(async () => {
+    try { const r = await api.get('/api/sales/config', { params: { all: '1' } }); setAll(r.data.data); }
+    catch (err) { setError(msg(err, 'Failed to load config')); }
+  }, []);
+  useEffect(() => { loadAll(); }, [loadAll, cfg]);
+
+  const afterChange = async () => { await loadAll(); await reload(); };
+  const startNew = () => {
+    setError('');
+    setForm({ label: '', base: section === 'stage' ? 'CONTACTED' : section === 'status' ? 'FOLLOW_UP' : section === 'lost-reason' ? 'OTHER' : '', color: '', targetStageKey: 'CONTACTED', needsFollowUp: true, notesRequired: true });
+    setEditing('new');
+  };
+  const startEdit = (it: CfgItem) => {
+    setError('');
+    setForm({ label: it.label, base: it.base || '', color: it.color || '', targetStageKey: it.targetStageKey || '', needsFollowUp: !!it.needsFollowUp, notesRequired: it.notesRequired !== false });
+    setEditing(it);
+  };
+  const save = async () => {
+    if (!form.label.trim()) { setError('Give it a name'); return; }
+    setBusy(true); setError('');
+    try {
+      const body: Record<string, unknown> = { label: form.label.trim(), color: form.color || undefined };
+      if (editing && editing !== 'new') body.active = editing.active;
+      if (section === 'stage' || section === 'lost-reason') body.base = form.base;
+      if (section === 'status') Object.assign(body, { base: form.base, targetStageKey: form.targetStageKey, needsFollowUp: form.needsFollowUp, notesRequired: form.notesRequired });
+      if (editing === 'new') await api.post(`/api/sales/config/${section}`, body);
+      else if (editing) await api.put(`/api/sales/config/${section}/${editing.id}`, body);
+      setEditing(null);
+      await afterChange();
+    } catch (err) { setError(msg(err, 'Failed to save')); }
+    finally { setBusy(false); }
+  };
+  const toggle = async (it: CfgItem) => {
+    setBusy(true); setError('');
+    try {
+      const body: Record<string, unknown> = { label: it.label, active: !it.active, color: it.color || undefined };
+      if (section === 'stage' || section === 'lost-reason') body.base = it.base;
+      if (section === 'status') Object.assign(body, { base: it.base, targetStageKey: it.targetStageKey, needsFollowUp: it.needsFollowUp, notesRequired: it.notesRequired });
+      await api.put(`/api/sales/config/${section}/${it.id}`, body);
+      await afterChange();
+    } catch (err) { setError(msg(err, 'Failed to update')); }
+    finally { setBusy(false); }
+  };
+  const move = async (idx: number, dir: -1 | 1) => {
+    const a = items[idx]; const b = items[idx + dir];
+    if (!a || !b) return;
+    setBusy(true); setError('');
+    const full = (it: CfgItem, sortOrder: number) => ({ label: it.label, active: it.active, color: it.color || undefined, sortOrder, base: it.base || undefined, targetStageKey: it.targetStageKey || undefined, needsFollowUp: it.needsFollowUp, notesRequired: it.notesRequired });
+    try {
+      await api.put(`/api/sales/config/${section}/${a.id}`, full(a, b.sortOrder === a.sortOrder ? b.sortOrder + dir : b.sortOrder));
+      await api.put(`/api/sales/config/${section}/${b.id}`, full(b, a.sortOrder));
+      await afterChange();
+    } catch (err) { setError(msg(err, 'Failed to reorder')); }
+    finally { setBusy(false); }
+  };
+  const remove = async (it: CfgItem) => {
+    if (!window.confirm(`Delete "${it.label}"?`)) return;
+    setBusy(true); setError('');
+    try { await api.delete(`/api/sales/config/${section}/${it.id}`); await afterChange(); }
+    catch (err) { setError(msg(err, 'Failed to delete')); }
+    finally { setBusy(false); }
+  };
+
+  const inp = 'px-3 py-2 border rounded-lg text-sm bg-background';
+  const baseLabel = (it: CfgItem) => {
+    if (!it.base) return '';
+    if (section === 'status') return BASE_STATUS_OPTS.find((o) => o.v === it.base)?.l.split(' (')[0] ?? it.base;
+    if (section === 'lost-reason') return BASE_REASON_OPTS.find((o) => o.v === it.base)?.l ?? it.base;
+    return it.base.replace(/_/g, ' ');
+  };
+
+  return (
+    <div className="space-y-4">
+      <div className="flex flex-wrap gap-2">
+        {CFG_SECTIONS.map((s) => (
+          <button key={s.id} onClick={() => { setSection(s.id); setEditing(null); setError(''); }}
+            className={`px-3 py-1.5 rounded-full text-sm border ${section === s.id ? 'bg-blue-600 text-white border-blue-600' : 'hover:bg-muted/50'}`}>{s.label}</button>
+        ))}
+      </div>
+      <p className="text-sm text-muted-foreground">{sec.hint}</p>
+      {error && <div className="bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg px-4 py-3">{error}</div>}
+
+      <div className="flex justify-end">
+        <button onClick={startNew} className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700"><Plus className="w-4 h-4" /> Add {sec.label.replace(/s$/, '').toLowerCase()}</button>
+      </div>
+
+      {editing && (
+        <div className="border rounded-xl p-4 bg-muted/20 space-y-3">
+          <h3 className="font-semibold text-sm">{editing === 'new' ? 'Add new' : `Edit "${editing.label}"`}</h3>
+          <div className="flex flex-wrap items-end gap-3">
+            <label className="text-xs text-muted-foreground">Name *
+              <input className={`${inp} block mt-1 w-56`} value={form.label} onChange={(e) => setForm({ ...form, label: e.target.value })} autoFocus />
+            </label>
+            {section === 'stage' && (
+              <label className="text-xs text-muted-foreground">Counts as (for reports)
+                <select disabled={editing !== 'new' && editing.system} className={`${inp} block mt-1`} value={form.base} onChange={(e) => setForm({ ...form, base: e.target.value })}>
+                  {BASE_STAGE_OPTS.map((b) => <option key={b} value={b}>{b.replace(/_/g, ' ')}</option>)}
+                </select>
+              </label>
+            )}
+            {section === 'status' && (
+              <>
+                <label className="text-xs text-muted-foreground">Behaves like
+                  <select disabled={editing !== 'new' && editing.system} className={`${inp} block mt-1`} value={form.base} onChange={(e) => setForm({ ...form, base: e.target.value })}>
+                    {BASE_STATUS_OPTS.map((b) => <option key={b.v} value={b.v}>{b.l}</option>)}
+                  </select>
+                </label>
+                <label className="text-xs text-muted-foreground">Moves lead to stage
+                  <select className={`${inp} block mt-1`} value={form.targetStageKey} onChange={(e) => setForm({ ...form, targetStageKey: e.target.value })}>
+                    {(all.stages.filter((s) => s.active)).map((s) => <option key={s.key} value={s.key}>{s.label}</option>)}
+                  </select>
+                </label>
+                <label className="text-xs text-muted-foreground flex items-center gap-2 pb-2"><input type="checkbox" checked={form.needsFollowUp} onChange={(e) => setForm({ ...form, needsFollowUp: e.target.checked })} /> Ask for follow-up date</label>
+                <label className="text-xs text-muted-foreground flex items-center gap-2 pb-2"><input type="checkbox" checked={form.notesRequired} onChange={(e) => setForm({ ...form, notesRequired: e.target.checked })} /> Notes required</label>
+              </>
+            )}
+            {section === 'lost-reason' && (
+              <label className="text-xs text-muted-foreground">Counts as (for reports)
+                <select disabled={editing !== 'new' && editing.system} className={`${inp} block mt-1`} value={form.base} onChange={(e) => setForm({ ...form, base: e.target.value })}>
+                  {BASE_REASON_OPTS.map((b) => <option key={b.v} value={b.v}>{b.l}</option>)}
+                </select>
+              </label>
+            )}
+            {hasColor && (
+              <label className="text-xs text-muted-foreground">Colour
+                <select className={`${inp} block mt-1`} value={form.color} onChange={(e) => setForm({ ...form, color: e.target.value })}>
+                  <option value="">Default</option>
+                  {(all.colors.length ? all.colors : Object.keys(CFG_COLOR)).map((c) => <option key={c} value={c}>{c}</option>)}
+                </select>
+              </label>
+            )}
+            <button onClick={save} disabled={busy} className="px-4 py-2 text-sm rounded-lg bg-blue-600 text-white disabled:opacity-50">{busy ? 'Saving…' : 'Save'}</button>
+            <button onClick={() => setEditing(null)} className="px-4 py-2 text-sm rounded-lg border">Cancel</button>
+          </div>
+        </div>
+      )}
+
+      <div className="bg-card border rounded-xl overflow-x-auto">
+        <table className="w-full text-sm">
+          <thead className="bg-muted/50 text-left text-xs uppercase text-muted-foreground">
+            <tr>
+              <th className="px-3 py-3 w-20">Order</th><th className="px-3 py-3">Name</th>
+              {(section === 'stage' || section === 'status' || section === 'lost-reason') && <th className="px-3 py-3">Counts as</th>}
+              {section === 'status' && <th className="px-3 py-3">Moves to stage</th>}
+              <th className="px-3 py-3">Type</th><th className="px-3 py-3">Active</th><th className="px-3 py-3"></th>
+            </tr>
+          </thead>
+          <tbody className="divide-y">
+            {items.length === 0 ? (
+              <tr><td colSpan={7} className="px-4 py-8 text-center text-muted-foreground">Nothing here yet — add the first one.</td></tr>
+            ) : items.map((it, i) => (
+              <tr key={it.id} className={it.active ? '' : 'opacity-60'}>
+                <td className="px-3 py-2 whitespace-nowrap">
+                  <button disabled={busy || i === 0} onClick={() => move(i, -1)} className="px-1 text-muted-foreground disabled:opacity-30">▲</button>
+                  <button disabled={busy || i === items.length - 1} onClick={() => move(i, 1)} className="px-1 text-muted-foreground disabled:opacity-30">▼</button>
+                </td>
+                <td className="px-3 py-2 font-medium">
+                  <span className={`text-xs rounded-full px-2 py-1 ${(it.color && CFG_COLOR[it.color]) || 'bg-slate-100 text-slate-700'}`}>{it.label}</span>
+                </td>
+                {(section === 'stage' || section === 'status' || section === 'lost-reason') && <td className="px-3 py-2 text-xs text-muted-foreground">{baseLabel(it)}</td>}
+                {section === 'status' && <td className="px-3 py-2 text-xs text-muted-foreground">{it.targetStageKey ? (all.stages.find((s) => s.key === it.targetStageKey)?.label ?? it.targetStageKey) : '—'}</td>}
+                <td className="px-3 py-2 text-xs text-muted-foreground">{it.system ? 'Built-in' : 'Custom'}</td>
+                <td className="px-3 py-2">
+                  <label className="inline-flex items-center gap-2 text-xs">
+                    <input type="checkbox" checked={it.active} disabled={busy || (section === 'stage' && ['NEW', 'ENROLLED', 'LOST'].includes(it.key))} onChange={() => toggle(it)} />
+                    {it.active ? 'On' : 'Off'}
+                  </label>
+                </td>
+                <td className="px-3 py-2 whitespace-nowrap text-right">
+                  <button onClick={() => startEdit(it)} className="text-xs text-blue-600 hover:underline mr-3">Edit</button>
+                  {!it.system && <button onClick={() => remove(it)} className="text-xs text-red-600 hover:underline">Delete</button>}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <p className="text-xs text-muted-foreground">Items already used on leads can't be deleted — switch them off to hide them from dropdowns while keeping history and reports intact.</p>
+    </div>
+  );
+}
+
+// ── Transcripts (free Whisper: calls + online demos, Tamil / English) ─────────
+interface TranscriptData {
+  id: string; status: 'PENDING' | 'PROCESSING' | 'DONE' | 'FAILED'; text: string | null; language: string | null; durationSec: number | null;
+  segments: { start: number; end: number; text: string }[] | null; summary: string | null; actionItems: string[] | null; topics: string[] | null; error: string | null;
+}
+const LANG_NAME: Record<string, string> = { ta: 'Tamil', en: 'English', hi: 'Hindi', te: 'Telugu', ml: 'Malayalam', kn: 'Kannada' };
+const clock = (s: number) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`;
+
+function TranscriptButton({ type, id, label = 'Transcript' }: { type: 'CALL' | 'DEMO'; id: string; label?: string }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <>
+      <button onClick={() => setOpen(true)} className="text-xs font-medium text-purple-600 hover:underline inline-flex items-center gap-1"><MessageCircle className="w-3 h-3" /> {label}</button>
+      {open && <TranscriptModal type={type} id={id} onClose={() => setOpen(false)} />}
+    </>
+  );
+}
+
+function TranscriptModal({ type, id, onClose }: { type: 'CALL' | 'DEMO'; id: string; onClose: () => void }) {
+  const [t, setT] = useState<TranscriptData | null>(null);
+  const [meta, setMeta] = useState<{ enabled: boolean; hasAudio: boolean } | null>(null);
+  const [error, setError] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [showSegs, setShowSegs] = useState(false);
+  const load = useCallback(async () => {
+    try {
+      const r = await api.get(`/api/sales/transcripts/${type}/${id}`);
+      setT(r.data.data); setMeta(r.data.meta);
+    } catch (err: unknown) { setError((err as { response?: { data?: { message?: string } } }).response?.data?.message || 'Failed to load transcript'); }
+  }, [type, id]);
+  useEffect(() => { load(); }, [load]);
+  useEffect(() => {
+    if (!t || (t.status !== 'PENDING' && t.status !== 'PROCESSING')) return;
+    const h = setInterval(load, 8000);
+    return () => clearInterval(h);
+  }, [t, load]);
+  const run = async () => {
+    setBusy(true); setError('');
+    try { await api.post(`/api/sales/transcripts/${type}/${id}/run`); await load(); }
+    catch (err: unknown) { setError((err as { response?: { data?: { message?: string } } }).response?.data?.message || 'Could not start transcription'); }
+    finally { setBusy(false); }
+  };
+  return (
+    <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-[60] p-4">
+      <div className="bg-white rounded-xl w-full max-w-2xl max-h-[85vh] overflow-y-auto p-6 space-y-4">
+        <div className="flex items-center justify-between">
+          <h2 className="font-semibold text-lg">{type === 'DEMO' ? 'Demo' : 'Call'} transcript</h2>
+          <button onClick={onClose}><X className="w-4 h-4" /></button>
+        </div>
+        {error && <div className="bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg px-4 py-3">{error}</div>}
+        {!t && meta && (
+          <div className="space-y-3 text-sm">
+            {!meta.enabled ? <p className="text-muted-foreground">Transcription isn't switched on yet. An admin needs to start the Whisper service and set <code>WHISPER_URL</code> on the server.</p>
+              : !meta.hasAudio ? <p className="text-muted-foreground">There is no recording for this {type === 'DEMO' ? 'demo' : 'call'} yet, so there is nothing to transcribe.</p>
+              : <><p className="text-muted-foreground">Not transcribed yet.</p><button onClick={run} disabled={busy} className="px-4 py-2 text-sm rounded-lg bg-purple-600 text-white disabled:opacity-50">{busy ? 'Queuing…' : 'Transcribe now'}</button></>}
+          </div>
+        )}
+        {t && (t.status === 'PENDING' || t.status === 'PROCESSING') && (
+          <p className="text-sm text-muted-foreground">{t.status === 'PENDING' ? 'Waiting in the queue…' : 'Transcribing…'} This page refreshes by itself; long recordings take a few minutes.</p>
+        )}
+        {t?.status === 'FAILED' && (
+          <div className="space-y-2 text-sm">
+            <p className="text-red-600">Transcription failed{t.error ? `: ${t.error}` : '.'}</p>
+            <button onClick={run} disabled={busy} className="px-4 py-2 text-sm rounded-lg bg-purple-600 text-white disabled:opacity-50">Try again</button>
+          </div>
+        )}
+        {t?.status === 'DONE' && (
+          <div className="space-y-4">
+            <p className="text-xs text-muted-foreground">
+              {t.language ? `${LANG_NAME[t.language] || t.language} · ` : ''}{t.durationSec ? `${clock(t.durationSec)} min` : ''}
+            </p>
+            {t.summary && (
+              <div className="rounded-lg border bg-purple-50/50 p-3 space-y-2">
+                <p className="text-xs font-semibold text-purple-700">AI summary</p>
+                <p className="text-sm">{t.summary}</p>
+                {t.actionItems && t.actionItems.length > 0 && (
+                  <div>
+                    <p className="text-xs font-semibold text-purple-700 mt-2">Action items</p>
+                    <ul className="list-disc pl-5 text-sm space-y-0.5">{t.actionItems.map((a, i) => <li key={i}>{a}</li>)}</ul>
+                  </div>
+                )}
+                {t.topics && t.topics.length > 0 && <div className="flex flex-wrap gap-1 pt-1">{t.topics.map((x, i) => <span key={i} className="text-[11px] bg-white border rounded-full px-2 py-0.5">{x}</span>)}</div>}
+              </div>
+            )}
+            <div>
+              <div className="flex items-center justify-between mb-1">
+                <p className="text-xs font-semibold text-muted-foreground">Transcript</p>
+                <div className="flex gap-3 text-xs">
+                  {t.segments && t.segments.length > 0 && <button onClick={() => setShowSegs(!showSegs)} className="text-blue-600 hover:underline">{showSegs ? 'Plain text' : 'With timestamps'}</button>}
+                  <button onClick={() => navigator.clipboard?.writeText(t.text || '')} className="text-blue-600 hover:underline">Copy</button>
+                  <button onClick={run} disabled={busy} className="text-muted-foreground hover:underline">Re-run</button>
+                </div>
+              </div>
+              {showSegs && t.segments ? (
+                <div className="space-y-1 text-sm">{t.segments.map((s, i) => <p key={i}><span className="text-xs text-muted-foreground font-mono mr-2">{clock(s.start)}</span>{s.text}</p>)}</div>
+              ) : <p className="text-sm whitespace-pre-wrap">{t.text}</p>}
+            </div>
+            {!t.summary && <p className="text-xs text-muted-foreground">Summaries and action items appear here once a free Gemini API key is added on the server.</p>}
+          </div>
+        )}
+        {!t && !meta && !error && <p className="text-sm text-muted-foreground">Loading…</p>}
+      </div>
+    </div>
+  );
+}
+
+interface TranscriptRow {
+  id: string; sourceType: 'CALL' | 'DEMO'; sourceId: string; createdAt: string; durationSec: number | null; language: string | null; summary: string | null;
+  topics: string[] | null; snippet: string; lead: { id: string; name: string; phone: string } | null; owner: string | null;
+}
+/** Search everything that was said on calls and demos. */
+function TranscriptsPanel({ onOpenLead }: { onOpenLead: (id: string) => void }) {
+  const [q, setQ] = useState('');
+  const [type, setType] = useState('');
+  const [from, setFrom] = useState('');
+  const [to, setTo] = useState('');
+  const [page, setPage] = useState(1);
+  const [rows, setRows] = useState<TranscriptRow[]>([]);
+  const [meta, setMeta] = useState<{ total: number; pages: number } | null>(null);
+  const [status, setStatus] = useState<{ enabled: boolean; summaries: boolean; pending: number; processing: number; failed: number } | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [open, setOpen] = useState<TranscriptRow | null>(null);
+  const run = useCallback(async () => {
+    setLoading(true);
+    try {
+      const params: Record<string, string> = { page: String(page) };
+      if (q.trim()) params.q = q.trim(); if (type) params.type = type; if (from) params.from = from; if (to) params.to = to;
+      const [r, s] = await Promise.all([api.get('/api/sales/transcripts', { params }), api.get('/api/sales/transcripts/status')]);
+      setRows(r.data.data); setMeta(r.data.meta); setStatus(s.data.data);
+    } catch { setRows([]); } finally { setLoading(false); }
+  }, [q, type, from, to, page]);
+  useEffect(() => { const h = setTimeout(run, 300); return () => clearTimeout(h); }, [run]);
+  useEffect(() => { setPage(1); }, [q, type, from, to]);
+  const hi = (text: string) => {
+    const k = q.trim(); if (!k) return text;
+    const i = text.toLowerCase().indexOf(k.toLowerCase()); if (i < 0) return text;
+    return <>{text.slice(0, i)}<mark className="bg-yellow-200">{text.slice(i, i + k.length)}</mark>{text.slice(i + k.length)}</>;
+  };
+  return (
+    <div className="space-y-4">
+      {status && !status.enabled && (
+        <div className="bg-amber-50 border border-amber-200 text-amber-800 text-sm rounded-lg px-4 py-3">Transcription is not switched on yet — an admin must start the Whisper service and set WHISPER_URL on the server (see whisper-service/README.md).</div>
+      )}
+      {status?.enabled && (status.pending + status.processing > 0 || status.failed > 0) && (
+        <p className="text-xs text-muted-foreground">{status.pending + status.processing} in queue{status.failed ? ` · ${status.failed} failed` : ''}</p>
+      )}
+      <div className="flex flex-wrap items-center gap-3">
+        <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search what was said (fees, placement, வேலை…)" className="px-3 py-2 border rounded-lg text-sm w-80" />
+        <select value={type} onChange={(e) => setType(e.target.value)} className="px-3 py-2 border rounded-lg text-sm"><option value="">Calls + demos</option><option value="CALL">Calls</option><option value="DEMO">Demos</option></select>
+        <label className="text-xs text-muted-foreground flex items-center gap-1">From<input type="date" value={from} onChange={(e) => setFrom(e.target.value)} className="px-2 py-1.5 border rounded-lg text-sm" /></label>
+        <label className="text-xs text-muted-foreground flex items-center gap-1">To<input type="date" value={to} onChange={(e) => setTo(e.target.value)} className="px-2 py-1.5 border rounded-lg text-sm" /></label>
+      </div>
+      <div className="space-y-2">
+        {loading && rows.length === 0 ? <p className="text-sm text-muted-foreground">Loading…</p>
+          : rows.length === 0 ? <p className="text-sm text-muted-foreground">No transcripts found.</p>
+          : rows.map((r) => (
+            <div key={r.id} className="border rounded-xl p-3 bg-card space-y-1">
+              <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground">
+                <span>
+                  <span className="font-medium text-foreground">{r.sourceType === 'DEMO' ? 'Demo' : 'Call'}</span>
+                  {r.lead && <> · <button onClick={() => onOpenLead(r.lead!.id)} className="text-blue-600 hover:underline">{r.lead.name}</button></>}
+                  {r.owner && <> · {r.owner}</>}{r.language ? ` · ${LANG_NAME[r.language] || r.language}` : ''}{r.durationSec ? ` · ${clock(r.durationSec)}` : ''}
+                </span>
+                <span>{formatDateTime(r.createdAt)}</span>
+              </div>
+              {r.summary && <p className="text-sm">{r.summary}</p>}
+              <p className="text-xs text-muted-foreground">{hi(r.snippet)}</p>
+              <div className="flex items-center gap-3 pt-1">
+                {r.topics && r.topics.length > 0 && <div className="flex flex-wrap gap-1">{r.topics.map((x, i) => <span key={i} className="text-[11px] bg-muted/50 rounded-full px-2 py-0.5">{x}</span>)}</div>}
+                <button onClick={() => setOpen(r)} className="ml-auto text-xs font-medium text-purple-600 hover:underline">Open transcript</button>
+              </div>
+            </div>
+          ))}
+      </div>
+      {meta && meta.pages > 1 && (
+        <div className="flex items-center justify-end gap-3 text-sm">
+          <button disabled={page <= 1} onClick={() => setPage(page - 1)} className="px-3 py-1 border rounded-lg disabled:opacity-40">Prev</button>
+          <span className="text-xs text-muted-foreground">Page {page} of {meta.pages} · {meta.total} results</span>
+          <button disabled={page >= meta.pages} onClick={() => setPage(page + 1)} className="px-3 py-1 border rounded-lg disabled:opacity-40">Next</button>
+        </div>
+      )}
+      {open && <TranscriptModal type={open.sourceType} id={open.sourceId} onClose={() => setOpen(null)} />}
     </div>
   );
 }
