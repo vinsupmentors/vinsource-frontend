@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { Calendar as CalIcon, ChevronLeft, ChevronRight, X } from 'lucide-react';
 
 /**
@@ -23,12 +24,28 @@ export default function DateTimeField({
   const [draft, setDraft] = useState<Date>(base);
   const [view, setView] = useState<Date>(new Date(base.getFullYear(), base.getMonth(), 1));
   const wrap = useRef<HTMLDivElement>(null);
+  const pop = useRef<HTMLDivElement>(null);
+  const [pos, setPos] = useState<{ top: number; left: number; maxH: number }>({ top: 0, left: 0, maxH: 400 });
+  // Float above everything (portal + fixed) so a modal's edge or the screen bottom never clips the OK button.
+  useLayoutEffect(() => {
+    if (!open || !wrap.current) return;
+    const place = () => {
+      const r = wrap.current!.getBoundingClientRect();
+      const W = 300, H = Math.min(pop.current?.offsetHeight || 400, window.innerHeight - 16);
+      const below = window.innerHeight - r.bottom - 8, above = r.top - 8;
+      const top = below >= H ? r.bottom + 4 : above >= H ? r.top - H - 4 : Math.max(8, window.innerHeight - H - 8);
+      setPos({ top, left: Math.max(8, Math.min(r.left, window.innerWidth - W - 8)), maxH: window.innerHeight - 16 });
+    };
+    place();
+    window.addEventListener('resize', place); window.addEventListener('scroll', place, true);
+    return () => { window.removeEventListener('resize', place); window.removeEventListener('scroll', place, true); };
+  }, [open, view]);
 
   useEffect(() => {
     if (!open) return;
     const d = parse(value) ?? (() => { const n = new Date(); n.setMinutes(Math.ceil(n.getMinutes() / 5) * 5, 0, 0); return n; })();
     setDraft(d); setView(new Date(d.getFullYear(), d.getMonth(), 1));
-    const h = (e: MouseEvent) => { if (wrap.current && !wrap.current.contains(e.target as Node)) setOpen(false); };
+    const h = (e: MouseEvent) => { const t = e.target as Node; if (wrap.current && !wrap.current.contains(t) && !pop.current?.contains(t)) setOpen(false); };
     document.addEventListener('mousedown', h);
     return () => document.removeEventListener('mousedown', h);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -58,8 +75,8 @@ export default function DateTimeField({
         <CalIcon className="w-4 h-4 text-muted-foreground" />
         <span className={value ? '' : 'text-muted-foreground'}>{value ? formatDateTimeValue(value) : placeholder}</span>
       </button>
-      {open && (
-        <div className="absolute z-[70] mt-1 w-[300px] bg-white border rounded-xl shadow-xl p-3 space-y-3 left-0">
+      {open && createPortal(
+        <div ref={pop} style={{ position: 'fixed', top: pos.top, left: pos.left, maxHeight: pos.maxH }} className="z-[1000] w-[300px] overflow-y-auto bg-white text-gray-900 border rounded-xl shadow-xl p-3 space-y-3">
           <div className="flex items-center justify-between">
             <button type="button" onClick={() => setView(new Date(view.getFullYear(), view.getMonth() - 1, 1))} className="p-1 rounded hover:bg-muted"><ChevronLeft className="w-4 h-4" /></button>
             <span className="text-sm font-semibold">{view.toLocaleDateString('en-IN', { month: 'long', year: 'numeric' })}</span>
@@ -107,7 +124,8 @@ export default function DateTimeField({
               <button type="button" disabled={tooEarly} onClick={() => { onChange(toValue(draft)); setOpen(false); }} className="px-4 py-1.5 text-sm rounded-lg bg-blue-600 text-white font-medium disabled:opacity-50">OK</button>
             </div>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
     </div>
   );

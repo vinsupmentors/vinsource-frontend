@@ -1641,6 +1641,13 @@ function LeadDetailModal({ lead, employees, canEdit, isAdmin, onClose, onChanged
     catch (err) { fail(err, 'Failed'); }
   };
 
+  const [stageSaving, setStageSaving] = useState(false);
+  const changeStage = async (key: string) => {
+    setStageSaving(true);
+    try { await api.put(`/api/sales/leads/${lead.id}`, (STATUSES as string[]).includes(key) ? { status: key } : { stageKey: key }); onChanged(); }
+    catch (err: unknown) { setGlobalError((err as { response?: { data?: { message?: string } } }).response?.data?.message || 'Failed to change stage'); }
+    finally { setStageSaving(false); }
+  };
   const reassign = async (assignedToId: string) => {
     setReassignSaving(true);
     try {
@@ -1714,24 +1721,60 @@ function LeadDetailModal({ lead, employees, canEdit, isAdmin, onClose, onChanged
   return (
     <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
       <div className="bg-white rounded-xl w-full max-w-3xl max-h-[90vh] overflow-y-auto p-6 space-y-6">
-        <div className="flex items-start justify-between">
-          <div>
-            <h2 className="font-semibold text-lg">{lead.name}</h2>
-            <div className="flex flex-wrap items-center gap-3 mt-1 text-xs text-muted-foreground">
-              <span className="flex items-center gap-1"><Phone className="w-3 h-3" /> {lead.phone}</span>
-              {lead.email && <span className="flex items-center gap-1"><Mail className="w-3 h-3" /> {lead.email}</span>}
-              {lead.source && <span>Source: {lead.source}</span>}
-              {lead.courseInterest && <span>Interested: {lead.courseInterest}</span>}
-              <span>Lead Age: {leadAgeLabel(lead.createdAt)}</span>
+        <div className="space-y-4">
+          <div className="flex items-start justify-between gap-3">
+            <div className="min-w-0">
+              <div className="flex flex-wrap items-center gap-2">
+                <h2 className="font-semibold text-xl truncate">{lead.name}</h2>
+                <span className={`text-xs font-semibold rounded-full px-2.5 py-1 ${stageChipClass(lead.stageKey || lead.status)}`}>{stageLabel(lead.stageKey || lead.status)}</span>
+                {lead.status === 'LOST' && lead.lostReason && <span className="text-xs text-muted-foreground">({LOST_REASON_LABEL[lead.lostReason]})</span>}
+              </div>
+              <div className="flex flex-wrap items-center gap-x-4 gap-y-1 mt-1.5 text-xs text-muted-foreground">
+                <span className="flex items-center gap-1"><Phone className="w-3 h-3" /> {lead.phone}</span>
+                {lead.email && <span className="flex items-center gap-1"><Mail className="w-3 h-3" /> {lead.email}</span>}
+                {lead.source && <span>Source: {lead.source}</span>}
+                {lead.courseInterest && <span>Course: {lead.courseInterest}</span>}
+                <span>Age: {leadAgeLabel(lead.createdAt)}</span>
+                {!isAdmin && lead.assignedTo && <span>Owner: {lead.assignedTo.firstName} {lead.assignedTo.lastName}</span>}
+              </div>
             </div>
+            <button onClick={onClose}><X className="w-4 h-4" /></button>
           </div>
-          <button onClick={onClose}><X className="w-4 h-4" /></button>
-        </div>
 
-        <div className="flex flex-wrap items-center gap-2">
-          <a href={`tel:${lead.phone.replace(/\s+/g, '')}`} className="flex items-center gap-1.5 px-3 py-1.5 border rounded-lg text-sm hover:bg-muted/50"><Phone className="w-3.5 h-3.5" /> Call</a>
-          {canEdit && <button onClick={() => setMsgChannel('WHATSAPP')} className="flex items-center gap-1.5 px-3 py-1.5 border rounded-lg text-sm text-green-700 border-green-300 hover:bg-green-50"><MessageCircle className="w-3.5 h-3.5" /> WhatsApp</button>}
-          {canEdit && <button onClick={() => setMsgChannel('EMAIL')} disabled={!lead.email} title={lead.email ? '' : 'No email on this lead'} className="flex items-center gap-1.5 px-3 py-1.5 border rounded-lg text-sm hover:bg-muted/50 disabled:opacity-40"><Mail className="w-3.5 h-3.5" /> Email</button>}
+          {/* Pipeline — where the lead is right now; click a step to move it */}
+          {(() => {
+            const cur = lead.stageKey || lead.status;
+            const steps = stageOptionsLive(cur).filter((o) => stageBase(o.value) !== 'LOST' || o.value === cur);
+            const idx = steps.findIndex((o) => o.value === cur);
+            return (
+              <div className="flex flex-wrap gap-1">
+                {steps.map((o, i) => {
+                  const active = o.value === cur, passed = idx >= 0 && i < idx;
+                  return (
+                    <button key={o.value} type="button" disabled={!canEdit || active || stageSaving}
+                      onClick={() => changeStage(o.value)}
+                      className={`px-3 py-1 text-xs rounded-full border transition-colors ${active ? 'bg-blue-600 text-white border-blue-600 font-semibold' : passed ? 'bg-blue-50 text-blue-700 border-blue-200' : 'bg-white text-muted-foreground hover:bg-muted'} disabled:cursor-default`}>
+                      {o.label}
+                    </button>
+                  );
+                })}
+              </div>
+            );
+          })()}
+
+          <div className="flex flex-wrap items-center gap-2">
+            <a href={`tel:${lead.phone.replace(/\s+/g, '')}`} className="flex items-center gap-1.5 px-3 py-1.5 border rounded-lg text-sm hover:bg-muted/50"><Phone className="w-3.5 h-3.5" /> Call</a>
+            {canEdit && <button onClick={() => setMsgChannel('WHATSAPP')} className="flex items-center gap-1.5 px-3 py-1.5 border rounded-lg text-sm text-green-700 border-green-300 hover:bg-green-50"><MessageCircle className="w-3.5 h-3.5" /> WhatsApp</button>}
+            {canEdit && <button onClick={() => setMsgChannel('EMAIL')} disabled={!lead.email} title={lead.email ? '' : 'No email on this lead'} className="flex items-center gap-1.5 px-3 py-1.5 border rounded-lg text-sm hover:bg-muted/50 disabled:opacity-40"><Mail className="w-3.5 h-3.5" /> Email</button>}
+            {isAdmin && (
+              <label className="ml-auto flex items-center gap-2 text-xs text-muted-foreground">Owner
+                <select value={lead.assignedTo?.id || ''} disabled={reassignSaving} onChange={(e) => reassign(e.target.value)} className="text-sm px-2 py-1 border rounded-lg text-foreground">
+                  <option value="">Unassigned (My Base)</option>
+                  {employees.map((e) => <option key={e.id} value={e.id}>{e.firstName} {e.lastName}</option>)}
+                </select>
+              </label>
+            )}
+          </div>
         </div>
         {msgChannel && (
           <SendMessageModal
@@ -1740,28 +1783,6 @@ function LeadDetailModal({ lead, employees, canEdit, isAdmin, onClose, onChanged
           />
         )}
 
-        <div className="flex flex-wrap items-center gap-4">
-          <span className={`text-xs font-medium rounded-full px-2 py-1 ${STATUS_COLOR[lead.status]}`}>{lead.status.replace(/_/g, ' ')}</span>
-          {lead.status === 'LOST' && lead.lostReason && (
-            <span className="text-xs text-muted-foreground">({LOST_REASON_LABEL[lead.lostReason]})</span>
-          )}
-          <div className="flex items-center gap-2 text-sm">
-            <span className="text-muted-foreground">Assigned to:</span>
-            {canEdit ? (
-              <select
-                value={lead.assignedTo?.id || ''}
-                disabled={reassignSaving}
-                onChange={(e) => reassign(e.target.value)}
-                className="text-xs px-2 py-1 border rounded-lg"
-              >
-                <option value="">Unassigned</option>
-                {employees.map((e) => <option key={e.id} value={e.id}>{e.firstName} {e.lastName}</option>)}
-              </select>
-            ) : (
-              <span>{lead.assignedTo ? `${lead.assignedTo.firstName} ${lead.assignedTo.lastName}` : '—'}</span>
-            )}
-          </div>
-        </div>
 
         {localError && <div className="bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg px-3 py-2">{localError}</div>}
 
@@ -1898,7 +1919,7 @@ function LeadDetailModal({ lead, employees, canEdit, isAdmin, onClose, onChanged
             {callActivityStatus && (
               <div className="space-y-3">
                 {/* Which call is this about? Duration + recording always come from the call log. */}
-                {callActivityType === 'CALL' && (
+                {callActivityType === 'CALL' && linkableCalls.length > 0 && (
                   <div className="rounded-lg border bg-white p-3 space-y-1.5">
                     <label className="text-xs font-medium text-muted-foreground">Which call is this about?</label>
                     <select className="w-full px-2 py-1.5 border rounded-lg text-sm" value={effectiveCallPick} onChange={(e) => setCallPick(e.target.value)}>
@@ -1910,7 +1931,7 @@ function LeadDetailModal({ lead, employees, canEdit, isAdmin, onClose, onChanged
                     {pickedCall ? (
                       <p className="text-xs text-green-700">You spoke for <b>{callDurLabel(pickedCall.durationSeconds)}</b> — taken from the call log, nothing to type.</p>
                     ) : (
-                      <p className="text-xs text-muted-foreground">{linkableCalls.length ? 'No call selected: the lead and its history update, but nothing is added to the Call Log and it does not count as a contact.' : 'No tracked call found for this lead in the last 3 days. You can still update the status — it will not appear in the Call Log.'}</p>
+                      <p className="text-xs text-muted-foreground">No call selected: the lead and its history update, but nothing is added to the Call Log.</p>
                     )}
                   </div>
                 )}
