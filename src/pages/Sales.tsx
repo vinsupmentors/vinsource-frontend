@@ -1858,27 +1858,6 @@ function LeadDetailModal({ lead, employees, canEdit, isAdmin, onClose, onChanged
             <button onClick={onClose}><X className="w-4 h-4" /></button>
           </div>
 
-          {/* Pipeline — where the lead is right now; click a step to move it */}
-          {(() => {
-            const cur = lead.stageKey || lead.status;
-            const steps = stageOptionsLive(cur);
-            const idx = steps.findIndex((o) => o.value === cur);
-            return (
-              <div className="flex flex-wrap gap-1">
-                {steps.map((o, i) => {
-                  const active = o.value === cur, passed = idx >= 0 && i < idx;
-                  return (
-                    <button key={o.value} type="button" disabled={!canEdit || active || stageSaving}
-                      onClick={() => changeStage(o.value)}
-                      className={`px-3 py-1 text-xs rounded-full border transition-colors ${active ? 'bg-blue-600 text-white border-blue-600 font-semibold' : passed ? 'bg-blue-50 text-blue-700 border-blue-200' : 'bg-white text-muted-foreground hover:bg-muted'} disabled:cursor-default`}>
-                      {o.label}
-                    </button>
-                  );
-                })}
-              </div>
-            );
-          })()}
-
           <div className="flex flex-wrap items-center gap-2">
             <a href={`tel:${lead.phone.replace(/\s+/g, '')}`} className="flex items-center gap-1.5 px-3 py-1.5 border rounded-lg text-sm hover:bg-muted/50"><Phone className="w-3.5 h-3.5" /> Call</a>
             {canEdit && <button onClick={() => setMsgChannel('WHATSAPP')} className="flex items-center gap-1.5 px-3 py-1.5 border rounded-lg text-sm text-green-700 border-green-300 hover:bg-green-50"><MessageCircle className="w-3.5 h-3.5" /> WhatsApp</button>}
@@ -2097,15 +2076,6 @@ function LeadDetailModal({ lead, employees, canEdit, isAdmin, onClose, onChanged
                   </select>
                 )}
 
-                <label className="text-xs text-muted-foreground flex flex-wrap items-center gap-2">
-                  Lead stage
-                  <select className="px-2 py-1.5 border rounded-lg text-sm bg-white" value={callStage} onChange={(e) => setCallStage(e.target.value)} disabled={statusGoesToLost(callActivityStatus)}>
-                    <option value="">Auto → {statusStageLabel(callActivityStatus)}</option>
-                    {!statusGoesToLost(callActivityStatus) && stageOptionsLive().map((s) => <option key={s.value} value={s.value}>{s.label}</option>)}
-                  </select>
-                  <span className="text-[11px]">Follows the status; change only if needed.</span>
-                </label>
-
                 {notesNeeded(callActivityStatus) ? (
                   <textarea className="w-full px-3 py-2 border rounded-lg text-sm bg-white" rows={2} value={callNotes} onChange={(e) => setCallNotes(e.target.value)}
                     placeholder={callActivityType === 'MEETING' ? 'What was discussed in the meeting? *' : 'What was discussed? *'} />
@@ -2113,7 +2083,13 @@ function LeadDetailModal({ lead, employees, canEdit, isAdmin, onClose, onChanged
                   <p className="text-xs text-muted-foreground italic">No notes needed for this status.</p>
                 )}
 
-                <div className="flex justify-end">
+                <div className="flex flex-wrap items-center justify-end gap-3">
+                  <label className="flex items-center gap-2 text-xs text-muted-foreground">Update lead stage
+                    <select className="px-2 py-2 border rounded-lg text-sm bg-white text-foreground min-w-[190px]" value={callStage} onChange={(e) => setCallStage(e.target.value)} disabled={statusGoesToLost(callActivityStatus)}>
+                      <option value="">Auto → {statusStageLabel(callActivityStatus)}</option>
+                      {!statusGoesToLost(callActivityStatus) && stageOptionsLive().map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+                    </select>
+                  </label>
                   <button onClick={submitCall} disabled={savingCall} className="px-4 py-2 text-sm rounded-lg bg-blue-600 text-white disabled:opacity-50">
                     {savingCall ? 'Saving…' : 'Save update'}
                   </button>
