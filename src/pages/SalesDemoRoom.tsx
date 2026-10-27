@@ -53,7 +53,7 @@ export default function SalesDemoRoomPage() {
   };
 
   const endDemo = async () => {
-    if (!outcome) { setEndErr('Pick how the demo went'); return; }
+    if (!outcome) { setEndErr('Pick the lead stage'); return; }
     setEnding(true); setEndErr('');
     try {
       await api.post(`/api/sales/demos/${id}/room/end`, { outcome, feedback: feedback.trim() || undefined, followUpAt: followUp ? new Date(followUp).toISOString() : undefined });
@@ -97,17 +97,17 @@ export default function SalesDemoRoomPage() {
       {endOpen && (
         <div className="fixed inset-0 z-[90] bg-black/60 flex items-center justify-center p-4">
           <div className="bg-white text-gray-900 rounded-2xl w-full max-w-md p-5 space-y-3">
-            <h3 className="font-semibold text-lg">End demo</h3>
-            <p className="text-xs text-gray-500">Ends the room for everyone, marks the demo conducted and moves the lead based on how it went.</p>
+            <h3 className="font-semibold text-lg">End demo — update lead stage</h3>
+            <p className="text-xs text-gray-500">Ends the room for everyone and marks the demo conducted. Pick the lead stage it moves to.</p>
             {endErr && <p className="text-sm text-red-700 bg-red-50 rounded-lg px-3 py-2">{endErr}</p>}
             <div className="grid grid-cols-2 gap-2">
-              {([['INTERESTED', 'Interested', '→ Negotiation'], ['FIFTY_FIFTY', '50-50', '→ Negotiation + follow-up'], ['NEED_FOLLOWUP', 'Needs follow-up', '→ Demo done + follow-up'], ['NOT_INTERESTED', 'Not interested', '→ Lost']] as const).map(([v, l, h]) => (
+              {([['INTERESTED', 'Demo Over - Positive', 'Lead stage'], ['NEED_FOLLOWUP', 'Demo Over - Need Follow up', 'Lead stage + follow-up task'], ['NOT_INTERESTED', 'Not Interested', 'Lead stage']] as const).map(([v, l, h]) => (
                 <button key={v} type="button" onClick={() => setOutcome(v)} className={`text-left border rounded-lg px-3 py-2 text-sm ${outcome === v ? 'border-blue-600 bg-blue-50' : 'hover:bg-gray-50'}`}>
                   <span className="font-medium block">{l}</span><span className="text-[11px] text-gray-500">{h}</span>
                 </button>
               ))}
             </div>
-            {(outcome === 'FIFTY_FIFTY' || outcome === 'NEED_FOLLOWUP') && (
+            {outcome === 'NEED_FOLLOWUP' && (
               <label className="text-xs text-gray-600 flex items-center gap-2">Follow-up <DateTimeField value={followUp} onChange={setFollowUp} min={new Date()} placeholder="Auto (1–2 days)" /></label>
             )}
             <textarea className="w-full border rounded-lg px-3 py-2 text-sm" rows={2} placeholder="Comments (optional)" value={feedback} onChange={(e) => setFeedback(e.target.value)} />

@@ -384,12 +384,14 @@ const DEMO_STATUS_COLOR: Record<DemoStatus, string> = {
 
 // What each demo outcome does to the lead (mirrors OUTCOME_PLAN on the server).
 const OUTCOME_EFFECT: Record<DemoOutcome, { text: string; followUp: boolean }> = {
-  INTERESTED: { text: 'Lead moves to Negotiation', followUp: false },
-  FIFTY_FIFTY: { text: 'Lead moves to Negotiation + a follow-up task', followUp: true },
-  NEED_FOLLOWUP: { text: 'Lead stays at Demo done + a follow-up task', followUp: true },
-  NOT_INTERESTED: { text: 'Lead is marked Lost', followUp: false },
+  INTERESTED: { text: 'Lead stage becomes Demo Over - Positive', followUp: false },
+  FIFTY_FIFTY: { text: 'Lead stage becomes Demo Over - Need Follow up + a follow-up task', followUp: true },
+  NEED_FOLLOWUP: { text: 'Lead stage becomes Demo Over - Need Follow up + a follow-up task', followUp: true },
+  NOT_INTERESTED: { text: 'Lead stage becomes Not Interested', followUp: false },
 };
-const DEMO_OUTCOMES: DemoOutcome[] = ['NOT_INTERESTED', 'INTERESTED', 'FIFTY_FIFTY', 'NEED_FOLLOWUP'];
+// What the sales team picks after a demo — it is the lead stage.
+const DEMO_OUTCOMES: DemoOutcome[] = ['INTERESTED', 'NEED_FOLLOWUP', 'NOT_INTERESTED'];
+const DEMO_STAGE_PICK: Record<string, string> = { INTERESTED: 'Demo Over - Positive', NEED_FOLLOWUP: 'Demo Over - Need Follow up', NOT_INTERESTED: 'Not Interested' };
 const DEMO_OUTCOME_LABEL: Record<DemoOutcome, string> = {
   NOT_INTERESTED: 'Not Interested', INTERESTED: 'Interested', FIFTY_FIFTY: '50-50', NEED_FOLLOWUP: 'Need Follow-up',
 };
@@ -1781,8 +1783,8 @@ function LeadDetailModal({ lead, employees, canEdit, isAdmin, onClose, onChanged
             <div className="space-y-2">
               <div className="flex flex-wrap items-center gap-2">
                 <select className="px-2 py-1 border rounded-lg text-xs" value={actionOutcome} onChange={(e) => setActionOutcome(e.target.value as DemoOutcome)}>
-                  <option value="">Outcome *</option>
-                  {DEMO_OUTCOMES.map((o) => <option key={o} value={o}>{DEMO_OUTCOME_LABEL[o]}</option>)}
+                  <option value="">Update lead stage *</option>
+                  {DEMO_OUTCOMES.map((o) => <option key={o} value={o}>{DEMO_STAGE_PICK[o]}</option>)}
                 </select>
                 {employees.length > 0 && (
                   <select className="px-2 py-1 border rounded-lg text-xs" value={actionConductedById} onChange={(e) => setActionConductedById(e.target.value)}>
