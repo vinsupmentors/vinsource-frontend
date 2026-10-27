@@ -1718,6 +1718,95 @@ function LeadDetailModal({ lead, employees, canEdit, isAdmin, onClose, onChanged
     }
   };
 
+  const demoActions = (d: DemoLite) => (
+    <div className="space-y-1">
+      {canEdit && d.status === 'COMPLETED' && !d.outcome && actingDemo?.id !== d.id && (
+        <button onClick={() => setActingDemo({ id: d.id, type: 'outcome' })} className="text-xs font-medium text-green-600 hover:underline">Add outcome</button>
+      )}
+      {canEdit && d.status === 'SCHEDULED' && actingDemo?.id !== d.id && (
+        <div className="flex flex-wrap gap-2 pt-1">
+          <button onClick={() => setActingDemo({ id: d.id, type: 'complete' })} className="text-xs font-medium text-green-600 hover:underline">Mark Conducted</button>
+          <button onClick={() => setActingDemo({ id: d.id, type: 'reschedule' })} className="text-xs font-medium text-amber-600 hover:underline">Reschedule</button>
+          <button onClick={() => setActingDemo({ id: d.id, type: 'noshow' })} className="text-xs font-medium text-red-600 hover:underline">No Show</button>
+          <button onClick={() => setActingDemo({ id: d.id, type: 'cancel' })} className="text-xs font-medium text-muted-foreground hover:underline">Cancel</button>
+        </div>
+      )}
+
+      {actingDemo?.id === d.id && (
+        <div className="border-t pt-2 mt-1 space-y-2">
+          {actingDemo.type === 'reschedule' ? (
+            <div className="space-y-2">
+              <div className="flex flex-wrap items-center gap-2">
+                <DateTimeField value={actionNewScheduledAt} onChange={setActionNewScheduledAt} min={new Date()} placeholder="New date & time" />
+                <select className="px-2 py-1 border rounded-lg text-xs" value={actionNewMode} onChange={(e) => setActionNewMode(e.target.value as DemoMode)}>
+                  {DEMO_MODES.map((m) => <option key={m} value={m}>{DEMO_MODE_LABEL[m]}</option>)}
+                </select>
+              </div>
+              <input
+                className="w-full px-2 py-1 border rounded-lg text-xs"
+                placeholder="Reason for rescheduling *"
+                value={actionRescheduleReason}
+                onChange={(e) => setActionRescheduleReason(e.target.value)}
+              />
+            </div>
+          ) : actingDemo.type === 'complete' || actingDemo.type === 'outcome' ? (
+            <div className="space-y-2">
+              <div className="flex flex-wrap items-center gap-2">
+                <select className="px-2 py-1 border rounded-lg text-xs" value={actionOutcome} onChange={(e) => setActionOutcome(e.target.value as DemoOutcome)}>
+                  <option value="">Outcome *</option>
+                  {DEMO_OUTCOMES.map((o) => <option key={o} value={o}>{DEMO_OUTCOME_LABEL[o]}</option>)}
+                </select>
+                {employees.length > 0 && (
+                  <select className="px-2 py-1 border rounded-lg text-xs" value={actionConductedById} onChange={(e) => setActionConductedById(e.target.value)}>
+                    <option value="">Conducted by...</option>
+                    {employees.map((e) => <option key={e.id} value={e.id}>{e.firstName} {e.lastName}</option>)}
+                  </select>
+                )}
+              </div>
+              {actionOutcome && (
+                <div className="text-xs rounded-lg bg-blue-50 text-blue-800 px-2 py-1.5">
+                  {OUTCOME_EFFECT[actionOutcome].text}.
+                  {OUTCOME_EFFECT[actionOutcome].followUp && (
+                    <span className="ml-2 inline-flex items-center gap-1 text-muted-foreground">Follow-up
+                      <DateTimeField value={actionFollowUp} onChange={setActionFollowUp} min={new Date()} placeholder="Auto" />
+                    </span>
+                  )}
+                </div>
+              )}
+              {actingDemo.type === 'complete' && !(d.mode === 'ONLINE' && d.roomName && d.startedAt) && (
+                <label className="text-xs text-muted-foreground flex items-center gap-2">
+                  Proof of demo {d.proofUrl ? '(already attached — pick a file to replace it)' : '*'}:
+                  <input type="file" accept="image/*" className="text-xs" onChange={(e) => setActionProofFile(e.target.files?.[0] || null)} />
+                </label>
+              )}
+              <input
+                className="w-full px-2 py-1 border rounded-lg text-xs"
+                placeholder="Comments (optional)"
+                value={actionFeedback}
+                onChange={(e) => setActionFeedback(e.target.value)}
+              />
+            </div>
+          ) : (
+            <div className="flex flex-wrap items-center gap-2">
+              <input
+                className="px-2 py-1 border rounded-lg text-xs flex-1 min-w-[160px]"
+                placeholder="Notes (optional)"
+                value={actionFeedback}
+                onChange={(e) => setActionFeedback(e.target.value)}
+              />
+            </div>
+          )}
+          <div className="flex gap-2">
+            <button onClick={submitAction} disabled={savingAction} className="px-3 py-1.5 text-xs rounded-lg bg-blue-600 text-white disabled:opacity-50">
+              {savingAction ? 'Saving...' : 'Confirm'}
+            </button>
+            <button onClick={closeAction} className="px-3 py-1.5 text-xs rounded-lg border">Cancel</button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+
   return (
     <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
       <div className="bg-white rounded-xl w-full max-w-3xl max-h-[90vh] overflow-y-auto p-6 space-y-6">
@@ -1863,9 +1952,11 @@ function LeadDetailModal({ lead, employees, canEdit, isAdmin, onClose, onChanged
                 {leadTasks.map((t) => (
                   <div key={t.id} className="flex items-center justify-between gap-3 px-3 py-2 text-sm">
                     <div>
-                      <span className={t.status !== 'OPEN' ? 'line-through text-muted-foreground' : 'font-medium'}>{t.title}</span>
+                      <span className="font-medium">{t.title}</span>
                       <p className="text-xs text-muted-foreground">{t.assignedTo ? `${t.assignedTo.firstName} ${t.assignedTo.lastName}` : ''}{t.dueAt ? ` · due ${formatDateTime(t.dueAt)}` : ''}</p>
                     </div>
+                    {t.status === 'DONE' && <span className="text-xs font-medium text-green-700 bg-green-50 rounded-full px-2.5 py-1 whitespace-nowrap">✓ Completed{t.completedAt ? ` · ${formatDateTime(t.completedAt)}` : ''}</span>}
+                    {t.status === 'CANCELLED' && <span className="text-xs font-medium text-slate-500 bg-slate-100 rounded-full px-2.5 py-1">Cancelled</span>}
                     {canEdit && t.status === 'OPEN' && <button onClick={() => finishLeadTask(t.id)} className="text-xs font-medium text-green-600 hover:underline">Done</button>}
                   </div>
                 ))}
@@ -2004,6 +2095,17 @@ function LeadDetailModal({ lead, employees, canEdit, isAdmin, onClose, onChanged
           </div>
         )}
 
+        {/* Demos waiting for the sales team to complete them */}
+        {leadTab === 'activity' && canEdit && demos.filter((d) => d.status === 'SCHEDULED' || (d.status === 'COMPLETED' && !d.outcome)).map((d) => (
+          <div key={d.id} className="border border-amber-300 bg-amber-50/60 rounded-xl p-4 space-y-2">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <h3 className="font-semibold text-sm flex items-center gap-2"><Video className="w-4 h-4" /> {d.status === 'SCHEDULED' ? 'Demo to complete' : 'Demo outcome pending'}</h3>
+              <span className="text-xs text-muted-foreground">{formatDateTime(d.scheduledAt)} · {DEMO_MODE_LABEL[d.mode]}</span>
+            </div>
+            {demoActions(d)}
+          </div>
+        ))}
+
         {/* Call history */}
         {leadTab === 'activity' && <div>
           <h3 className="font-semibold text-sm mb-2">Activity History {lead._count?.callLogs ? `(${lead._count.callLogs})` : ''}</h3>
@@ -2119,90 +2221,6 @@ function LeadDetailModal({ lead, employees, canEdit, isAdmin, onClose, onChanged
                     <p className="text-xs text-amber-700">Rescheduled — {d.rescheduleReason}</p>
                   )}
 
-                  {canEdit && d.status === 'COMPLETED' && !d.outcome && actingDemo?.id !== d.id && (
-                    <button onClick={() => setActingDemo({ id: d.id, type: 'outcome' })} className="text-xs font-medium text-green-600 hover:underline">Add outcome</button>
-                  )}
-                  {canEdit && d.status === 'SCHEDULED' && actingDemo?.id !== d.id && (
-                    <div className="flex flex-wrap gap-2 pt-1">
-                      <button onClick={() => setActingDemo({ id: d.id, type: 'complete' })} className="text-xs font-medium text-green-600 hover:underline">Mark Conducted</button>
-                      <button onClick={() => setActingDemo({ id: d.id, type: 'reschedule' })} className="text-xs font-medium text-amber-600 hover:underline">Reschedule</button>
-                      <button onClick={() => setActingDemo({ id: d.id, type: 'noshow' })} className="text-xs font-medium text-red-600 hover:underline">No Show</button>
-                      <button onClick={() => setActingDemo({ id: d.id, type: 'cancel' })} className="text-xs font-medium text-muted-foreground hover:underline">Cancel</button>
-                    </div>
-                  )}
-
-                  {actingDemo?.id === d.id && (
-                    <div className="border-t pt-2 mt-1 space-y-2">
-                      {actingDemo.type === 'reschedule' ? (
-                        <div className="space-y-2">
-                          <div className="flex flex-wrap items-center gap-2">
-                            <DateTimeField value={actionNewScheduledAt} onChange={setActionNewScheduledAt} min={new Date()} placeholder="New date & time" />
-                            <select className="px-2 py-1 border rounded-lg text-xs" value={actionNewMode} onChange={(e) => setActionNewMode(e.target.value as DemoMode)}>
-                              {DEMO_MODES.map((m) => <option key={m} value={m}>{DEMO_MODE_LABEL[m]}</option>)}
-                            </select>
-                          </div>
-                          <input
-                            className="w-full px-2 py-1 border rounded-lg text-xs"
-                            placeholder="Reason for rescheduling *"
-                            value={actionRescheduleReason}
-                            onChange={(e) => setActionRescheduleReason(e.target.value)}
-                          />
-                        </div>
-                      ) : actingDemo.type === 'complete' || actingDemo.type === 'outcome' ? (
-                        <div className="space-y-2">
-                          <div className="flex flex-wrap items-center gap-2">
-                            <select className="px-2 py-1 border rounded-lg text-xs" value={actionOutcome} onChange={(e) => setActionOutcome(e.target.value as DemoOutcome)}>
-                              <option value="">Outcome *</option>
-                              {DEMO_OUTCOMES.map((o) => <option key={o} value={o}>{DEMO_OUTCOME_LABEL[o]}</option>)}
-                            </select>
-                            {employees.length > 0 && (
-                              <select className="px-2 py-1 border rounded-lg text-xs" value={actionConductedById} onChange={(e) => setActionConductedById(e.target.value)}>
-                                <option value="">Conducted by...</option>
-                                {employees.map((e) => <option key={e.id} value={e.id}>{e.firstName} {e.lastName}</option>)}
-                              </select>
-                            )}
-                          </div>
-                          {actionOutcome && (
-                            <div className="text-xs rounded-lg bg-blue-50 text-blue-800 px-2 py-1.5">
-                              {OUTCOME_EFFECT[actionOutcome].text}.
-                              {OUTCOME_EFFECT[actionOutcome].followUp && (
-                                <span className="ml-2 inline-flex items-center gap-1 text-muted-foreground">Follow-up
-                                  <DateTimeField value={actionFollowUp} onChange={setActionFollowUp} min={new Date()} placeholder="Auto" />
-                                </span>
-                              )}
-                            </div>
-                          )}
-                          {actingDemo.type === 'complete' && !(d.mode === 'ONLINE' && d.roomName && d.startedAt) && (
-                            <label className="text-xs text-muted-foreground flex items-center gap-2">
-                              Proof of demo {d.proofUrl ? '(already attached — pick a file to replace it)' : '*'}:
-                              <input type="file" accept="image/*" className="text-xs" onChange={(e) => setActionProofFile(e.target.files?.[0] || null)} />
-                            </label>
-                          )}
-                          <input
-                            className="w-full px-2 py-1 border rounded-lg text-xs"
-                            placeholder="Comments (optional)"
-                            value={actionFeedback}
-                            onChange={(e) => setActionFeedback(e.target.value)}
-                          />
-                        </div>
-                      ) : (
-                        <div className="flex flex-wrap items-center gap-2">
-                          <input
-                            className="px-2 py-1 border rounded-lg text-xs flex-1 min-w-[160px]"
-                            placeholder="Notes (optional)"
-                            value={actionFeedback}
-                            onChange={(e) => setActionFeedback(e.target.value)}
-                          />
-                        </div>
-                      )}
-                      <div className="flex gap-2">
-                        <button onClick={submitAction} disabled={savingAction} className="px-3 py-1.5 text-xs rounded-lg bg-blue-600 text-white disabled:opacity-50">
-                          {savingAction ? 'Saving...' : 'Confirm'}
-                        </button>
-                        <button onClick={closeAction} className="px-3 py-1.5 text-xs rounded-lg border">Cancel</button>
-                      </div>
-                    </div>
-                  )}
                 </div>
               );})}
             </div>
