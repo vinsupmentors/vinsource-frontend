@@ -5,7 +5,8 @@ import { errMsg } from '@/lib/liveClasses';
 import { LiveKitRoom, VideoConference, RoomAudioRenderer } from '@livekit/components-react';
 import '@livekit/components-styles';
 import { Lobby, PipButton, roomOptionsFrom, type LocalUserChoices } from '@/components/classroom/ClassroomExtras';
-import { Timer, Copy, Eye } from 'lucide-react';
+import { Timer, Copy, Eye, PhoneOff } from 'lucide-react';
+import DateTimeField from '@/components/DateTimeField';
 
 interface Joined { token: string; url: string; title: string; course?: string | null; expiresAt?: string | null; accessCode?: string; joinLink?: string; closed?: boolean }
 
@@ -27,6 +28,12 @@ export default function SalesDemoRoomPage() {
   const [ended, setEnded] = useState('');
   const [reopenNote, setReopenNote] = useState('');
   const [reopenSent, setReopenSent] = useState(false);
+  const [endOpen, setEndOpen] = useState(false);
+  const [outcome, setOutcome] = useState('');
+  const [feedback, setFeedback] = useState('');
+  const [followUp, setFollowUp] = useState('');
+  const [ending, setEnding] = useState(false);
+  const [endErr, setEndErr] = useState('');
 
   const enter = (c?: LocalUserChoices) => {
     if (c) setChoices(c);
@@ -43,6 +50,15 @@ export default function SalesDemoRoomPage() {
     api.post(`/api/sales/demos/${id}/room/reopen-request`, { note: reopenNote })
       .then(() => setReopenSent(true))
       .catch((e) => setError(errMsg(e, 'Could not send the request.')));
+  };
+
+  const endDemo = async () => {
+    if (!outcome) { setEndErr('Pick how the demo went'); return; }
+    setEnding(true); setEndErr('');
+    try {
+      await api.post(`/api/sales/demos/${id}/room/end`, { outcome, feedback: feedback.trim() || undefined, followUpAt: followUp ? new Date(followUp).toISOString() : undefined });
+      nav('/sales');
+    } catch (e) { setEndErr(errMsg(e, 'Could not end the demo.')); setEnding(false); }
   };
 
   if (ended || (error && !joined)) {
@@ -76,8 +92,32 @@ export default function SalesDemoRoomPage() {
     <LiveKitRoom serverUrl={joined.url} token={joined.token} connect video={observe ? false : choices.videoEnabled} audio={observe ? false : choices.audioEnabled}
       options={observe ? undefined : roomOptionsFrom(choices)} data-lk-theme="default" style={{ height: '100vh' }} onDisconnected={onDone}>
       <RoomAudioRenderer />
-      <TopBar joined={joined} observe={observe} onDone={onDone} />
+      <TopBar joined={joined} observe={observe} onDone={onDone} onEnd={() => setEndOpen(true)} />
       <VideoConference />
+      {endOpen && (
+        <div className="fixed inset-0 z-[90] bg-black/60 flex items-center justify-center p-4">
+          <div className="bg-white text-gray-900 rounded-2xl w-full max-w-md p-5 space-y-3">
+            <h3 className="font-semibold text-lg">End demo</h3>
+            <p className="text-xs text-gray-500">Ends the room for everyone, marks the demo conducted and moves the lead based on how it went.</p>
+            {endErr && <p className="text-sm text-red-700 bg-red-50 rounded-lg px-3 py-2">{endErr}</p>}
+            <div className="grid grid-cols-2 gap-2">
+              {([['INTERESTED', 'Interested', '→ Negotiation'], ['FIFTY_FIFTY', '50-50', '→ Negotiation + follow-up'], ['NEED_FOLLOWUP', 'Needs follow-up', '→ Demo done + follow-up'], ['NOT_INTERESTED', 'Not interested', '→ Lost']] as const).map(([v, l, h]) => (
+                <button key={v} type="button" onClick={() => setOutcome(v)} className={`text-left border rounded-lg px-3 py-2 text-sm ${outcome === v ? 'border-blue-600 bg-blue-50' : 'hover:bg-gray-50'}`}>
+                  <span className="font-medium block">{l}</span><span className="text-[11px] text-gray-500">{h}</span>
+                </button>
+              ))}
+            </div>
+            {(outcome === 'FIFTY_FIFTY' || outcome === 'NEED_FOLLOWUP') && (
+              <label className="text-xs text-gray-600 flex items-center gap-2">Follow-up <DateTimeField value={followUp} onChange={setFollowUp} min={new Date()} placeholder="Auto (1–2 days)" /></label>
+            )}
+            <textarea className="w-full border rounded-lg px-3 py-2 text-sm" rows={2} placeholder="Comments (optional)" value={feedback} onChange={(e) => setFeedback(e.target.value)} />
+            <div className="flex justify-end gap-2">
+              <button onClick={() => setEndOpen(false)} className="px-4 py-2 text-sm rounded-lg border">Keep going</button>
+              <button onClick={endDemo} disabled={ending} className="px-4 py-2 text-sm rounded-lg bg-red-600 text-white disabled:opacity-50">{ending ? 'Ending…' : 'End demo'}</button>
+            </div>
+          </div>
+        </div>
+      )}
     </LiveKitRoom>
   );
 }
@@ -86,7 +126,7 @@ function Shell({ children }: { children: React.ReactNode }) {
   return <div className="fixed inset-0 bg-[#0f1115] flex items-center justify-center z-50 p-4 text-center">{children}</div>;
 }
 
-function TopBar({ joined, observe, onDone }: { joined: Joined; observe: boolean; onDone: () => void }) {
+function TopBar({ joined, observe, onDone, onEnd }: { joined: Joined; observe: boolean; onDone: () => void; onEnd: () => void }) {
   const [left, setLeft] = useState(() => (joined.expiresAt ? Math.max(0, new Date(joined.expiresAt).getTime() - Date.now()) : 0));
   const [copied, setCopied] = useState(false);
   useEffect(() => {
@@ -116,6 +156,7 @@ function TopBar({ joined, observe, onDone }: { joined: Joined; observe: boolean;
         <span className={`inline-flex items-center gap-1.5 text-xs font-semibold ${left < 300000 ? 'text-red-300' : ''}`}><Timer className="w-3.5 h-3.5" /> {m}:{String(s).padStart(2, '0')} left</span>
       )}
       <PipButton />
+      {!observe && <button onClick={onEnd} className="inline-flex items-center gap-1 text-xs bg-red-600 hover:bg-red-700 rounded px-2.5 py-1 font-medium"><PhoneOff className="w-3.5 h-3.5" /> End demo</button>}
     </div>
   );
 }

@@ -1,8 +1,9 @@
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useMemo } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import * as XLSX from 'xlsx';
 import api, { BASE_URL } from '@/lib/api';
 import { useModuleAccess } from '@/hooks/useModuleAccess';
+import DateTimeField from '@/components/DateTimeField';
 import AdvancedFilter, { type FilterField, type FilterGroup } from '@/components/AdvancedFilter';
 import { formatDate, formatDateTime, formatTime } from '@/lib/utils';
 import {
@@ -181,7 +182,12 @@ interface CallLog {
   nextFollowUpAt?: string | null;
   calledAt: string;
   calledBy?: EmployeeLite | null;
+  source?: 'MANUAL' | 'AUTO';
+  direction?: 'INBOUND' | 'OUTBOUND' | 'MISSED' | null;
+  durationSeconds?: number | null;
 }
+const callDirLabel = (d?: string | null) => (d === 'INBOUND' ? 'Incoming' : d === 'OUTBOUND' ? 'Outgoing' : d === 'MISSED' ? 'Missed' : 'Call');
+const callDurLabel = (s?: number | null) => { if (s == null) return '—'; const m = Math.floor(s / 60), sec = s % 60; return m > 0 ? `${m}m ${sec}s` : `${sec}s`; };
 
 interface Pulse {
   callsMadeToday: number;
@@ -375,6 +381,13 @@ const DEMO_STATUS_COLOR: Record<DemoStatus, string> = {
   CANCELLED: 'bg-slate-100 text-slate-500',
 };
 
+// What each demo outcome does to the lead (mirrors OUTCOME_PLAN on the server).
+const OUTCOME_EFFECT: Record<DemoOutcome, { text: string; followUp: boolean }> = {
+  INTERESTED: { text: 'Lead moves to Negotiation', followUp: false },
+  FIFTY_FIFTY: { text: 'Lead moves to Negotiation + a follow-up task', followUp: true },
+  NEED_FOLLOWUP: { text: 'Lead stays at Demo done + a follow-up task', followUp: true },
+  NOT_INTERESTED: { text: 'Lead is marked Lost', followUp: false },
+};
 const DEMO_OUTCOMES: DemoOutcome[] = ['NOT_INTERESTED', 'INTERESTED', 'FIFTY_FIFTY', 'NEED_FOLLOWUP'];
 const DEMO_OUTCOME_LABEL: Record<DemoOutcome, string> = {
   NOT_INTERESTED: 'Not Interested', INTERESTED: 'Interested', FIFTY_FIFTY: '50-50', NEED_FOLLOWUP: 'Need Follow-up',
@@ -1029,6 +1042,7 @@ export default function SalesPage() {
 
       {showAdd && (
         <AddLeadModal
+          isAdmin={isAdmin}
           employees={employees}
           saving={saving}
           setSaving={setSaving}
@@ -1040,6 +1054,8 @@ export default function SalesPage() {
 
       {showBulkUpload && (
         <BulkUploadLeadsModal
+          isAdmin={isAdmin}
+          employees={employees}
           onClose={() => setShowBulkUpload(false)}
           setError={setError}
           onSaved={() => { fetchAll(); }}
@@ -1066,6 +1082,7 @@ export default function SalesPage() {
           lead={detailLead}
           employees={employees}
           canEdit={canEdit}
+          isAdmin={isAdmin}
           onClose={closeLeadDetail}
           onChanged={refreshDetailLead}
           setGlobalError={setError}
@@ -1098,66 +1115,109 @@ interface ModalProps {
   setError: (s: string) => void;
 }
 
-function AddLeadModal({ employees, saving, setSaving, onClose, onSaved, setError }: ModalProps) {
+function AddLeadModal({ employees, saving, setSaving, onClose, onSaved, setError, isAdmin }: ModalProps & { isAdmin: boolean }) {
   const [form, setForm] = useState({
-    name: '', phone: '', email: '', source: '', scoutKey: '', courseInterest: '', assignedToId: '', notes: '',
+    name: '', phone: '', email: '', source: '', scoutKey: '', courseInterest: '', city: '', assignedToId: '', notes: '',
   });
+  const [courses, setCourses] = useState<{ id: string; name: string }[]>([]);
+  const [localError, setLocalError] = useState('');
   const activeSources = CFG.sources.filter((s) => s.active);
   const activeScouts = CFG.scouts.filter((s) => s.active);
+  useEffect(() => { api.get('/api/sales/courses').then((r) => setCourses(r.data.data)).catch(() => setCourses([])); }, []);
+
+  const digits = form.phone.replace(/\D/g, '');
+  const phoneBad = form.phone.length > 0 && (digits.length < 10 || digits.length > 13);
+  const emailBad = form.email.length > 0 && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email.trim());
+  const set = (k: keyof typeof form, v: string) => { setForm({ ...form, [k]: v }); setLocalError(''); };
 
   const submit = async () => {
-    if (!form.name || !form.phone) { setError('Name and phone are required'); return; }
+    if (!form.name.trim() || !form.phone.trim()) { setLocalError('Name and phone are required'); return; }
+    if (phoneBad) { setLocalError('Enter a valid phone number (10–13 digits)'); return; }
+    if (emailBad) { setLocalError('Enter a valid email address'); return; }
     setSaving(true);
     setError('');
+    setLocalError('');
     try {
-      await api.post('/api/sales/leads', { ...form, assignedToId: form.assignedToId || undefined, scoutKey: form.scoutKey || undefined });
+      await api.post('/api/sales/leads', {
+        ...form,
+        name: form.name.trim(), phone: form.phone.trim(), email: form.email.trim() || undefined,
+        city: form.city.trim() || undefined,
+        assignedToId: form.assignedToId || undefined,
+        scoutKey: isAdmin ? (form.scoutKey || undefined) : undefined,
+      });
       onSaved();
     } catch (err: unknown) {
       const e = err as { response?: { data?: { message?: string } } };
-      setError(e.response?.data?.message || 'Failed to create lead');
+      setLocalError(e.response?.data?.message || 'Failed to create lead');
     } finally {
       setSaving(false);
     }
   };
 
+  const inp = 'w-full px-3 py-2 border rounded-lg text-sm';
+  const lab = 'text-xs font-medium text-muted-foreground space-y-1 block';
   return (
     <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
-      <div className="bg-white rounded-xl w-full max-w-md p-6 space-y-4">
-        <div className="flex items-center justify-between">
-          <h2 className="font-semibold text-lg">New Lead</h2>
+      <div className="bg-white rounded-xl w-full max-w-xl max-h-[92vh] overflow-y-auto p-6 space-y-5">
+        <div className="flex items-start justify-between">
+          <div>
+            <h2 className="font-semibold text-lg">New lead</h2>
+            <p className="text-xs text-muted-foreground">Phone numbers are checked for duplicates automatically.</p>
+          </div>
           <button onClick={onClose}><X className="w-4 h-4" /></button>
         </div>
-        <div className="space-y-3">
-          <input className="w-full px-3 py-2 border rounded-lg text-sm" placeholder="Name *" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
-          <input className="w-full px-3 py-2 border rounded-lg text-sm" placeholder="Phone *" value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} />
-          <input className="w-full px-3 py-2 border rounded-lg text-sm" placeholder="Email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} />
-          {activeSources.length ? (
-            <select className="w-full px-3 py-2 border rounded-lg text-sm" value={form.source} onChange={(e) => setForm({ ...form, source: e.target.value })}>
-              <option value="">Source…</option>
-              {activeSources.map((s) => <option key={s.key} value={s.label}>{s.label}</option>)}
-            </select>
-          ) : (
-            <input className="w-full px-3 py-2 border rounded-lg text-sm" placeholder="Source (e.g. Instagram, Referral)" value={form.source} onChange={(e) => setForm({ ...form, source: e.target.value })} />
-          )}
-          {activeScouts.length > 0 && (
-            <select className="w-full px-3 py-2 border rounded-lg text-sm" value={form.scoutKey} onChange={(e) => setForm({ ...form, scoutKey: e.target.value })}>
-              <option value="">Lead Scout (who gave this lead)…</option>
-              {activeScouts.map((s) => <option key={s.key} value={s.key}>{s.label}</option>)}
-            </select>
-          )}
-          <input className="w-full px-3 py-2 border rounded-lg text-sm" placeholder="Course Interest" value={form.courseInterest} onChange={(e) => setForm({ ...form, courseInterest: e.target.value })} />
-          {employees.length > 0 && (
-            <select className="w-full px-3 py-2 border rounded-lg text-sm" value={form.assignedToId} onChange={(e) => setForm({ ...form, assignedToId: e.target.value })}>
-              <option value="">Assign to...</option>
-              {employees.map((e) => <option key={e.id} value={e.id}>{e.firstName} {e.lastName}</option>)}
-            </select>
-          )}
-          <textarea className="w-full px-3 py-2 border rounded-lg text-sm" placeholder="Notes" rows={2} value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} />
-        </div>
+        {localError && <div className="text-sm text-red-700 bg-red-50 border border-red-200 rounded-lg px-3 py-2">{localError}</div>}
+
+        <section className="space-y-3">
+          <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Contact</h3>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <label className={lab}>Name *<input className={inp} value={form.name} onChange={(e) => set('name', e.target.value)} autoFocus /></label>
+            <label className={lab}>Phone *<input className={`${inp} ${phoneBad ? 'border-red-400' : ''}`} inputMode="tel" value={form.phone} onChange={(e) => set('phone', e.target.value)} placeholder="98765 43210" /></label>
+            <label className={lab}>Email<input className={`${inp} ${emailBad ? 'border-red-400' : ''}`} value={form.email} onChange={(e) => set('email', e.target.value)} /></label>
+            <label className={lab}>City<input className={inp} value={form.city} onChange={(e) => set('city', e.target.value)} /></label>
+          </div>
+        </section>
+
+        <section className="space-y-3">
+          <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Interest & origin</h3>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <label className={lab}>Course interest
+              <select className={inp} value={form.courseInterest} onChange={(e) => set('courseInterest', e.target.value)}>
+                <option value="">— Select —</option>
+                {courses.map((c) => <option key={c.id} value={c.name}>{c.name}</option>)}
+              </select>
+            </label>
+            <label className={lab}>Source
+              {activeSources.length ? (
+                <select className={inp} value={form.source} onChange={(e) => set('source', e.target.value)}>
+                  <option value="">— Select —</option>
+                  {activeSources.map((s) => <option key={s.key} value={s.label}>{s.label}</option>)}
+                </select>
+              ) : <input className={inp} placeholder="e.g. Instagram, Referral" value={form.source} onChange={(e) => set('source', e.target.value)} />}
+            </label>
+            {isAdmin && activeScouts.length > 0 && (
+              <label className={lab}>Lead scout
+                <select className={inp} value={form.scoutKey} onChange={(e) => set('scoutKey', e.target.value)}>
+                  <option value="">— None —</option>
+                  {activeScouts.map((s) => <option key={s.key} value={s.key}>{s.label}</option>)}
+                </select>
+              </label>
+            )}
+            <label className={lab}>Assign to
+              <select className={inp} value={form.assignedToId} onChange={(e) => set('assignedToId', e.target.value)}>
+                <option value="">{isAdmin ? 'My Base (unassigned)' : 'Me'}</option>
+                {employees.map((e) => <option key={e.id} value={e.id}>{e.firstName} {e.lastName}</option>)}
+              </select>
+            </label>
+          </div>
+        </section>
+
+        <label className={lab}>Notes<textarea className={inp} rows={2} value={form.notes} onChange={(e) => set('notes', e.target.value)} /></label>
+
         <div className="flex justify-end gap-2">
           <button onClick={onClose} className="px-4 py-2 text-sm rounded-lg border">Cancel</button>
           <button onClick={submit} disabled={saving} className="px-4 py-2 text-sm rounded-lg bg-blue-600 text-white disabled:opacity-50">
-            {saving ? 'Saving...' : 'Create Lead'}
+            {saving ? 'Saving…' : 'Create lead'}
           </button>
         </div>
       </div>
@@ -1184,13 +1244,19 @@ function bulkField(row: BulkRow, ...aliases: string[]): string {
   return '';
 }
 
-function BulkUploadLeadsModal({ onClose, setError, onSaved }: {
-  onClose: () => void; setError: (s: string) => void; onSaved: () => void;
+function BulkUploadLeadsModal({ onClose, setError, onSaved, isAdmin, employees }: {
+  onClose: () => void; setError: (s: string) => void; onSaved: () => void; isAdmin: boolean; employees: EmployeeLite[];
 }) {
   const [rows, setRows] = useState<BulkRow[]>([]);
   const [fileName, setFileName] = useState('');
-  const [uploading, setUploading] = useState(false);
-  const [results, setResults] = useState<BulkResult[] | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [preview, setPreview] = useState<BulkResult[] | null>(null); // dry-run result
+  const [results, setResults] = useState<BulkResult[] | null>(null); // real import result
+  const [courses, setCourses] = useState<{ id: string; name: string }[]>([]);
+  const [defaults, setDefaults] = useState({ source: '', courseInterest: '', assignedToId: '', batchLabel: '', scoutKey: '' });
+  const activeSources = CFG.sources.filter((s) => s.active);
+  const activeScouts = CFG.scouts.filter((s) => s.active);
+  useEffect(() => { api.get('/api/sales/courses').then((r) => setCourses(r.data.data)).catch(() => setCourses([])); }, []);
 
   const downloadTemplate = () => {
     const ws = XLSX.utils.json_to_sheet([
@@ -1203,118 +1269,153 @@ function BulkUploadLeadsModal({ onClose, setError, onSaved }: {
   };
 
   const onFile = (file: File) => {
-    setFileName(file.name);
-    setResults(null);
+    setFileName(file.name); setResults(null); setPreview(null);
     const reader = new FileReader();
     reader.onload = (e) => {
       try {
-        const data = e.target?.result;
-        const wb = XLSX.read(data, { type: 'binary' });
-        const sheet = wb.Sheets[wb.SheetNames[0]];
-        const json = XLSX.utils.sheet_to_json<BulkRow>(sheet, { defval: '' });
-        setRows(json);
-      } catch {
-        setError('Could not parse the file. Please use the template format.');
-      }
+        const wb = XLSX.read(e.target?.result, { type: 'binary' });
+        setRows(XLSX.utils.sheet_to_json<BulkRow>(wb.Sheets[wb.SheetNames[0]], { defval: '' }));
+      } catch { setError('Could not parse the file. Please use the template format.'); }
     };
     reader.readAsBinaryString(file);
   };
 
-  const submit = async () => {
+  const payload = (validateOnly: boolean) => ({
+    leads: rows,
+    validateOnly,
+    defaults: {
+      source: defaults.source || undefined, courseInterest: defaults.courseInterest || undefined,
+      assignedToId: defaults.assignedToId || undefined, batchLabel: defaults.batchLabel.trim() || undefined,
+      scoutKey: isAdmin ? (defaults.scoutKey || undefined) : undefined,
+    },
+  });
+
+  const run = async (validateOnly: boolean) => {
     if (!rows.length) { setError('Choose a file with lead rows first'); return; }
-    setUploading(true);
-    setError('');
+    setBusy(true); setError('');
     try {
-      const res = await api.post('/api/sales/leads/bulk', { leads: rows });
-      setResults(res.data.data.results);
-      onSaved();
+      const res = await api.post('/api/sales/leads/bulk', payload(validateOnly));
+      if (validateOnly) setPreview(res.data.data.results);
+      else { setResults(res.data.data.results); onSaved(); }
     } catch (err: unknown) {
       const e = err as { response?: { data?: { message?: string } } };
-      setError(e.response?.data?.message || 'Bulk upload failed');
-    } finally {
-      setUploading(false);
-    }
+      setError(e.response?.data?.message || (validateOnly ? 'Check failed' : 'Bulk upload failed'));
+    } finally { setBusy(false); }
   };
 
-  const createdCount = results?.filter((r) => r.status === 'created').length ?? 0;
-  const errorCount = results ? results.length - createdCount : 0;
+  const shown = results ?? preview;
+  const okCount = shown?.filter((r) => r.status === 'created').length ?? 0;
+  const badCount = shown ? shown.length - okCount : 0;
+  const inp = 'w-full px-2 py-1.5 border rounded-lg text-sm bg-white';
+  const lab = 'text-[11px] font-medium text-muted-foreground space-y-1 block';
+  const step = results ? 3 : preview ? 2 : 1;
 
   return (
     <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
-      <div className="bg-white rounded-xl w-full max-w-lg p-6 space-y-4">
-        <div className="flex items-center justify-between">
-          <h2 className="font-semibold text-lg">Bulk Upload Leads</h2>
+      <div className="bg-white rounded-xl w-full max-w-2xl max-h-[92vh] flex flex-col">
+        <div className="flex items-start justify-between p-5 border-b">
+          <div>
+            <h2 className="font-semibold text-lg">Bulk upload leads</h2>
+            <div className="flex gap-3 mt-1 text-xs">
+              {['1 · File & defaults', '2 · Check', '3 · Imported'].map((t, i) => (
+                <span key={t} className={step === i + 1 ? 'font-semibold text-blue-700' : 'text-muted-foreground'}>{t}</span>
+              ))}
+            </div>
+          </div>
           <button onClick={onClose}><X className="w-4 h-4" /></button>
         </div>
 
-        <div className="space-y-3 max-h-[65vh] overflow-y-auto pr-1">
-          <p className="text-xs text-muted-foreground">
-            Two formats work here. Either the simple template below (<code>name, phone, email, source, courseInterest,
-            assignedToCode, campaign, notes</code>), or a direct export from your old CRM with columns like
-            <code> Name, Phone, Status, Assigned, Source, Demo, Reminder, Last Contact, Created, Date Of Demo</code> —
-            upload that file exactly as exported, no renaming needed. For the CRM export, old status text (e.g. "Followup",
-            "Not Interested", "Demo conducted - Positive") is automatically mapped into the pipeline, <code>Assigned</code> is
-            matched by rep name, and <code>Created</code>/<code>Reminder</code>/<code>Last Contact</code> are preserved so Lead
-            Age stays accurate. Leads with a phone number that already exists are skipped and reported as errors, so it's safe
-            to re-upload the same file.
-          </p>
-          <button onClick={downloadTemplate} className="text-xs px-3 py-2 border rounded-lg hover:bg-muted/50 flex items-center gap-1">
-            <Download className="w-3 h-3" /> Download template
-          </button>
-          <input
-            type="file"
-            accept=".xlsx,.xls,.csv"
-            onChange={(e) => { const f = e.target.files?.[0]; if (f) onFile(f); }}
-            className="w-full text-sm border rounded-lg px-3 py-2"
-          />
-          {fileName && !results && (
-            <p className="text-xs text-muted-foreground">{fileName} — {rows.length} row{rows.length === 1 ? '' : 's'} parsed.</p>
+        <div className="p-5 space-y-4 overflow-y-auto">
+          {!results && (
+            <>
+              <div className="flex flex-wrap items-center gap-2">
+                <input type="file" accept=".xlsx,.xls,.csv" onChange={(e) => { const f = e.target.files?.[0]; if (f) onFile(f); }} className="flex-1 min-w-[200px] text-sm border rounded-lg px-3 py-2" />
+                <button onClick={downloadTemplate} className="text-xs px-3 py-2 border rounded-lg hover:bg-muted/50 flex items-center gap-1"><Download className="w-3 h-3" /> Template</button>
+              </div>
+              <p className="text-[11px] text-muted-foreground">
+                Columns: <code>name, phone, email, source, courseInterest, assignedToCode, campaign, notes</code>. Old-CRM exports (Name, Phone, Status, Assigned, Source, Created, Reminder…) also work as-is.
+                Anything you set below fills only the rows that leave that column empty. Phones that already exist are skipped, so re-uploading is safe.
+              </p>
+              {fileName && <p className="text-xs text-muted-foreground">{fileName} — {rows.length} row{rows.length === 1 ? '' : 's'} read.</p>}
+
+              <div className="border rounded-lg p-3 space-y-2 bg-muted/20">
+                <p className="text-xs font-semibold">Defaults for this file</p>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                  <label className={lab}>Source
+                    <select className={inp} value={defaults.source} onChange={(e) => { setDefaults({ ...defaults, source: e.target.value }); setPreview(null); }}>
+                      <option value="">— From file —</option>
+                      {activeSources.map((s) => <option key={s.key} value={s.label}>{s.label}</option>)}
+                    </select>
+                  </label>
+                  <label className={lab}>Course interest
+                    <select className={inp} value={defaults.courseInterest} onChange={(e) => { setDefaults({ ...defaults, courseInterest: e.target.value }); setPreview(null); }}>
+                      <option value="">— From file —</option>
+                      {courses.map((c) => <option key={c.id} value={c.name}>{c.name}</option>)}
+                    </select>
+                  </label>
+                  <label className={lab}>{isAdmin ? 'Assign all to' : 'Assigned to'}
+                    <select className={inp} value={defaults.assignedToId} disabled={!isAdmin} onChange={(e) => { setDefaults({ ...defaults, assignedToId: e.target.value }); setPreview(null); }}>
+                      <option value="">{isAdmin ? 'My Base / as in file' : 'Me'}</option>
+                      {isAdmin && employees.map((e) => <option key={e.id} value={e.id}>{e.firstName} {e.lastName}</option>)}
+                    </select>
+                  </label>
+                  <label className={lab}>Batch label (to track this upload)
+                    <input className={inp} placeholder="e.g. Instagram Oct-26" value={defaults.batchLabel} onChange={(e) => { setDefaults({ ...defaults, batchLabel: e.target.value }); setPreview(null); }} />
+                  </label>
+                  {isAdmin && activeScouts.length > 0 && (
+                    <label className={lab}>Lead scout
+                      <select className={inp} value={defaults.scoutKey} onChange={(e) => { setDefaults({ ...defaults, scoutKey: e.target.value }); setPreview(null); }}>
+                        <option value="">— None —</option>
+                        {activeScouts.map((s) => <option key={s.key} value={s.key}>{s.label}</option>)}
+                      </select>
+                    </label>
+                  )}
+                </div>
+              </div>
+
+              {rows.length > 0 && !shown && (
+                <div className="border rounded-lg max-h-40 overflow-auto">
+                  <table className="w-full text-[11px]">
+                    <thead className="bg-muted/40 text-left sticky top-0"><tr>{['Name', 'Phone', 'Source', 'Assigned'].map((h) => <th key={h} className="px-2 py-1">{h}</th>)}</tr></thead>
+                    <tbody className="divide-y">
+                      {rows.slice(0, 8).map((r, i) => (
+                        <tr key={i}>
+                          <td className="px-2 py-1 whitespace-nowrap">{bulkField(r, 'name') || '—'}</td>
+                          <td className="px-2 py-1">{bulkField(r, 'phone', 'phonenumber', 'mobile') || <span className="text-red-500">missing</span>}</td>
+                          <td className="px-2 py-1 whitespace-nowrap">{bulkField(r, 'source') || '—'}</td>
+                          <td className="px-2 py-1 whitespace-nowrap">{bulkField(r, 'assigned', 'assignedto', 'assignedtocode') || '—'}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                  {rows.length > 8 && <p className="text-[10px] text-muted-foreground px-2 py-1">…and {rows.length - 8} more</p>}
+                </div>
+              )}
+            </>
           )}
 
-          {rows.length > 0 && !results && (
-            <div className="border rounded-lg max-h-44 overflow-auto">
-              <table className="w-full text-[11px]">
-                <thead className="bg-muted/40 text-left sticky top-0">
-                  <tr>{['Name', 'Phone', 'Status', 'Assigned'].map((h) => <th key={h} className="px-2 py-1 whitespace-nowrap">{h}</th>)}</tr>
-                </thead>
-                <tbody className="divide-y">
-                  {rows.slice(0, 10).map((r, i) => (
-                    <tr key={i}>
-                      <td className="px-2 py-1 whitespace-nowrap">{bulkField(r, 'name') || '—'}</td>
-                      <td className="px-2 py-1">{bulkField(r, 'phone', 'phonenumber', 'mobile') || <span className="text-red-500">missing</span>}</td>
-                      <td className="px-2 py-1 whitespace-nowrap">{bulkField(r, 'status') || '—'}</td>
-                      <td className="px-2 py-1 whitespace-nowrap">{bulkField(r, 'assigned', 'assignedto') || bulkField(r, 'assignedtocode') || '—'}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-              {rows.length > 10 && <p className="text-[10px] text-muted-foreground px-2 py-1">...and {rows.length - 10} more row(s)</p>}
-            </div>
-          )}
-
-          {results && (
+          {shown && (
             <div className="space-y-2">
               <p className="text-sm font-medium">
-                <span className="text-green-600">{createdCount} created</span>
-                {errorCount > 0 && <span className="text-red-600"> · {errorCount} skipped</span>}
+                {results ? (
+                  <><span className="text-green-600">{okCount} imported</span>{badCount > 0 && <span className="text-red-600"> · {badCount} skipped</span>}</>
+                ) : (
+                  <><span className="text-green-600">{okCount} will be imported</span>{badCount > 0 && <span className="text-red-600"> · {badCount} will be skipped</span>} <span className="text-xs text-muted-foreground font-normal">(nothing saved yet)</span></>
+                )}
               </p>
-              {errorCount > 0 && (
-                <div className="border rounded-lg max-h-40 overflow-auto divide-y">
-                  {results.filter((r) => r.status === 'error').map((r) => (
-                    <div key={r.row} className="px-2 py-1.5 text-xs">
-                      <span className="font-medium">Row {r.row}:</span> {r.message}
-                    </div>
+              {badCount > 0 && (
+                <div className="border rounded-lg max-h-48 overflow-auto divide-y">
+                  {shown.filter((r) => r.status === 'error').map((r) => (
+                    <div key={r.row} className="px-2 py-1.5 text-xs"><span className="font-medium">Row {r.row}:</span> {r.message}</div>
                   ))}
                 </div>
               )}
-              {results.some((r) => r.status === 'created' && r.message) && (
+              {shown.some((r) => r.status === 'created' && r.message) && (
                 <div>
-                  <p className="text-xs text-amber-700 font-medium mb-1">Created with notes:</p>
-                  <div className="border rounded-lg max-h-40 overflow-auto divide-y">
-                    {results.filter((r) => r.status === 'created' && r.message).map((r) => (
-                      <div key={r.row} className="px-2 py-1.5 text-xs text-amber-700">
-                        <span className="font-medium">Row {r.row}:</span> {r.message}
-                      </div>
+                  <p className="text-xs text-amber-700 font-medium mb-1">Notes:</p>
+                  <div className="border rounded-lg max-h-32 overflow-auto divide-y">
+                    {shown.filter((r) => r.status === 'created' && r.message).map((r) => (
+                      <div key={r.row} className="px-2 py-1.5 text-xs text-amber-700"><span className="font-medium">Row {r.row}:</span> {r.message}</div>
                     ))}
                   </div>
                 </div>
@@ -1323,12 +1424,16 @@ function BulkUploadLeadsModal({ onClose, setError, onSaved }: {
           )}
         </div>
 
-        <div className="flex justify-end gap-2">
+        <div className="flex justify-end gap-2 p-4 border-t">
           <button onClick={onClose} className="px-4 py-2 text-sm rounded-lg border">{results ? 'Close' : 'Cancel'}</button>
-          {!results && (
-            <button onClick={submit} disabled={uploading || !rows.length} className="px-4 py-2 text-sm rounded-lg bg-blue-600 text-white disabled:opacity-50">
-              {uploading ? 'Uploading...' : `Upload ${rows.length || ''} Lead${rows.length === 1 ? '' : 's'}`}
-            </button>
+          {!results && !preview && (
+            <button onClick={() => run(true)} disabled={busy || !rows.length} className="px-4 py-2 text-sm rounded-lg bg-blue-600 text-white disabled:opacity-50">{busy ? 'Checking…' : 'Check file'}</button>
+          )}
+          {!results && preview && (
+            <>
+              <button onClick={() => setPreview(null)} className="px-4 py-2 text-sm rounded-lg border">Back</button>
+              <button onClick={() => run(false)} disabled={busy || okCount === 0} className="px-4 py-2 text-sm rounded-lg bg-green-600 text-white disabled:opacity-50">{busy ? 'Importing…' : `Import ${okCount} lead${okCount === 1 ? '' : 's'}`}</button>
+            </>
           )}
         </div>
       </div>
@@ -1374,8 +1479,8 @@ function LostReasonModal({ lead, saving, setSaving, onClose, onConfirm }: {
 }
 
 // ── Lead detail modal: call log timeline + demo actions + reassignment ────
-function LeadDetailModal({ lead, employees, canEdit, onClose, onChanged, setGlobalError }: {
-  lead: Lead; employees: EmployeeLite[]; canEdit: boolean; onClose: () => void; onChanged: () => void; setGlobalError: (s: string) => void;
+function LeadDetailModal({ lead, employees, canEdit, isAdmin, onClose, onChanged, setGlobalError }: {
+  lead: Lead; employees: EmployeeLite[]; canEdit: boolean; isAdmin: boolean; onClose: () => void; onChanged: () => void; setGlobalError: (s: string) => void;
 }) {
   const [callLogs, setCallLogs] = useState<CallLog[]>([]);
   const [demos, setDemos] = useState<DemoLite[]>([]);
@@ -1403,14 +1508,8 @@ function LeadDetailModal({ lead, employees, canEdit, onClose, onChanged, setGlob
   const [callStage, setCallStage] = useState(''); // optional manual stage override
   const [callCourse, setCallCourse] = useState(lead.courseInterest || '');
   const [callLostReason, setCallLostReason] = useState('');
-  // Student intake — collected during the call itself, pre-filled with
-  // whatever's already on file for this lead so a BDA only has to fill in
-  // what's missing/changed rather than retype everything each call.
-  const [callCity, setCallCity] = useState(lead.city || '');
-  const [callEducation, setCallEducation] = useState(lead.educationQualification || '');
-  const [callCollege, setCallCollege] = useState(lead.collegeName || '');
-  const [callPassedOutYear, setCallPassedOutYear] = useState(lead.passedOutYear ? String(lead.passedOutYear) : '');
-  const [callCurrentStatus, setCallCurrentStatus] = useState(lead.currentStatus || '');
+  // Which tracked call this update is about ('__auto__' = not chosen yet → newest recent call, if any).
+  const [callPick, setCallPick] = useState('__auto__');
   const [savingCall, setSavingCall] = useState(false);
   const [msgChannel, setMsgChannel] = useState<'WHATSAPP' | 'EMAIL' | null>(null);
 
@@ -1419,7 +1518,7 @@ function LeadDetailModal({ lead, employees, canEdit, onClose, onChanged, setGlob
   const [demoConductedBy, setDemoConductedBy] = useState(lead.assignedTo?.id || '');
   const [demoEmail, setDemoEmail] = useState(lead.email || '');
 
-  const [actingDemo, setActingDemo] = useState<{ id: string; type: 'complete' | 'reschedule' | 'noshow' | 'cancel' } | null>(null);
+  const [actingDemo, setActingDemo] = useState<{ id: string; type: 'complete' | 'reschedule' | 'noshow' | 'cancel' | 'outcome' } | null>(null);
   const [actionFeedback, setActionFeedback] = useState('');
   const [actionConductedById, setActionConductedById] = useState('');
   const [actionNewScheduledAt, setActionNewScheduledAt] = useState('');
@@ -1427,6 +1526,7 @@ function LeadDetailModal({ lead, employees, canEdit, onClose, onChanged, setGlob
   const [actionRescheduleReason, setActionRescheduleReason] = useState('');
   // Mark Conducted specifics.
   const [actionOutcome, setActionOutcome] = useState<DemoOutcome | ''>('');
+  const [actionFollowUp, setActionFollowUp] = useState('');
   const [actionProofFile, setActionProofFile] = useState<File | null>(null);
   const [savingAction, setSavingAction] = useState(false);
 
@@ -1459,6 +1559,15 @@ function LeadDetailModal({ lead, employees, canEdit, onClose, onChanged, setGlob
   useEffect(() => { load(); }, [load]);
   useEffect(() => { api.get('/api/sales/courses').then((r) => setCourses(r.data.data)).catch(() => setCourses([])); }, []);
 
+  // Real calls from the call log that have no update attached yet (last 3 days), newest first.
+  const linkableCalls = useMemo(() => callLogs
+    .filter((c) => c.source === 'AUTO' && !c.activityStatus && c.direction !== 'MISSED' && Date.now() - new Date(c.calledAt).getTime() < 3 * 86400000)
+    .sort((a, b) => new Date(b.calledAt).getTime() - new Date(a.calledAt).getTime()), [callLogs]);
+  const effectiveCallPick = callPick === '__auto__'
+    ? (linkableCalls[0] && Date.now() - new Date(linkableCalls[0].calledAt).getTime() < 24 * 3600000 ? linkableCalls[0].id : '')
+    : callPick;
+  const pickedCall = linkableCalls.find((c) => c.id === effectiveCallPick) || null;
+
   const submitCall = async () => {
     if (!callActivityStatus) { setLocalError('Choose the Update Status first'); return; }
     // DNP (did not pick) needs no notes; every other status does.
@@ -1489,12 +1598,9 @@ function LeadDetailModal({ lead, employees, canEdit, onClose, onChanged, setGlob
         status: callStage || undefined,
         courseInterest: callCourse.trim() || undefined,
         lostReason: statusNeedsLostReason(callActivityStatus) ? (callLostReason || undefined) : undefined,
-        city: callCity.trim(),
-        educationQualification: callEducation.trim(),
-        collegeName: callCollege.trim(),
-        passedOutYear: callPassedOutYear.trim(),
-        currentStatus: callCurrentStatus.trim(),
+        callLogId: callActivityType === 'CALL' ? (effectiveCallPick || undefined) : undefined,
       });
+      setCallPick('__auto__');
       setCallNotes(''); setCallFollowUp(''); setCallActivityStatus(''); setCallStage(''); setCallLostReason('');
       await load();
       onChanged();
@@ -1513,7 +1619,8 @@ function LeadDetailModal({ lead, employees, canEdit, onClose, onChanged, setGlob
     if (!profile.name.trim() || !profile.phone.trim()) { setLocalError('Name and phone are required'); return; }
     setSavingProfile(true); setLocalError('');
     try {
-      await api.put(`/api/sales/leads/${lead.id}`, { ...profile, name: profile.name.trim(), phone: profile.phone.trim() });
+      const { scoutKey: _scout, ...profileRest } = profile; // Lead Scout is admin-only
+      await api.put(`/api/sales/leads/${lead.id}`, { ...profileRest, ...(isAdmin ? { scoutKey: _scout } : {}), name: profile.name.trim(), phone: profile.phone.trim() });
       await load(); onChanged();
     } catch (err) { fail(err, 'Failed to save'); } finally { setSavingProfile(false); }
   };
@@ -1550,15 +1657,19 @@ function LeadDetailModal({ lead, employees, canEdit, onClose, onChanged, setGlob
   const closeAction = () => {
     setActingDemo(null); setActionFeedback(''); setActionConductedById('');
     setActionNewScheduledAt(''); setActionNewMode('ONLINE'); setActionRescheduleReason('');
-    setActionOutcome(''); setActionProofFile(null);
+    setActionOutcome(''); setActionProofFile(null); setActionFollowUp('');
   };
 
   const submitAction = async () => {
     if (!actingDemo) return;
     const existingDemo = demos.find((d) => d.id === actingDemo.id);
+    if (actingDemo.type === 'outcome') {
+      if (!actionOutcome) { setLocalError('Pick an outcome'); return; }
+    }
     if (actingDemo.type === 'complete') {
+      const heldInPortal = existingDemo?.mode === 'ONLINE' && !!existingDemo?.roomName && !!existingDemo?.startedAt;
       if (!actionOutcome) { setLocalError('Pick an outcome before marking this demo Conducted'); return; }
-      if (!actionProofFile && !existingDemo?.proofUrl) { setLocalError('Attach a photo/screenshot as proof the demo was conducted'); return; }
+      if (!heldInPortal && !actionProofFile && !existingDemo?.proofUrl) { setLocalError('Attach a photo/screenshot as proof the demo was conducted'); return; }
     }
     if (actingDemo.type === 'reschedule' && !actionRescheduleReason.trim()) {
       setLocalError('A reason for rescheduling is required'); return;
@@ -1571,9 +1682,12 @@ function LeadDetailModal({ lead, employees, canEdit, onClose, onChanged, setGlob
         fd.append('status', 'COMPLETED');
         fd.append('outcome', actionOutcome);
         if (actionFeedback) fd.append('feedback', actionFeedback);
+        if (actionFollowUp) fd.append('followUpAt', new Date(actionFollowUp).toISOString());
         if (actionConductedById) fd.append('conductedById', actionConductedById);
         if (actionProofFile) fd.append('proof', actionProofFile);
         await api.put(`/api/sales/demos/${actingDemo.id}`, fd, { headers: { 'Content-Type': 'multipart/form-data' } });
+      } else if (actingDemo.type === 'outcome') {
+        await api.put(`/api/sales/demos/${actingDemo.id}`, { outcome: actionOutcome, followUpAt: actionFollowUp ? new Date(actionFollowUp).toISOString() : undefined, feedback: actionFeedback || undefined });
       } else if (actingDemo.type === 'noshow') {
         await api.put(`/api/sales/demos/${actingDemo.id}`, { status: 'NO_SHOW', feedback: actionFeedback || undefined });
       } else if (actingDemo.type === 'cancel') {
@@ -1683,13 +1797,13 @@ function LeadDetailModal({ lead, employees, canEdit, onClose, onChanged, setGlob
                       <input className="w-full px-3 py-2 border rounded-lg text-sm text-foreground" value={profile[k]} onChange={(e) => setProfile({ ...profile, [k]: e.target.value })} />
                     </label>
                   ))}
-                  <label className="text-xs text-muted-foreground space-y-1 block">
+                  {isAdmin && <label className="text-xs text-muted-foreground space-y-1 block">
                     Lead Scout
                     <select className="w-full px-3 py-2 border rounded-lg text-sm text-foreground" value={profile.scoutKey} onChange={(e) => setProfile({ ...profile, scoutKey: e.target.value })}>
                       <option value="">— None —</option>
                       {CFG.scouts.filter((s) => s.active || s.key === profile.scoutKey).map((s) => <option key={s.key} value={s.key}>{s.label}</option>)}
                     </select>
-                  </label>
+                  </label>}
                 </div>
                 <div className="flex justify-end">
                   <button onClick={saveProfile} disabled={savingProfile} className="px-4 py-2 text-sm rounded-lg bg-blue-600 text-white disabled:opacity-50">{savingProfile ? 'Saving...' : 'Save changes'}</button>
@@ -1718,7 +1832,7 @@ function LeadDetailModal({ lead, employees, canEdit, onClose, onChanged, setGlob
               <div className="border rounded-xl p-3 space-y-2 bg-muted/20">
                 <div className="flex flex-wrap gap-2">
                   <input className="px-3 py-2 border rounded-lg text-sm flex-1 min-w-[200px]" placeholder="New task for this lead *" value={taskTitle} onChange={(e) => setTaskTitle(e.target.value)} />
-                  <input type="datetime-local" className="px-2 py-2 border rounded-lg text-sm" value={taskDue} onChange={(e) => setTaskDue(e.target.value)} />
+                  <DateTimeField value={taskDue} onChange={setTaskDue} placeholder="Due date & time" />
                   <button onClick={addLeadTask} className="px-4 py-2 text-sm rounded-lg bg-blue-600 text-white">Add task</button>
                 </div>
               </div>
@@ -1761,48 +1875,51 @@ function LeadDetailModal({ lead, employees, canEdit, onClose, onChanged, setGlob
           </div>
         )}
 
-        {/* Log a call */}
+        {/* Log activity */}
         {leadTab === 'activity' && canEdit && (
-          <div className="border rounded-xl p-4 space-y-3 bg-muted/20">
-            <h3 className="font-semibold text-sm flex items-center gap-2"><PhoneCall className="w-4 h-4" /> Log Activity</h3>
+          <div className="border rounded-xl p-4 space-y-4 bg-muted/20">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <h3 className="font-semibold text-sm flex items-center gap-2"><PhoneCall className="w-4 h-4" /> Log activity</h3>
+              <div className="inline-flex rounded-lg border bg-white overflow-hidden text-xs">
+                {([['CALL', 'Call update'], ['MEETING', 'Meeting / visit']] as [ActivityType, string][]).map(([v, l]) => (
+                  <button key={v} type="button" onClick={() => setCallActivityType(v)} className={`px-3 py-1.5 ${callActivityType === v ? 'bg-blue-600 text-white' : 'hover:bg-muted'}`}>{l}</button>
+                ))}
+              </div>
+            </div>
 
-            <div className="flex flex-wrap items-center gap-3">
-              <label className="text-xs text-muted-foreground flex items-center gap-2">
-                Activity:
-                <select className="px-2 py-1 border rounded-lg text-sm" value={callActivityType} onChange={(e) => setCallActivityType(e.target.value as ActivityType)}>
-                  <option value="CALL">Call</option>
-                  <option value="MEETING">Meeting / Visit</option>
-                </select>
-              </label>
-              {/* Step 1: update status */}
-              <label className="text-xs text-muted-foreground flex items-center gap-2">
-                1. Update status *
-                <select className="px-2 py-1 border rounded-lg text-sm" value={callActivityStatus} onChange={(e) => { setCallActivityStatus(e.target.value); setCallStage(''); }}>
-                  <option value="">Select...</option>
-                  {ACTIVITY_STATUSES_LIVE().map((s) => <option key={s.value} value={s.value}>{s.label}</option>)}
-                </select>
-              </label>
+            {/* Step 1: status */}
+            <div className="flex flex-wrap gap-1.5">
+              {ACTIVITY_STATUSES_LIVE().map((s) => (
+                <button key={s.value} type="button" onClick={() => { setCallActivityStatus(s.value as ActivityStatus); setCallStage(''); }}
+                  className={`px-3 py-1.5 rounded-full text-xs border ${callActivityStatus === s.value ? 'bg-blue-600 text-white border-blue-600' : 'bg-white hover:bg-muted'}`}>{s.label}</button>
+              ))}
             </div>
 
             {callActivityStatus && (
               <div className="space-y-3">
-                {/* Step 2: follow-up date AND time */}
-                {needsFollowUp(callActivityStatus) && (
-                  <label className="text-xs text-muted-foreground flex items-center gap-2">
-                    {statusBase(callActivityStatus) === 'DEMO_BOOKED' ?'2. Demo date & time *' : '2. Follow-up date & time *'}
-                    <input type="datetime-local" className="px-2 py-1 border rounded-lg text-sm" value={callFollowUp} onChange={(e) => setCallFollowUp(e.target.value)} />
-                  </label>
+                {/* Which call is this about? Duration + recording always come from the call log. */}
+                {callActivityType === 'CALL' && (
+                  <div className="rounded-lg border bg-white p-3 space-y-1.5">
+                    <label className="text-xs font-medium text-muted-foreground">Which call is this about?</label>
+                    <select className="w-full px-2 py-1.5 border rounded-lg text-sm" value={effectiveCallPick} onChange={(e) => setCallPick(e.target.value)}>
+                      {linkableCalls.map((c) => (
+                        <option key={c.id} value={c.id}>{formatDateTime(c.calledAt)} · {callDirLabel(c.direction)} · {callDurLabel(c.durationSeconds)}{c.recordingUrl ? ' · recorded' : ''}</option>
+                      ))}
+                      <option value="">No call — only updating the status</option>
+                    </select>
+                    {pickedCall ? (
+                      <p className="text-xs text-green-700">You spoke for <b>{callDurLabel(pickedCall.durationSeconds)}</b> — taken from the call log, nothing to type.</p>
+                    ) : (
+                      <p className="text-xs text-muted-foreground">{linkableCalls.length ? 'No call selected: the lead and its history update, but nothing is added to the Call Log and it does not count as a contact.' : 'No tracked call found for this lead in the last 3 days. You can still update the status — it will not appear in the Call Log.'}</p>
+                    )}
+                  </div>
                 )}
 
-                {/* Demo booked needs the course */}
-                {statusBase(callActivityStatus) === 'DEMO_BOOKED' && (
-                  <label className="text-xs text-muted-foreground flex items-center gap-2">
-                    Course for the demo *
-                    <select className="px-2 py-1 border rounded-lg text-sm" value={callCourse} onChange={(e) => setCallCourse(e.target.value)}>
-                      <option value="">Select course...</option>
-                      {callCourse && !courses.some((c) => c.name === callCourse) && <option value={callCourse}>{callCourse}</option>}
-                      {courses.map((c) => <option key={c.id} value={c.name}>{c.name}</option>)}
-                    </select>
+                {needsFollowUp(callActivityStatus) && (
+                  <label className="text-xs text-muted-foreground flex flex-wrap items-center gap-2">
+                    {statusBase(callActivityStatus) === 'DEMO_BOOKED' ? 'Demo date & time *' : 'Follow-up date & time *'}
+                    <DateTimeField value={callFollowUp} onChange={setCallFollowUp} min={new Date()} placeholder="Pick date & time" />
+                    {statusBase(callActivityStatus) !== 'DEMO_BOOKED' && <span className="text-[11px]">Becomes a task in My Reminders.</span>}
                   </label>
                 )}
 
@@ -1810,72 +1927,59 @@ function LeadDetailModal({ lead, employees, canEdit, onClose, onChanged, setGlob
                   <div className="border rounded-lg p-3 space-y-2 bg-white">
                     <p className="text-xs font-medium text-muted-foreground">Demo details</p>
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                      <select className="px-2 py-1.5 border rounded-lg text-sm sm:col-span-2" value={callCourse} onChange={(e) => setCallCourse(e.target.value)}>
+                        <option value="">Course for the demo *</option>
+                        {callCourse && !courses.some((c) => c.name === callCourse) && <option value={callCourse}>{callCourse}</option>}
+                        {courses.map((c) => <option key={c.id} value={c.name}>{c.name}</option>)}
+                      </select>
                       <select className="px-2 py-1.5 border rounded-lg text-sm" value={demoMode} onChange={(e) => setDemoMode(e.target.value as DemoMode)}>
                         {DEMO_MODES.map((m) => <option key={m} value={m}>{DEMO_MODE_LABEL[m]} demo</option>)}
                       </select>
                       <select className="px-2 py-1.5 border rounded-lg text-sm" value={demoConductedBy} onChange={(e) => setDemoConductedBy(e.target.value)}>
-                        <option value="">Conducted by...</option>
+                        <option value="">Conducted by…</option>
                         {employees.map((e) => <option key={e.id} value={e.id}>{e.firstName} {e.lastName}</option>)}
                       </select>
                       {demoMode === 'ONLINE' && (
-                        <input type="email" className="px-2 py-1.5 border rounded-lg text-sm sm:col-span-2" placeholder="Student email * (online demo link is sent here)" value={demoEmail} onChange={(e) => setDemoEmail(e.target.value)} />
+                        <input type="email" className="px-2 py-1.5 border rounded-lg text-sm sm:col-span-2" placeholder="Student email * (the online demo link is sent here)" value={demoEmail} onChange={(e) => setDemoEmail(e.target.value)} />
                       )}
                     </div>
-                    {demoMode === 'ONLINE' && <p className="text-xs text-muted-foreground">Online demos run inside the portal for 60 minutes. Sales Admin is emailed and can watch it live.</p>}
+                    <p className="text-xs text-muted-foreground">
+                      {demoMode === 'ONLINE' ? 'Online demos run inside the portal for 60 minutes; Sales Admin is emailed and can watch live. ' : ''}
+                      The student and you both get a reminder 10 minutes before. {!lead.city && !lead.collegeName && <>Student details live in the <button type="button" onClick={() => setLeadTab('profile')} className="text-blue-600 underline">Profile</button> tab.</>}
+                    </p>
                   </div>
                 )}
 
                 {statusNeedsLostReason(callActivityStatus) && (
-                  <select className="px-2 py-1 border rounded-lg text-sm" value={callLostReason} onChange={(e) => setCallLostReason(e.target.value)}>
-                    <option value="">Reason (optional)...</option>
+                  <select className="px-2 py-1.5 border rounded-lg text-sm bg-white" value={callLostReason} onChange={(e) => setCallLostReason(e.target.value)}>
+                    <option value="">Reason (optional)…</option>
                     {lostReasonsLive().filter((r) => r.base !== 'NOT_INTERESTED').map((r) => <option key={r.value} value={r.value}>{r.label}</option>)}
                   </select>
                 )}
 
-                {/* Step 3: lead stage — follows the status automatically */}
                 <label className="text-xs text-muted-foreground flex flex-wrap items-center gap-2">
-                  3. Lead stage
-                  <select
-                    className="px-2 py-1 border rounded-lg text-sm"
-                    value={callStage}
-                    onChange={(e) => setCallStage(e.target.value as LeadStatus | '')}
-                    disabled={statusGoesToLost(callActivityStatus)}
-                  >
+                  Lead stage
+                  <select className="px-2 py-1.5 border rounded-lg text-sm bg-white" value={callStage} onChange={(e) => setCallStage(e.target.value)} disabled={statusGoesToLost(callActivityStatus)}>
                     <option value="">Auto → {statusStageLabel(callActivityStatus)}</option>
                     {!statusGoesToLost(callActivityStatus) && stageOptionsLive().filter((s) => !['LOST', 'NEW'].includes(stageBase(s.value))).map((s) => <option key={s.value} value={s.value}>{s.label}</option>)}
                   </select>
-                  <span className="text-[11px]">Set automatically from the status; change only if needed.</span>
+                  <span className="text-[11px]">Follows the status; change only if needed.</span>
                 </label>
 
-                {/* DNP = did not pick, so no notes to write */}
                 {notesNeeded(callActivityStatus) ? (
-                  <textarea
-                    className="w-full px-3 py-2 border rounded-lg text-sm"
-                    placeholder={callActivityType === 'MEETING' ? 'What was discussed in the meeting? *' : 'What happened on this call? *'}
-                    rows={2}
-                    value={callNotes}
-                    onChange={(e) => setCallNotes(e.target.value)}
-                  />
+                  <textarea className="w-full px-3 py-2 border rounded-lg text-sm bg-white" rows={2} value={callNotes} onChange={(e) => setCallNotes(e.target.value)}
+                    placeholder={callActivityType === 'MEETING' ? 'What was discussed in the meeting? *' : 'What was discussed? *'} />
                 ) : (
-                  <p className="text-xs text-muted-foreground italic">DNP — no notes needed.</p>
+                  <p className="text-xs text-muted-foreground italic">No notes needed for this status.</p>
                 )}
+
+                <div className="flex justify-end">
+                  <button onClick={submitCall} disabled={savingCall} className="px-4 py-2 text-sm rounded-lg bg-blue-600 text-white disabled:opacity-50">
+                    {savingCall ? 'Saving…' : 'Save update'}
+                  </button>
+                </div>
               </div>
             )}
-
-            <p className="text-xs font-medium text-muted-foreground pt-1">Student details</p>
-            <div className="grid grid-cols-2 gap-2">
-              <input className="px-2 py-1.5 border rounded-lg text-xs" placeholder="City" value={callCity} onChange={(e) => setCallCity(e.target.value)} />
-              <input className="px-2 py-1.5 border rounded-lg text-xs" placeholder="Education qualification" value={callEducation} onChange={(e) => setCallEducation(e.target.value)} />
-              <input className="px-2 py-1.5 border rounded-lg text-xs" placeholder="College name" value={callCollege} onChange={(e) => setCallCollege(e.target.value)} />
-              <input type="number" className="px-2 py-1.5 border rounded-lg text-xs" placeholder="Passed out year" value={callPassedOutYear} onChange={(e) => setCallPassedOutYear(e.target.value)} />
-              <input className="px-2 py-1.5 border rounded-lg text-xs" placeholder="Current status (e.g. Working, Job Seeking)" value={callCurrentStatus} onChange={(e) => setCallCurrentStatus(e.target.value)} />
-            </div>
-
-            <div className="flex justify-end">
-              <button onClick={submitCall} disabled={savingCall} className="px-4 py-2 text-sm rounded-lg bg-blue-600 text-white disabled:opacity-50">
-                {savingCall ? 'Saving...' : 'Log Activity'}
-              </button>
-            </div>
           </div>
         )}
 
@@ -1994,6 +2098,9 @@ function LeadDetailModal({ lead, employees, canEdit, onClose, onChanged, setGlob
                     <p className="text-xs text-amber-700">Rescheduled — {d.rescheduleReason}</p>
                   )}
 
+                  {canEdit && d.status === 'COMPLETED' && !d.outcome && actingDemo?.id !== d.id && (
+                    <button onClick={() => setActingDemo({ id: d.id, type: 'outcome' })} className="text-xs font-medium text-green-600 hover:underline">Add outcome</button>
+                  )}
                   {canEdit && d.status === 'SCHEDULED' && actingDemo?.id !== d.id && (
                     <div className="flex flex-wrap gap-2 pt-1">
                       <button onClick={() => setActingDemo({ id: d.id, type: 'complete' })} className="text-xs font-medium text-green-600 hover:underline">Mark Conducted</button>
@@ -2008,7 +2115,7 @@ function LeadDetailModal({ lead, employees, canEdit, onClose, onChanged, setGlob
                       {actingDemo.type === 'reschedule' ? (
                         <div className="space-y-2">
                           <div className="flex flex-wrap items-center gap-2">
-                            <input type="datetime-local" className="px-2 py-1 border rounded-lg text-xs" value={actionNewScheduledAt} onChange={(e) => setActionNewScheduledAt(e.target.value)} />
+                            <DateTimeField value={actionNewScheduledAt} onChange={setActionNewScheduledAt} min={new Date()} placeholder="New date & time" />
                             <select className="px-2 py-1 border rounded-lg text-xs" value={actionNewMode} onChange={(e) => setActionNewMode(e.target.value as DemoMode)}>
                               {DEMO_MODES.map((m) => <option key={m} value={m}>{DEMO_MODE_LABEL[m]}</option>)}
                             </select>
@@ -2020,7 +2127,7 @@ function LeadDetailModal({ lead, employees, canEdit, onClose, onChanged, setGlob
                             onChange={(e) => setActionRescheduleReason(e.target.value)}
                           />
                         </div>
-                      ) : actingDemo.type === 'complete' ? (
+                      ) : actingDemo.type === 'complete' || actingDemo.type === 'outcome' ? (
                         <div className="space-y-2">
                           <div className="flex flex-wrap items-center gap-2">
                             <select className="px-2 py-1 border rounded-lg text-xs" value={actionOutcome} onChange={(e) => setActionOutcome(e.target.value as DemoOutcome)}>
@@ -2034,15 +2141,22 @@ function LeadDetailModal({ lead, employees, canEdit, onClose, onChanged, setGlob
                               </select>
                             )}
                           </div>
-                          <label className="text-xs text-muted-foreground flex items-center gap-2">
-                            Proof of demo {d.proofUrl ? '(already attached — pick a file to replace it)' : '*'}:
-                            <input
-                              type="file"
-                              accept="image/*"
-                              className="text-xs"
-                              onChange={(e) => setActionProofFile(e.target.files?.[0] || null)}
-                            />
-                          </label>
+                          {actionOutcome && (
+                            <div className="text-xs rounded-lg bg-blue-50 text-blue-800 px-2 py-1.5">
+                              {OUTCOME_EFFECT[actionOutcome].text}.
+                              {OUTCOME_EFFECT[actionOutcome].followUp && (
+                                <span className="ml-2 inline-flex items-center gap-1 text-muted-foreground">Follow-up
+                                  <DateTimeField value={actionFollowUp} onChange={setActionFollowUp} min={new Date()} placeholder="Auto" />
+                                </span>
+                              )}
+                            </div>
+                          )}
+                          {actingDemo.type === 'complete' && !(d.mode === 'ONLINE' && d.roomName && d.startedAt) && (
+                            <label className="text-xs text-muted-foreground flex items-center gap-2">
+                              Proof of demo {d.proofUrl ? '(already attached — pick a file to replace it)' : '*'}:
+                              <input type="file" accept="image/*" className="text-xs" onChange={(e) => setActionProofFile(e.target.files?.[0] || null)} />
+                            </label>
+                          )}
                           <input
                             className="w-full px-2 py-1 border rounded-lg text-xs"
                             placeholder="Comments (optional)"
@@ -2081,7 +2195,7 @@ function LeadDetailModal({ lead, employees, canEdit, onClose, onChanged, setGlob
 // ── My Reminders: follow-ups due + open tasks, grouped by urgency ────────────
 interface TaskRow {
   id: string; title: string; description?: string | null; dueAt?: string | null; status: 'OPEN' | 'DONE' | 'CANCELLED';
-  completedAt?: string | null; bucket?: string;
+  completedAt?: string | null; bucket?: string; kind?: 'MANUAL' | 'FOLLOW_UP' | 'DEMO'; demoId?: string | null;
   lead?: { id: string; name: string; phone?: string } | null;
   assignedTo?: EmployeeLite; createdBy?: EmployeeLite | null;
 }
@@ -2225,7 +2339,7 @@ function TasksPanel({ isAdmin, canEdit, employees, onOpenLead }: { isAdmin: bool
           <h3 className="font-semibold text-sm">{isAdmin ? 'Create / assign a task' : 'Add a task for yourself'}</h3>
           <div className="flex flex-wrap gap-2">
             <input className="px-3 py-2 border rounded-lg text-sm flex-1 min-w-[220px]" placeholder="Task title *" value={title} onChange={(e) => setTitle(e.target.value)} />
-            <input type="datetime-local" className="px-2 py-2 border rounded-lg text-sm" value={due} onChange={(e) => setDue(e.target.value)} />
+            <DateTimeField value={due} onChange={setDue} placeholder="Due date & time" />
             {isAdmin && (
               <select className="px-2 py-2 border rounded-lg text-sm" value={assignee} onChange={(e) => setAssignee(e.target.value)}>
                 <option value="">Assign to me</option>
@@ -2258,7 +2372,7 @@ function TasksPanel({ isAdmin, canEdit, employees, onOpenLead }: { isAdmin: bool
               <tr><td colSpan={6} className="px-4 py-8 text-center text-muted-foreground">{loading ? 'Loading...' : 'No tasks'}</td></tr>
             ) : rows.map((t) => (
               <tr key={t.id} className="hover:bg-muted/30">
-                <td className="px-3 py-3"><span className="font-medium">{t.title}</span>{t.description && <p className="text-xs text-muted-foreground">{t.description}</p>}</td>
+                <td className="px-3 py-3">{t.kind && t.kind !== 'MANUAL' && <span className={`mr-2 text-[10px] font-semibold rounded-full px-2 py-0.5 ${t.kind === 'DEMO' ? 'bg-purple-100 text-purple-700' : 'bg-blue-100 text-blue-700'}`}>{t.kind === 'DEMO' ? 'Demo' : 'Follow-up'}</span>}<span className="font-medium">{t.title}</span>{t.description && <p className="text-xs text-muted-foreground">{t.description}</p>}</td>
                 <td className="px-3 py-3 text-xs">{t.lead ? <button onClick={() => onOpenLead(t.lead!.id)} className="text-blue-600 hover:underline">{t.lead.name}</button> : '—'}</td>
                 {isAdmin && <td className="px-3 py-3 text-xs">{t.assignedTo ? `${t.assignedTo.firstName} ${t.assignedTo.lastName}` : '—'}</td>}
                 <td className="px-3 py-3 text-xs whitespace-nowrap">{t.dueAt ? formatDateTime(t.dueAt) : '—'}</td>
@@ -2280,12 +2394,30 @@ function TasksPanel({ isAdmin, canEdit, employees, onOpenLead }: { isAdmin: bool
 }
 
 // ── My Base (Sales Admin): pool of unassigned leads — bulk hand-out and pull-back ──
-interface BaseSummary { pool: number; sources: { source: string; count: number }[]; batches: { label: string; count: number; lastAssignedAt: string | null }[] }
+interface BaseSummary {
+  pool: number; sources: { source: string; count: number }[]; batches: { label: string; count: number; lastAssignedAt: string | null }[];
+  aging: { label: string; count: number; min: number; max: number | null }[];
+  alerts: { staleDays: number; stale: number; neverTouched: number; overdueLeads: number; untouchedWithPeople: number };
+  people: { employeeId: string; name: string; open: number; overdue: number; untouched: number }[];
+  scouts: { scoutKey: string | null; count: number }[]; cities: { city: string; count: number }[]; courses: { course: string; count: number }[];
+}
+interface BaseView { id: string; name: string; tree: Record<string, string>; mine?: boolean; shared?: boolean }
+type PoolRow = Lead & { city?: string | null; lastContactAt?: string | null; _count?: { callLogs: number } };
 function MyBasePanel({ employees, onOpenLead }: { employees: EmployeeLite[]; onOpenLead: (id: string) => void }) {
   const monthLabel = new Date().toLocaleDateString('en-IN', { month: 'short', year: 'numeric' });
-  const [rows, setRows] = useState<Lead[]>([]);
+  const [rows, setRows] = useState<PoolRow[]>([]);
   const [meta, setMeta] = useState<ListMeta | null>(null);
   const [summary, setSummary] = useState<BaseSummary | null>(null);
+  const [scout, setScout] = useState('');
+  const [course, setCourse] = useState('');
+  const [city, setCity] = useState('');
+  const [minAge, setMinAge] = useState('');
+  const [maxAge, setMaxAge] = useState('');
+  const [untouched, setUntouched] = useState('');
+  const [sort, setSort] = useState<'oldest' | 'newest'>('oldest');
+  const [views, setViews] = useState<BaseView[]>([]);
+  const [viewName, setViewName] = useState('');
+  const [showPeople, setShowPeople] = useState(false);
   const [page, setPage] = useState(1);
   const [search, setSearch] = useState('');
   const [source, setSource] = useState('');
@@ -2308,19 +2440,41 @@ function MyBasePanel({ employees, onOpenLead }: { employees: EmployeeLite[]; onO
 
   const criteria = useCallback(() => ({
     search: search || undefined, source: source ? source.split(',') : undefined, createdFrom: from || undefined, createdTo: to || undefined,
-  }), [search, source, from, to]);
+    scoutKey: scout ? scout.split(',') : undefined, course: course ? course.split(',') : undefined, city: city ? city.split(',') : undefined,
+    minAgeDays: minAge !== '' ? Number(minAge) : undefined, maxAgeDays: maxAge !== '' ? Number(maxAge) : undefined, untouchedDays: untouched ? Number(untouched) : undefined,
+  }), [search, source, from, to, scout, course, city, minAge, maxAge, untouched]);
+
+  const filterState = { search, source, from, to, scout, course, city, minAge, maxAge, untouched, sort };
+  const anyFilter = !!(search || source || from || to || scout || course || city || minAge || maxAge || untouched);
+  const clearFilters = () => { setSearch(''); setSource(''); setFrom(''); setTo(''); setScout(''); setCourse(''); setCity(''); setMinAge(''); setMaxAge(''); setUntouched(''); };
+  const applyView = (t: Record<string, string>) => {
+    setSearch(t.search || ''); setSource(t.source || ''); setFrom(t.from || ''); setTo(t.to || ''); setScout(t.scout || ''); setCourse(t.course || '');
+    setCity(t.city || ''); setMinAge(t.minAge || ''); setMaxAge(t.maxAge || ''); setUntouched(t.untouched || ''); setSort((t.sort as 'oldest' | 'newest') || 'oldest');
+  };
+  const loadViews = useCallback(() => { api.get('/api/saved-filters', { params: { scope: 'mybase' } }).then((r) => setViews(r.data.data)).catch(() => setViews([])); }, []);
+  useEffect(() => { loadViews(); }, [loadViews]);
+  const saveView = async () => {
+    if (!viewName.trim()) return;
+    const tree: Record<string, string> = {};
+    Object.entries(filterState).forEach(([k, v]) => { if (v) tree[k] = String(v); });
+    try { await api.post('/api/saved-filters', { scope: 'mybase', name: viewName.trim(), tree }); setViewName(''); loadViews(); }
+    catch (err) { setError(errOf(err, 'Could not save the view')); }
+  };
+  const delView = async (id: string) => { await api.delete(`/api/saved-filters/${id}`).catch(() => {}); loadViews(); };
 
   const load = useCallback(async () => {
     setLoading(true); setError('');
     try {
-      const params: Record<string, string> = { page: String(page), limit: '50', assignedToId: 'NONE' };
+      const params: Record<string, string> = { page: String(page), limit: '50', sort };
       if (search) params.search = search; if (source) params.source = source; if (from) params.createdFrom = from; if (to) params.createdTo = to;
-      const [l, s] = await Promise.all([api.get('/api/sales/leads', { params }), api.get('/api/sales/mybase/summary')]);
+      if (scout) params.scoutKey = scout; if (course) params.course = course; if (city) params.city = city;
+      if (minAge !== '') params.minAgeDays = minAge; if (maxAge !== '') params.maxAgeDays = maxAge; if (untouched) params.untouchedDays = untouched;
+      const [l, s] = await Promise.all([api.get('/api/sales/mybase/pool', { params }), api.get('/api/sales/mybase/summary')]);
       setRows(l.data.data); setMeta(l.data.meta); setSummary(s.data.data);
     } catch (err) { setError(errOf(err, 'Failed to load My Base')); }
     finally { setLoading(false); }
-  }, [page, search, source, from, to]);
-  useEffect(() => { setPage(1); setPicked(new Set()); setAllMatching(false); }, [search, source, from, to]);
+  }, [page, search, source, from, to, scout, course, city, minAge, maxAge, untouched, sort]);
+  useEffect(() => { setPage(1); setPicked(new Set()); setAllMatching(false); }, [search, source, from, to, scout, course, city, minAge, maxAge, untouched, sort]);
   useEffect(() => { load(); }, [load]);
 
   const pageAllPicked = rows.length > 0 && rows.every((r) => picked.has(r.id));
@@ -2374,6 +2528,51 @@ function MyBasePanel({ employees, onOpenLead }: { employees: EmployeeLite[]; onO
         <StatCard icon={Inbox} label="In My Base" value={summary?.pool ?? '—'} />
         {(summary?.sources || []).slice(0, 3).map((s) => <StatCard key={s.source} icon={Users} label={s.source} value={s.count} />)}
       </div>
+
+      {summary && (summary.alerts.stale > 0 || summary.alerts.neverTouched > 0 || summary.alerts.overdueLeads > 0 || summary.alerts.untouchedWithPeople > 0) && (
+        <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-2">
+          {summary.alerts.stale > 0 && <button onClick={() => { clearFilters(); setMinAge(String(summary.alerts.staleDays)); }} className="text-left text-sm rounded-lg border border-amber-300 bg-amber-50 px-3 py-2"><b>{summary.alerts.stale}</b> lead{summary.alerts.stale === 1 ? '' : 's'} sitting in My Base for {summary.alerts.staleDays}+ days <span className="text-xs text-amber-700 block">Click to review</span></button>}
+          {summary.alerts.neverTouched > 0 && <div className="text-sm rounded-lg border border-slate-200 bg-slate-50 px-3 py-2"><b>{summary.alerts.neverTouched}</b> in My Base never contacted</div>}
+          {summary.alerts.overdueLeads > 0 && <button onClick={() => setShowPeople(true)} className="text-left text-sm rounded-lg border border-red-300 bg-red-50 px-3 py-2"><b>{summary.alerts.overdueLeads}</b> overdue follow-ups with the team <span className="text-xs text-red-700 block">See who</span></button>}
+          {summary.alerts.untouchedWithPeople > 0 && <button onClick={() => setShowPeople(true)} className="text-left text-sm rounded-lg border border-orange-300 bg-orange-50 px-3 py-2"><b>{summary.alerts.untouchedWithPeople}</b> assigned leads untouched {summary.alerts.staleDays}+ days <span className="text-xs text-orange-700 block">See who</span></button>}
+        </div>
+      )}
+
+      {summary && summary.aging.length > 0 && (
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="text-xs text-muted-foreground">Lead age:</span>
+          {summary.aging.map((b) => {
+            const active = minAge === String(b.min) && maxAge === (b.max == null ? '' : String(b.max));
+            return (
+              <button key={b.label} onClick={() => { if (active) { setMinAge(''); setMaxAge(''); } else { setMinAge(String(b.min)); setMaxAge(b.max == null ? '' : String(b.max)); } }}
+                className={`text-xs rounded-full border px-3 py-1 ${active ? 'bg-blue-600 text-white border-blue-600' : 'bg-white hover:bg-muted'}`}>{b.label} · <b>{b.count}</b></button>
+            );
+          })}
+        </div>
+      )}
+
+      {summary && summary.people.length > 0 && (
+        <section className="border rounded-xl bg-card">
+          <button onClick={() => setShowPeople((v) => !v)} className="w-full flex items-center justify-between px-4 py-3 text-sm font-semibold">
+            <span>Team load — who can take more?</span><span className="text-xs text-muted-foreground font-normal">{showPeople ? 'Hide' : 'Show'}</span>
+          </button>
+          {showPeople && (
+            <table className="w-full text-sm border-t">
+              <thead className="text-left text-xs uppercase text-muted-foreground bg-muted/40"><tr><th className="px-4 py-2">Salesperson</th><th className="px-4 py-2">Open leads</th><th className="px-4 py-2">Overdue follow-ups</th><th className="px-4 py-2">Untouched {summary.alerts.staleDays}d+</th><th className="px-4 py-2"></th></tr></thead>
+              <tbody className="divide-y">
+                {summary.people.map((pp) => (
+                  <tr key={pp.employeeId}>
+                    <td className="px-4 py-2">{pp.name}</td><td className="px-4 py-2">{pp.open}</td>
+                    <td className={`px-4 py-2 ${pp.overdue ? 'text-red-600 font-medium' : ''}`}>{pp.overdue}</td>
+                    <td className={`px-4 py-2 ${pp.untouched ? 'text-orange-600 font-medium' : ''}`}>{pp.untouched}</td>
+                    <td className="px-4 py-2 text-right"><button onClick={() => toggleTarget(pp.employeeId)} className={`text-xs rounded-full border px-3 py-1 ${targets.has(pp.employeeId) ? 'bg-blue-50 border-blue-400 text-blue-700' : 'hover:bg-muted'}`}>{targets.has(pp.employeeId) ? 'Selected to assign' : 'Select'}</button></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </section>
+      )}
       {error && <div className="bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg px-4 py-3">{error}</div>}
       {notice && <div className="bg-green-50 border border-green-200 text-green-700 text-sm rounded-lg px-4 py-3">{notice}</div>}
 
@@ -2429,7 +2628,33 @@ function MyBasePanel({ employees, onOpenLead }: { employees: EmployeeLite[]; onO
       <div className="flex flex-wrap items-center gap-2">
         <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search name, phone, email…" className={`${inp} w-64`} />
         <MultiSelect label="Source" options={(summary?.sources || []).map((s) => ({ value: s.source, label: `${s.source} (${s.count})` }))} value={source} onChange={setSource} />
+        {(summary?.scouts?.length ?? 0) > 0 && <MultiSelect label="Lead scout" options={summary!.scouts.map((x) => ({ value: x.scoutKey || '', label: `${x.scoutKey ? scoutLabel(x.scoutKey) : 'No scout'} (${x.count})` })).filter((o) => o.value)} value={scout} onChange={setScout} />}
+        {(summary?.courses?.length ?? 0) > 0 && <MultiSelect label="Course" options={summary!.courses.map((x) => ({ value: x.course, label: `${x.course} (${x.count})` }))} value={course} onChange={setCourse} />}
+        {(summary?.cities?.length ?? 0) > 0 && <MultiSelect label="City" options={summary!.cities.map((x) => ({ value: x.city, label: `${x.city} (${x.count})` }))} value={city} onChange={setCity} />}
         <label className="text-xs text-muted-foreground flex items-center gap-1">Created <input type="date" value={from} onChange={(e) => setFrom(e.target.value)} className={inp} /> – <input type="date" value={to} onChange={(e) => setTo(e.target.value)} className={inp} /></label>
+        <label className="text-xs text-muted-foreground flex items-center gap-1">Not contacted for
+          <select value={untouched} onChange={(e) => setUntouched(e.target.value)} className={inp}><option value="">Any</option><option value="3">3+ days</option><option value="7">7+ days</option><option value="14">14+ days</option></select>
+        </label>
+        <select value={sort} onChange={(e) => setSort(e.target.value as 'oldest' | 'newest')} className={inp}><option value="oldest">Oldest first</option><option value="newest">Newest first</option></select>
+        {anyFilter && <button onClick={clearFilters} className="text-xs text-red-600 hover:underline">Clear filters</button>}
+      </div>
+
+      {/* Saved views */}
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="text-xs text-muted-foreground">Saved views:</span>
+        {views.length === 0 && <span className="text-xs text-muted-foreground italic">none yet</span>}
+        {views.map((v) => (
+          <span key={v.id} className="inline-flex items-center rounded-full border bg-white text-xs">
+            <button onClick={() => applyView(v.tree)} className="pl-3 pr-2 py-1 hover:text-blue-700">{v.name}{v.shared ? ' · shared' : ''}</button>
+            <button onClick={() => delView(v.id)} className="pr-2 py-1 text-muted-foreground hover:text-red-600" title="Delete view"><X className="w-3 h-3" /></button>
+          </span>
+        ))}
+        {anyFilter && (
+          <span className="inline-flex items-center gap-1">
+            <input value={viewName} onChange={(e) => setViewName(e.target.value)} placeholder="Name this view" className="border rounded-lg px-2 py-1 text-xs w-36" />
+            <button onClick={saveView} disabled={!viewName.trim()} className="text-xs rounded-lg border px-2 py-1 disabled:opacity-40">Save</button>
+          </span>
+        )}
       </div>
 
       {picked.size > 0 && meta && meta.total > rows.length && !allMatching && pageAllPicked && (
@@ -2444,7 +2669,7 @@ function MyBasePanel({ employees, onOpenLead }: { employees: EmployeeLite[]; onO
           <thead className="bg-muted/50 text-left text-xs uppercase text-muted-foreground">
             <tr>
               <th className="px-3 py-3 w-8"><input type="checkbox" checked={pageAllPicked || allMatching} onChange={togglePage} /></th>
-              <th className="px-3 py-3">Name</th><th className="px-3 py-3">Phone</th><th className="px-3 py-3">Source</th><th className="px-3 py-3">Course</th><th className="px-3 py-3">Lead stage</th><th className="px-3 py-3">Created</th>
+              <th className="px-3 py-3">Name</th><th className="px-3 py-3">Phone</th><th className="px-3 py-3">Source</th><th className="px-3 py-3">Scout</th><th className="px-3 py-3">Course</th><th className="px-3 py-3">City</th><th className="px-3 py-3">Age</th><th className="px-3 py-3">Last contact</th>
             </tr>
           </thead>
           <tbody className="divide-y">
@@ -2452,11 +2677,13 @@ function MyBasePanel({ employees, onOpenLead }: { employees: EmployeeLite[]; onO
               <tr key={r.id} className="hover:bg-muted/30">
                 <td className="px-3 py-2"><input type="checkbox" checked={allMatching || picked.has(r.id)} onChange={() => toggleOne(r.id)} /></td>
                 <td className="px-3 py-2"><button onClick={() => onOpenLead(r.id)} className="text-blue-600 hover:underline font-medium">{r.name}</button></td>
-                <td className="px-3 py-2 text-xs">{r.phone}</td><td className="px-3 py-2 text-xs">{r.source || '—'}</td><td className="px-3 py-2 text-xs">{r.courseInterest || '—'}</td>
-                <td className="px-3 py-2 text-xs">{String(r.status).replace(/_/g, ' ')}</td><td className="px-3 py-2 text-xs text-muted-foreground">{formatDate(r.createdAt)}</td>
+                <td className="px-3 py-2 text-xs">{r.phone}</td><td className="px-3 py-2 text-xs">{r.source || '—'}</td>
+                <td className="px-3 py-2 text-xs">{r.scoutKey ? scoutLabel(r.scoutKey) : '—'}</td><td className="px-3 py-2 text-xs">{r.courseInterest || '—'}</td><td className="px-3 py-2 text-xs">{r.city || '—'}</td>
+                {(() => { const d = Math.floor((Date.now() - new Date(r.createdAt).getTime()) / 86400000); return <td className={`px-3 py-2 text-xs ${d >= (summary?.alerts.staleDays ?? 7) ? 'text-amber-700 font-medium' : 'text-muted-foreground'}`} title={formatDate(r.createdAt)}>{d}d</td>; })()}
+                <td className="px-3 py-2 text-xs text-muted-foreground">{r.lastContactAt ? formatDate(r.lastContactAt) : 'Never'}</td>
               </tr>
             ))}
-            {rows.length === 0 && !loading && <tr><td colSpan={7} className="px-4 py-8 text-center text-muted-foreground">My Base is empty</td></tr>}
+            {rows.length === 0 && !loading && <tr><td colSpan={9} className="px-4 py-8 text-center text-muted-foreground">{anyFilter ? 'No leads match these filters' : 'My Base is empty'}</td></tr>}
           </tbody>
         </table>
       </div>
