@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import api from '@/lib/api';
 import { useRole } from '@/hooks/useAuth';
+import { useModuleAccess } from '@/hooks/useModuleAccess';
 import { UserPlus, ChevronRight, Plus, X, Loader2, Users, RefreshCw, Pencil, Trash2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import BulkOnboarding from '@/components/BulkOnboarding';
@@ -45,7 +46,8 @@ const STATUS_LABEL: Record<string, string> = {
 
 export default function OnboardingPage() {
   const { can, isSuperAdmin } = useRole();
-  const isHR = can('HR');
+  const { hasModule } = useModuleAccess();
+  const isHR = can('HR') || hasModule('HR', 'EDIT');
 
   const [requests, setRequests] = useState<OnboardingRequest[]>([]);
   const [total, setTotal] = useState(0);

@@ -4,6 +4,7 @@ import { api } from '@/lib/api';
 import { Employee, ApiMeta } from '@/types';
 import { getInitials, formatDate } from '@/lib/utils';
 import { useRole } from '@/hooks/useAuth';
+import { useModuleAccess } from '@/hooks/useModuleAccess';
 import {
   Search, Plus, Filter, Loader2, AlertCircle, ChevronLeft, ChevronRight,
   Eye, Mail, Users, X, Check, UserCheck,
@@ -444,7 +445,10 @@ function TempPasswordBanner({ password, onDismiss }: { password: string; onDismi
 
 export default function Employees() {
   const navigate = useNavigate();
-  const { can } = useRole();
+  const { can: canRole } = useRole();
+  const { hasModule } = useModuleAccess();
+  // HR login role, or HR-module EDIT access (HR department staff whose login role is Manager/Employee).
+  const can = (r: Parameters<typeof canRole>[0]) => canRole(r) || (r === 'HR' && hasModule('HR', 'EDIT'));
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [meta, setMeta] = useState<ApiMeta | null>(null);
   const [loading, setLoading] = useState(true);

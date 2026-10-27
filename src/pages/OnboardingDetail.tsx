@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import api, { BASE_URL } from '@/lib/api';
 import { useRole } from '@/hooks/useAuth';
+import { useModuleAccess } from '@/hooks/useModuleAccess';
 import {
   CheckCircle, XCircle, FileText, ArrowLeft,
   Loader2, AlertTriangle, X, User, GraduationCap,
@@ -68,7 +69,8 @@ export default function OnboardingDetailPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const { can } = useRole();
-  const isHR = can('HR');
+  const { hasModule } = useModuleAccess();
+  const isHR = can('HR') || hasModule('HR', 'EDIT');
 
   const [data, setData] = useState<OnboardingDetail | null>(null);
   const [loading, setLoading] = useState(true);

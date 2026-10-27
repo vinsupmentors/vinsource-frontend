@@ -24,6 +24,8 @@ interface NavItem {
   to: string;
   icon: React.ComponentType<{ className?: string }>;
   minRole?: Role;
+  /** Also show when the HR module access is at least this level (HR-department staff whose login role is below HR). */
+  hrLevel?: 'VIEW' | 'EDIT';
   hideFor?: Role[];
   /** Only show this item to employees who actually have a TrainerAssignment row. */
   trainersOnly?: boolean;
@@ -41,7 +43,7 @@ const navItems: NavItem[] = [
   // and there doesn't need to be, since the controller scopes by identity
   // rather than a module permission (see calendar.controller.ts).
   { label: 'Calendar',       to: '/calendar',       icon: CalendarRange },
-  { label: 'Employees',      to: '/employees',      icon: Users,         minRole: 'MANAGER' },
+  { label: 'Employees',      to: '/employees',      icon: Users,         minRole: 'MANAGER', hrLevel: 'VIEW' },
   {
     label: 'Attendance',
     to: '/attendance',
@@ -57,7 +59,7 @@ const navItems: NavItem[] = [
   { label: 'Assets',         to: '/assets',         icon: Package },
   { label: 'Documents',      to: '/documents',      icon: FileText },
   { label: 'Helpdesk',       to: '/helpdesk',       icon: HelpCircle },
-  { label: 'Onboarding',     to: '/onboarding',     icon: UserPlus,      minRole: 'MANAGER' },
+  { label: 'Onboarding',     to: '/onboarding',     icon: UserPlus,      minRole: 'MANAGER', hrLevel: 'VIEW' },
   { label: 'Appt. Letters',  to: '/appointment-letters', icon: FileBadge,   minRole: 'HR' },
   { label: 'My Training',    to: '/my-training',    icon: Presentation, trainersOnly: true },
   { label: 'Demo Requests',  to: '/demo-requests',  icon: Presentation, demoAccess: true },
@@ -267,7 +269,9 @@ export function Sidebar() {
     setExpanded((p) => p.includes(label) ? p.filter((l) => l !== label) : [...p, label]);
 
   const visible = navItems.filter((item) => {
-    if (item.minRole && !can(item.minRole)) return false;
+    const hrRank: Record<string, number> = { NONE: 0, VIEW: 1, EDIT: 2, ADMIN: 3 };
+    const hrOk = !!item.hrLevel && hrRank[modules['HR'] || 'NONE'] >= hrRank[item.hrLevel];
+    if (item.minRole && !can(item.minRole) && !hrOk) return false;
     if (item.hideFor && role && item.hideFor.includes(role as Role)) return false;
     // "My Training" shows if the user is assigned as a trainer OR has Production module access
     if (item.trainersOnly && !user?.isTrainer && !modules['PRODUCTION_TRAINING']) return false;
