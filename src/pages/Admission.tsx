@@ -497,7 +497,7 @@ function NewAdmissionTab({ canEdit, setError }: { canEdit: boolean; setError: (s
             </Field>
             <Field label="Payment Mode">
               <select className={inputCls} value={paymentMode} onChange={(e) => setPaymentMode(e.target.value)}>
-                {['CASH', 'UPI', 'CARD', 'NET_BANKING', 'CHEQUE', 'OTHER'].map((m) => <option key={m} value={m}>{m}</option>)}
+                {['CASH', 'UPI', 'CARD', 'NET_BANKING', 'CHEQUE', 'JODO', 'OTHER'].map((m) => <option key={m} value={m}>{m}</option>)}
               </select>
             </Field>
           </div>

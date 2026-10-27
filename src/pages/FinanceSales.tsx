@@ -3,7 +3,7 @@ import api from '@/lib/api';
 import { useModuleAccess } from '@/hooks/useModuleAccess';
 import { Lock, Plus, X, Wallet, TrendingUp, Receipt, Search, Trash2, CheckCircle2, Ban, Users, AlertTriangle, Percent } from 'lucide-react';
 
-type PaymentMode = 'CASH' | 'UPI' | 'CARD' | 'NET_BANKING' | 'CHEQUE' | 'OTHER';
+type PaymentMode = 'CASH' | 'UPI' | 'CARD' | 'NET_BANKING' | 'CHEQUE' | 'JODO' | 'OTHER';
 type FeePlanType = 'FULL' | 'PART' | 'EMI';
 type FeePlanStatus = 'ACTIVE' | 'CANCELLED' | 'COMPLETED' | 'REFUNDED';
 type FeeInstallmentStatus = 'PENDING' | 'PENDING_APPROVAL' | 'PAID' | 'OVERDUE' | 'WAIVED';
@@ -29,7 +29,7 @@ interface Stats {
   totalTransactions: number;
 }
 
-const MODES: PaymentMode[] = ['CASH', 'UPI', 'CARD', 'NET_BANKING', 'CHEQUE', 'OTHER'];
+const MODES: PaymentMode[] = ['CASH', 'UPI', 'CARD', 'NET_BANKING', 'CHEQUE', 'JODO', 'OTHER'];
 
 const fmt = (n: number) => `₹${n.toLocaleString('en-IN')}`;
 
@@ -778,7 +778,7 @@ function PlanDetailModal({ planId, canEdit, canApprove, onClose, onChanged }: {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [collectingId, setCollectingId] = useState<string | null>(null);
-  const [collectForm, setCollectForm] = useState({ amount: '', mode: 'UPI' as PaymentMode, collectedAt: new Date().toISOString().slice(0, 10) });
+  const [collectForm, setCollectForm] = useState({ amount: '', mode: 'UPI' as PaymentMode, collectedAt: new Date().toISOString().slice(0, 10), reference: '' });
   const [interestDraft, setInterestDraft] = useState('');
   const [savingInterest, setSavingInterest] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -810,7 +810,7 @@ function PlanDetailModal({ planId, canEdit, canApprove, onClose, onChanged }: {
 
   const startCollect = (inst: Installment) => {
     setCollectingId(inst.id);
-    setCollectForm({ amount: String(inst.amount), mode: 'UPI', collectedAt: new Date().toISOString().slice(0, 10) });
+    setCollectForm({ amount: String(inst.amount), mode: 'UPI', collectedAt: new Date().toISOString().slice(0, 10), reference: '' });
   };
 
   const submitCollect = async () => {
@@ -819,7 +819,7 @@ function PlanDetailModal({ planId, canEdit, canApprove, onClose, onChanged }: {
     setError('');
     try {
       await api.post(`/api/finance-sales/installments/${collectingId}/collect`, {
-        amount: collectForm.amount, mode: collectForm.mode, collectedAt: collectForm.collectedAt,
+        amount: collectForm.amount, mode: collectForm.mode, collectedAt: collectForm.collectedAt, reference: collectForm.reference || undefined,
       });
       setCollectingId(null);
       await load();
@@ -1111,6 +1111,7 @@ function PlanDetailModal({ planId, canEdit, canApprove, onClose, onChanged }: {
                             {MODES.map((m) => <option key={m} value={m}>{m.replace('_', ' ')}</option>)}
                           </select>
                           <input type="date" className="px-2 py-1.5 border rounded-lg text-sm" value={collectForm.collectedAt} onChange={(e) => setCollectForm({ ...collectForm, collectedAt: e.target.value })} />
+                          <input className="px-2 py-1.5 border rounded-lg text-sm col-span-2 md:col-span-3" placeholder={collectForm.mode === 'JODO' ? 'JODO reference / transaction id' : 'UTR / transaction reference (optional)'} value={collectForm.reference} onChange={(e) => setCollectForm({ ...collectForm, reference: e.target.value })} />
                           <div className="col-span-2 md:col-span-3 flex justify-end gap-2">
                             <button onClick={() => setCollectingId(null)} className="px-3 py-1.5 text-xs rounded-lg border">Cancel</button>
                             <button onClick={submitCollect} disabled={busy} className="px-3 py-1.5 text-xs rounded-lg bg-green-600 text-white disabled:opacity-50">

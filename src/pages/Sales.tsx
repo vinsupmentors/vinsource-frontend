@@ -168,7 +168,7 @@ const CFG_COLOR: Record<string, string> = {
   orange: 'bg-orange-100 text-orange-700', red: 'bg-red-100 text-red-700', purple: 'bg-purple-100 text-purple-700', pink: 'bg-pink-100 text-pink-700', teal: 'bg-teal-100 text-teal-700',
 };
 
-type LeadTab = 'profile' | 'activity' | 'tasks' | 'demo' | 'notes' | 'history';
+type LeadTab = 'profile' | 'activity' | 'tasks' | 'demo' | 'fees' | 'notes' | 'history';
 
 interface LeadHistoryRow {
   id: string; type: string; summary: string; createdAt: string; actor?: EmployeeLite | null;
@@ -530,8 +530,8 @@ function MultiSelect({ label, options, value, onChange }: {
 }
 
 // ── Main page ────────────────────────────────────────────────────────────
-type Tab = 'dashboard' | 'leads' | 'reminders' | 'tasks' | 'summaries' | 'activityMonitor' | 'pulse' | 'leadQuality' | 'liveDemos' | 'demoBooked' | 'demoRescheduled' | 'demoConducted' | 'devices' | 'unmatchedCalls' | 'callLog' | 'leaderboard' | 'targets' | 'myBase' | 'batches' | 'leadControl' | 'today' | 'callAnalytics' | 'config' | 'transcripts';
-const VALID_TABS: Tab[] = ['dashboard', 'transcripts', 'config', 'leads', 'reminders', 'tasks', 'summaries', 'activityMonitor', 'pulse', 'leadQuality', 'liveDemos', 'demoBooked', 'demoRescheduled', 'demoConducted', 'devices', 'unmatchedCalls', 'callLog', 'leaderboard', 'targets', 'myBase', 'batches', 'leadControl', 'today', 'callAnalytics'];
+type Tab = 'collections' | 'dashboard' | 'leads' | 'reminders' | 'tasks' | 'summaries' | 'activityMonitor' | 'pulse' | 'leadQuality' | 'liveDemos' | 'demoBooked' | 'demoRescheduled' | 'demoConducted' | 'devices' | 'unmatchedCalls' | 'callLog' | 'leaderboard' | 'targets' | 'myBase' | 'batches' | 'leadControl' | 'today' | 'callAnalytics' | 'config' | 'transcripts';
+const VALID_TABS: Tab[] = ['collections', 'dashboard', 'transcripts', 'config', 'leads', 'reminders', 'tasks', 'summaries', 'activityMonitor', 'pulse', 'leadQuality', 'liveDemos', 'demoBooked', 'demoRescheduled', 'demoConducted', 'devices', 'unmatchedCalls', 'callLog', 'leaderboard', 'targets', 'myBase', 'batches', 'leadControl', 'today', 'callAnalytics'];
 // Sales Pulse / Lead Quality are aggregate, cross-rep views — admin only.
 // BDAs get Demo Booked/Rescheduled/Conducted instead, scoped to their own leads.
 // Devices (issuing call-tracking tokens) is admin-only too. Unmatched Calls
@@ -778,6 +778,7 @@ export default function SalesPage() {
               { id: 'today' as Tab, label: 'Today', icon: Sun },
               { id: 'leads' as Tab, label: 'Leads', icon: Users },
               { id: 'reminders' as Tab, label: 'My Reminders', icon: Bell },
+              { id: 'collections' as Tab, label: 'Collections', icon: Percent },
               { id: 'tasks' as Tab, label: 'Manage Tasks', icon: ListChecks },
               { id: 'myBase' as Tab, label: 'My Base', icon: Inbox },
               { id: 'batches' as Tab, label: 'Batches', icon: Layers },
@@ -801,6 +802,7 @@ export default function SalesPage() {
               { id: 'today' as Tab, label: 'Today', icon: Sun },
               { id: 'leads' as Tab, label: 'Leads', icon: Users },
               { id: 'reminders' as Tab, label: 'My Reminders', icon: Bell },
+              { id: 'collections' as Tab, label: 'Collections', icon: Percent },
               { id: 'tasks' as Tab, label: 'My Tasks', icon: ListChecks },
               { id: 'callLog' as Tab, label: 'Call Log', icon: History },
               { id: 'callAnalytics' as Tab, label: 'My Call Stats', icon: BarChart3 },
@@ -1033,6 +1035,8 @@ export default function SalesPage() {
       {tab === 'reminders' && <TaskBoard isAdmin={isAdmin} canEdit={canEdit} employees={employees} onOpenLead={openLeadDetail} manage={false} />}
 
       {tab === 'tasks' && <TaskBoard isAdmin={isAdmin} canEdit={canEdit} employees={employees} onOpenLead={openLeadDetail} manage />}
+
+      {tab === 'collections' && <CollectionsPanel isAdmin={isAdmin} employees={employees} onOpenLead={openLeadDetail} />}
 
       {tab === 'dashboard' && <DashboardPanel isAdmin={isAdmin} employees={employees} go={setTab} />}
 
@@ -1891,7 +1895,7 @@ function LeadDetailModal({ lead, employees, canEdit, isAdmin, onClose, onChanged
         <div className="flex flex-wrap gap-1 border-b -mt-2">
           {([
             ['profile', 'Profile'], ['activity', 'Activity'], ['tasks', 'Tasks / Reminders'],
-            ['demo', `Meeting / Demo${demos.length ? ` (${demos.length})` : ''}`], ['notes', 'Notes'], ['history', 'History'],
+            ['demo', `Meeting / Demo${demos.length ? ` (${demos.length})` : ''}`], ['fees', 'Fees'], ['notes', 'Notes'], ['history', 'History'],
           ] as [LeadTab, string][]).map(([id, label]) => (
             <button key={id} onClick={() => setLeadTab(id)}
               className={`px-3 py-2 text-sm font-medium border-b-2 -mb-px ${leadTab === id ? 'border-blue-600 text-blue-600' : 'border-transparent text-muted-foreground hover:text-foreground'}`}>
@@ -2164,6 +2168,8 @@ function LeadDetailModal({ lead, employees, canEdit, isAdmin, onClose, onChanged
             </div>
           )}
         </div>}
+
+        {leadTab === 'fees' && <LeadFeesTab leadId={lead.id} />}
 
         {/* Full lead history — from creation, never edited */}
         {leadTab === 'history' && <div>
@@ -5400,6 +5406,7 @@ interface DashData {
   today: { calls: number; talkMinutes: number; demos: number; followUps: number; overdue: number; tasks: number; pendingOutcome: number; untouchedNew: number };
   month: { newLeads: number; enrolled: number; demosDone: number; goal: number; revenueGoal: number; dayOfMonth: number; daysInMonth: number };
   funnel: Record<string, number>; openTotal: number;
+  money?: { collectedMonth: number; awaitingAmount: number; awaitingCount: number; overdueAmount: number; overdueCount: number };
   callsTrend: { date: string; count: number }[];
   sources: { source: string; leads: number; enrolled: number; rate: number }[];
   pool: number;
@@ -5464,6 +5471,14 @@ function DashboardPanel({ isAdmin, employees, go }: { isAdmin: boolean; employee
         {tile('Demos today', t.demos, 'scheduled for today', 'text-purple-600', () => go(isAdmin ? 'liveDemos' : 'demoBooked'))}
         {tile('Open tasks due', t.tasks, 'incl. follow-ups & demos', 'text-foreground', () => go(isAdmin ? 'tasks' : 'reminders'))}
       </div>
+
+      {data.money && (
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+          {tile('Collected this month', formatCurrency(data.money.collectedMonth), 'verified by Finance', 'text-green-700', () => go('collections'))}
+          {tile('Waiting for Finance', formatCurrency(data.money.awaitingAmount), `${data.money.awaitingCount} payment${data.money.awaitingCount === 1 ? '' : 's'} to verify`, 'text-amber-700', () => go('collections'))}
+          {tile('Overdue fees', formatCurrency(data.money.overdueAmount), `${data.money.overdueCount} instalment${data.money.overdueCount === 1 ? '' : 's'} to chase`, data.money.overdueCount ? 'text-red-600' : 'text-foreground', () => go('collections'))}
+        </div>
+      )}
 
       <div className="grid lg:grid-cols-3 gap-4">
         <section className="border rounded-xl bg-card p-4 space-y-3 lg:col-span-1">
@@ -5556,6 +5571,135 @@ function DashboardPanel({ isAdmin, employees, go }: { isAdmin: boolean; employee
           </section>
         )}
       </div>
+    </div>
+  );
+}
+
+// ── Fees on a lead: what was quoted, what Finance has verified, what is still due ──
+interface FeeInst { id: string; dueDate: string; amount: number; status: 'PENDING' | 'PENDING_APPROVAL' | 'PAID' | 'OVERDUE' | 'WAIVED'; paidAt?: string | null; mode?: string | null; reference?: string | null }
+interface FeeData {
+  total: number; paid: number; awaiting: number; overdue: number; balance: number; pct: number; nextDue: { dueDate: string; amount: number } | null;
+  plans: { id: string; courseName: string; totalFee: number; planType: string; admissionId?: string | null; status: string; installments: FeeInst[] }[];
+}
+const FEE_STATUS: Record<string, { label: string; cls: string }> = {
+  PAID: { label: 'Paid', cls: 'bg-green-100 text-green-700' },
+  PENDING_APPROVAL: { label: 'With Finance', cls: 'bg-amber-100 text-amber-700' },
+  PENDING: { label: 'Due', cls: 'bg-slate-100 text-slate-700' },
+  OVERDUE: { label: 'Overdue', cls: 'bg-red-100 text-red-700' },
+  WAIVED: { label: 'Waived', cls: 'bg-slate-100 text-slate-500' },
+};
+function LeadFeesTab({ leadId }: { leadId: string }) {
+  const [data, setData] = useState<FeeData | null>(null);
+  const [error, setError] = useState('');
+  useEffect(() => {
+    api.get(`/api/sales/leads/${leadId}/fees`).then((r) => setData(r.data.data))
+      .catch((err: unknown) => setError((err as { response?: { data?: { message?: string } } }).response?.data?.message || 'Could not load fees'));
+  }, [leadId]);
+  if (error) return <p className="text-sm text-red-700">{error}</p>;
+  if (!data) return <p className="text-sm text-muted-foreground">Loading…</p>;
+  if (data.plans.length === 0) {
+    return (
+      <div className="border border-dashed rounded-xl p-6 text-center space-y-2">
+        <p className="text-sm text-muted-foreground">No fee plan yet for this lead.</p>
+        <a href="/admission" target="_blank" rel="noreferrer" className="inline-block px-4 py-2 text-sm rounded-lg bg-blue-600 text-white">Start admission</a>
+      </div>
+    );
+  }
+  const pct = Math.min(100, Math.round(data.pct * 100));
+  return (
+    <div className="space-y-4">
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+        {([['Total fee', data.total, ''], ['Paid (verified)', data.paid, 'text-green-700'], ['With Finance', data.awaiting, 'text-amber-700'], ['Balance', data.balance, data.overdue > 0 ? 'text-red-600' : '']] as [string, number, string][]).map(([l, v, c]) => (
+          <div key={l} className="border rounded-xl p-3"><p className="text-xs text-muted-foreground">{l}</p><p className={`text-lg font-bold ${c}`}>{formatCurrency(v)}</p></div>
+        ))}
+      </div>
+      <div>
+        <div className="h-2.5 rounded-full bg-slate-100 overflow-hidden"><div className="h-full bg-green-500" style={{ width: `${pct}%` }} /></div>
+        <p className="text-xs text-muted-foreground mt-1">{pct}% paid{data.nextDue ? ` · next due ${formatDate(data.nextDue.dueDate)} (${formatCurrency(data.nextDue.amount)})` : ''}{data.overdue > 0 ? ` · ${formatCurrency(data.overdue)} overdue` : ''}</p>
+      </div>
+      {data.plans.map((p) => (
+        <div key={p.id} className="border rounded-xl overflow-hidden">
+          <div className="px-4 py-2 bg-muted/40 text-sm flex flex-wrap items-center justify-between gap-2">
+            <span className="font-medium">{p.courseName} <span className="text-xs text-muted-foreground">· {p.planType.replace(/_/g, ' ')}{p.admissionId ? ` · ${p.admissionId}` : ''}</span></span>
+            <span className="text-xs text-muted-foreground">Fee {formatCurrency(p.totalFee)}</span>
+          </div>
+          <table className="w-full text-sm">
+            <thead className="text-left text-xs text-muted-foreground"><tr><th className="px-4 py-1.5">Due</th><th>Amount</th><th>Status</th><th>Paid on</th><th>Mode / ref</th></tr></thead>
+            <tbody className="divide-y">
+              {p.installments.map((i) => {
+                const st = i.status === 'PENDING' && new Date(i.dueDate) < new Date() ? FEE_STATUS.OVERDUE : FEE_STATUS[i.status];
+                return (
+                  <tr key={i.id}>
+                    <td className="px-4 py-1.5">{formatDate(i.dueDate)}</td><td>{formatCurrency(i.amount)}</td>
+                    <td><span className={`text-[11px] font-medium rounded-full px-2 py-0.5 ${st.cls}`}>{st.label}</span></td>
+                    <td className="text-xs text-muted-foreground">{i.paidAt ? formatDate(i.paidAt) : '—'}</td>
+                    <td className="text-xs text-muted-foreground">{i.mode ? i.mode.replace('_', ' ') : '—'}{i.reference ? ` · ${i.reference}` : ''}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      ))}
+      <p className="text-xs text-muted-foreground">Payments are collected and verified in Finance; once Finance verifies one, this lead's stage moves automatically (Registration Done → Partial Payment at 60% → Enrolled when fully paid).</p>
+    </div>
+  );
+}
+
+// ── Collections board: what Finance is checking, what is overdue, what falls due soon ──
+interface CollRow { id: string; amount: number; dueDate: string; status: string; paidAt?: string | null; mode?: string | null; reference?: string | null; collectedBy?: EmployeeLite | null; course: string; lead: { id: string; name: string; phone: string; assignedTo?: EmployeeLite | null } }
+function CollectionsPanel({ isAdmin, employees, onOpenLead }: { isAdmin: boolean; employees: EmployeeLite[]; onOpenLead: (id: string) => void }) {
+  const [data, setData] = useState<{ awaiting: CollRow[]; overdue: CollRow[]; upcoming: CollRow[] } | null>(null);
+  const [emp, setEmp] = useState('');
+  const [error, setError] = useState('');
+  useEffect(() => {
+    api.get('/api/sales/collections', { params: emp ? { employeeId: emp } : {} }).then((r) => setData(r.data.data))
+      .catch((err: unknown) => setError((err as { response?: { data?: { message?: string } } }).response?.data?.message || 'Failed to load collections'));
+  }, [emp]);
+  if (error) return <div className="bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg px-4 py-3">{error}</div>;
+  if (!data) return <p className="text-sm text-muted-foreground py-8 text-center">Loading…</p>;
+  const sum = (l: CollRow[]) => l.reduce((n, x) => n + x.amount, 0);
+  const days = (d: string) => Math.floor((Date.now() - new Date(d).getTime()) / 86400000);
+  const block = (title: string, cls: string, list: CollRow[], kind: 'awaiting' | 'overdue' | 'upcoming') => (
+    <section className="space-y-2">
+      <h3 className={`text-sm font-semibold ${cls}`}>{title} ({list.length}) · {formatCurrency(sum(list))}</h3>
+      <div className="bg-card border rounded-xl divide-y">
+        {list.length === 0 ? <p className="px-4 py-4 text-sm text-muted-foreground">Nothing here</p> : list.map((r) => (
+          <div key={r.id} className="flex flex-wrap items-center justify-between gap-3 px-4 py-3 text-sm">
+            <div className="min-w-0">
+              <button onClick={() => onOpenLead(r.lead.id)} className="text-blue-600 hover:underline font-medium">{r.lead.name}</button>
+              <span className="text-xs text-muted-foreground ml-2">{r.lead.phone} · {r.course}</span>
+              <p className="text-xs text-muted-foreground">
+                {kind === 'awaiting' ? `Collected${r.collectedBy ? ` by ${r.collectedBy.firstName} ${r.collectedBy.lastName}` : ''}${r.paidAt ? ` on ${formatDate(r.paidAt)}` : ''}${r.mode ? ` · ${r.mode.replace('_', ' ')}` : ''}${r.reference ? ` · ref ${r.reference}` : ''}`
+                  : `Owner: ${r.lead.assignedTo ? `${r.lead.assignedTo.firstName} ${r.lead.assignedTo.lastName}` : '—'}`}
+              </p>
+            </div>
+            <div className="flex items-center gap-4 whitespace-nowrap">
+              <span className="font-semibold">{formatCurrency(r.amount)}</span>
+              {kind === 'overdue' && <span className="text-xs text-red-600 font-medium">{days(r.dueDate)}d overdue</span>}
+              {kind === 'upcoming' && <span className="text-xs text-muted-foreground">due {formatDate(r.dueDate)}</span>}
+              {kind === 'awaiting' && <span className="text-xs text-amber-700">with Finance</span>}
+              {kind !== 'awaiting' && <a href={`tel:${r.lead.phone.replace(/\s+/g, '')}`} className="text-xs border rounded-lg px-2 py-1 hover:bg-muted/50">Call</a>}
+            </div>
+          </div>
+        ))}
+      </div>
+    </section>
+  );
+  return (
+    <div className="space-y-5">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <p className="text-xs text-muted-foreground">Payments are verified in Finance. Overdue and upcoming instalments are the ones to chase.</p>
+        {isAdmin && (
+          <select value={emp} onChange={(e) => setEmp(e.target.value)} className="border rounded-lg px-3 py-2 text-sm bg-background">
+            <option value="">Whole team</option>
+            {employees.map((e) => <option key={e.id} value={e.id}>{e.firstName} {e.lastName}</option>)}
+          </select>
+        )}
+      </div>
+      {block('Overdue', 'text-red-600', data.overdue, 'overdue')}
+      {block('Awaiting Finance verification', 'text-amber-700', data.awaiting, 'awaiting')}
+      {block('Due in the next 14 days', 'text-foreground', data.upcoming, 'upcoming')}
     </div>
   );
 }
