@@ -54,6 +54,7 @@ export default function SalesDemoRoomPage() {
 
   const endDemo = async () => {
     if (!outcome) { setEndErr('Pick the lead stage'); return; }
+    if (outcome !== 'NOT_INTERESTED' && !followUp) { setEndErr('Pick the next follow-up date and time'); return; }
     setEnding(true); setEndErr('');
     try {
       await api.post(`/api/sales/demos/${id}/room/end`, { outcome, feedback: feedback.trim() || undefined, followUpAt: followUp ? new Date(followUp).toISOString() : undefined });
@@ -107,8 +108,8 @@ export default function SalesDemoRoomPage() {
                 </button>
               ))}
             </div>
-            {outcome === 'NEED_FOLLOWUP' && (
-              <label className="text-xs text-gray-600 flex items-center gap-2">Follow-up <DateTimeField value={followUp} onChange={setFollowUp} min={new Date()} placeholder="Auto (1–2 days)" /></label>
+            {outcome && outcome !== 'NOT_INTERESTED' && (
+              <label className="text-xs text-gray-600 flex items-center gap-2">Next follow-up * <DateTimeField value={followUp} onChange={setFollowUp} min={new Date()} placeholder="Pick date & time" /></label>
             )}
             <textarea className="w-full border rounded-lg px-3 py-2 text-sm" rows={2} placeholder="Comments (optional)" value={feedback} onChange={(e) => setFeedback(e.target.value)} />
             <div className="flex justify-end gap-2">

@@ -1702,8 +1702,11 @@ function LeadDetailModal({ lead, employees, canEdit, isAdmin, onClose, onChanged
   const submitAction = async () => {
     if (!actingDemo) return;
     const existingDemo = demos.find((d) => d.id === actingDemo.id);
+    if ((actingDemo.type === 'outcome' || actingDemo.type === 'complete') && actionOutcome && actionOutcome !== 'NOT_INTERESTED' && !actionFollowUp) {
+      setLocalError('Pick the next follow-up date and time'); return;
+    }
     if (actingDemo.type === 'outcome') {
-      if (!actionOutcome) { setLocalError('Pick an outcome'); return; }
+      if (!actionOutcome) { setLocalError('Pick the lead stage'); return; }
     }
     if (actingDemo.type === 'complete') {
       if (!actionOutcome) { setLocalError('Pick an outcome before marking this demo Conducted'); return; }
@@ -1796,9 +1799,9 @@ function LeadDetailModal({ lead, employees, canEdit, isAdmin, onClose, onChanged
               {actionOutcome && (
                 <div className="text-xs rounded-lg bg-blue-50 text-blue-800 px-2 py-1.5">
                   {OUTCOME_EFFECT[actionOutcome].text}.
-                  {OUTCOME_EFFECT[actionOutcome].followUp && (
-                    <span className="ml-2 inline-flex items-center gap-1 text-muted-foreground">Follow-up
-                      <DateTimeField value={actionFollowUp} onChange={setActionFollowUp} min={new Date()} placeholder="Auto" />
+                  {actionOutcome !== 'NOT_INTERESTED' && (
+                    <span className="ml-2 inline-flex items-center gap-1 text-foreground">Next follow-up *
+                      <DateTimeField value={actionFollowUp} onChange={setActionFollowUp} min={new Date()} placeholder="Pick date & time" />
                     </span>
                   )}
                 </div>
@@ -1957,8 +1960,17 @@ function LeadDetailModal({ lead, employees, canEdit, isAdmin, onClose, onChanged
               </div>
             )}
             {leadTasks.length === 0 ? <p className="text-sm text-muted-foreground">No tasks on this lead.</p> : (
+              <div className="space-y-4">
+                {([
+                  ['Overdue', 'text-red-600', leadTasks.filter((t) => t.status === 'OPEN' && t.dueAt && new Date(t.dueAt).getTime() < Date.now())],
+                  ['Pending', 'text-foreground', leadTasks.filter((t) => t.status === 'OPEN' && !(t.dueAt && new Date(t.dueAt).getTime() < Date.now()))],
+                  ['Completed', 'text-green-700', leadTasks.filter((t) => t.status === 'DONE' || t.status === 'CANCELLED')],
+                ] as [string, string, typeof leadTasks][]).map(([label, cls, list]) => (
+                  <div key={label} className="space-y-1.5">
+                    <h4 className={`text-sm font-semibold ${cls}`}>{label} ({list.length})</h4>
+                    {list.length === 0 ? <p className="text-xs text-muted-foreground">Nothing here</p> : (
               <div className="border rounded-xl divide-y">
-                {leadTasks.map((t) => (
+                {list.map((t) => (
                   <div key={t.id} className="flex items-center justify-between gap-3 px-3 py-2 text-sm">
                     <div>
                       <span className="font-medium">{t.title}</span>
@@ -1967,6 +1979,10 @@ function LeadDetailModal({ lead, employees, canEdit, isAdmin, onClose, onChanged
                     {t.status === 'DONE' && <span className="text-xs font-medium text-green-700 bg-green-50 rounded-full px-2.5 py-1 whitespace-nowrap">✓ Completed{t.completedAt ? ` · ${formatDateTime(t.completedAt)}` : ''}</span>}
                     {t.status === 'CANCELLED' && <span className="text-xs font-medium text-slate-500 bg-slate-100 rounded-full px-2.5 py-1">Cancelled</span>}
                     {canEdit && t.status === 'OPEN' && <button onClick={() => finishLeadTask(t.id)} className="text-xs font-medium text-green-600 hover:underline">Done</button>}
+                  </div>
+                ))}
+              </div>
+                    )}
                   </div>
                 ))}
               </div>
