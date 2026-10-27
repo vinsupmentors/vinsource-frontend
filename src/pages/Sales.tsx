@@ -3,6 +3,7 @@ import { useSearchParams } from 'react-router-dom';
 import * as XLSX from 'xlsx';
 import api, { BASE_URL } from '@/lib/api';
 import { useModuleAccess } from '@/hooks/useModuleAccess';
+import ColumnHeader from '@/components/ColumnHeader';
 import DateTimeField from '@/components/DateTimeField';
 import AdvancedFilter, { type FilterField, type FilterGroup } from '@/components/AdvancedFilter';
 import { formatDate, formatDateTime, formatTime } from '@/lib/utils';
@@ -14,7 +15,7 @@ import {
   Target as TargetIcon, Trophy, Clock, PlayCircle, Bell, ListChecks, BarChart3, Eye, Inbox, Layers, ShieldCheck, Sun, MessageCircle, Send,
 } from 'lucide-react';
 
-const PAGE_SIZE = 100;
+const PAGE_SIZES = ['25', '50', '100', '250', 'all'];
 
 // ── Types ────────────────────────────────────────────────────────────────
 type LeadStatus = 'NEW' | 'CONTACTED' | 'DEMO_SCHEDULED' | 'DEMO_DONE' | 'NEGOTIATION' | 'ENROLLED' | 'LOST';
@@ -527,8 +528,8 @@ function MultiSelect({ label, options, value, onChange }: {
 }
 
 // ── Main page ────────────────────────────────────────────────────────────
-type Tab = 'leads' | 'reminders' | 'tasks' | 'summaries' | 'activityMonitor' | 'pulse' | 'leadQuality' | 'liveDemos' | 'demoBooked' | 'demoRescheduled' | 'demoConducted' | 'devices' | 'unmatchedCalls' | 'callLog' | 'leaderboard' | 'targets' | 'myBase' | 'batches' | 'leadControl' | 'today' | 'callAnalytics' | 'config' | 'transcripts';
-const VALID_TABS: Tab[] = ['transcripts', 'config', 'leads', 'reminders', 'tasks', 'summaries', 'activityMonitor', 'pulse', 'leadQuality', 'liveDemos', 'demoBooked', 'demoRescheduled', 'demoConducted', 'devices', 'unmatchedCalls', 'callLog', 'leaderboard', 'targets', 'myBase', 'batches', 'leadControl', 'today', 'callAnalytics'];
+type Tab = 'dashboard' | 'leads' | 'reminders' | 'tasks' | 'summaries' | 'activityMonitor' | 'pulse' | 'leadQuality' | 'liveDemos' | 'demoBooked' | 'demoRescheduled' | 'demoConducted' | 'devices' | 'unmatchedCalls' | 'callLog' | 'leaderboard' | 'targets' | 'myBase' | 'batches' | 'leadControl' | 'today' | 'callAnalytics' | 'config' | 'transcripts';
+const VALID_TABS: Tab[] = ['dashboard', 'transcripts', 'config', 'leads', 'reminders', 'tasks', 'summaries', 'activityMonitor', 'pulse', 'leadQuality', 'liveDemos', 'demoBooked', 'demoRescheduled', 'demoConducted', 'devices', 'unmatchedCalls', 'callLog', 'leaderboard', 'targets', 'myBase', 'batches', 'leadControl', 'today', 'callAnalytics'];
 // Sales Pulse / Lead Quality are aggregate, cross-rep views — admin only.
 // BDAs get Demo Booked/Rescheduled/Conducted instead, scoped to their own leads.
 // Devices (issuing call-tracking tokens) is admin-only too. Unmatched Calls
@@ -548,7 +549,7 @@ export default function SalesPage() {
 
   const [searchParams, setSearchParams] = useSearchParams();
   const tabFromUrl = searchParams.get('tab') as Tab | null;
-  const [tab, setTabState] = useState<Tab>(tabFromUrl && VALID_TABS.includes(tabFromUrl) ? tabFromUrl : 'today');
+  const [tab, setTabState] = useState<Tab>(tabFromUrl && VALID_TABS.includes(tabFromUrl) ? tabFromUrl : 'dashboard');
   const setTab = (t: Tab) => { setTabState(t); setSearchParams({ tab: t }, { replace: true }); };
   useEffect(() => {
     if (tabFromUrl && VALID_TABS.includes(tabFromUrl) && tabFromUrl !== tab) setTabState(tabFromUrl);
@@ -601,6 +602,15 @@ export default function SalesPage() {
   // Config lists (stages, statuses, lost reasons, sources, scouts) — kept in a module snapshot so every sub-component can read labels.
   const [cfg, setCfgState] = useState<CfgData>(CFG);
   const [scoutFilter, setScoutFilter] = useState('');
+  const [pageSize, setPageSize] = useState<string>(() => { try { const v = localStorage.getItem('sales.pageSize'); return v && PAGE_SIZES.includes(v) ? v : '50'; } catch { return '50'; } });
+  const [sortBy, setSortBy] = useState('');
+  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc');
+  const [nameLike, setNameLike] = useState('');
+  const [phoneLike, setPhoneLike] = useState('');
+  const [emailLike, setEmailLike] = useState('');
+  const onSort = (key: string, dir: 'asc' | 'desc' | '') => { if (!dir) { setSortBy(''); return; } setSortBy(key); setSortDir(dir); };
+  const changePageSize = (v: string) => { setPageSize(v); setPage(1); try { localStorage.setItem('sales.pageSize', v); } catch { /* ignore */ } };
+  useEffect(() => { setPage(1); }, [nameLike, phoneLike, emailLike, sortBy, sortDir]);
   const loadConfig = useCallback(async () => {
     try {
       const r = await api.get('/api/sales/config');
@@ -615,7 +625,9 @@ export default function SalesPage() {
     setLoading(true);
     setError('');
     try {
-      const params: Record<string, string> = { page: String(page), limit: String(PAGE_SIZE) };
+      const params: Record<string, string> = { page: String(page), limit: pageSize };
+      if (sortBy) { params.sortBy = sortBy; params.sortDir = sortDir; }
+      if (nameLike) params.nameLike = nameLike; if (phoneLike) params.phoneLike = phoneLike; if (emailLike) params.emailLike = emailLike;
       if (search) params.search = search;
       if (statusFilter) params.status = statusFilter;
       if (activityFilter) params.activityStatus = activityFilter;
@@ -641,7 +653,7 @@ export default function SalesPage() {
     } finally {
       setLoading(false);
     }
-  }, [page, search, statusFilter, activityFilter, followUpFilter, assignedFilter, sourceFilter, scoutFilter, createdFrom, createdTo, followFrom, followTo, advFilter]);
+  }, [page, search, statusFilter, activityFilter, followUpFilter, assignedFilter, sourceFilter, scoutFilter, createdFrom, createdTo, followFrom, followTo, advFilter, pageSize, sortBy, sortDir, nameLike, phoneLike, emailLike]);
 
   useEffect(() => { if (level && tab === 'leads') fetchAll(); }, [level, tab, fetchAll]);
 
@@ -702,7 +714,7 @@ export default function SalesPage() {
   // Marking a lead LOST requires picking a reason first — every other status
   // change applies immediately.
   const onStatusChange = (lead: Lead, status: string) => {
-    if (stageBase(status) === 'LOST') { setLostStage(status); setLostReasonLead(lead); return; }
+    if (stageBase(status) === 'LOST' && !['CUSTOM_NOT_INTERESTED', 'CUSTOM_UNRESPONSIVE'].includes(status)) { setLostStage(status); setLostReasonLead(lead); return; }
     updateLeadStatus(lead.id, status);
   };
 
@@ -760,6 +772,7 @@ export default function SalesPage() {
       <div className="flex flex-wrap items-center gap-x-1 border-b max-w-full">
         {(isAdmin
           ? [
+              { id: 'dashboard' as Tab, label: 'Dashboard', icon: BarChart3 },
               { id: 'today' as Tab, label: 'Today', icon: Sun },
               { id: 'leads' as Tab, label: 'Leads', icon: Users },
               { id: 'reminders' as Tab, label: 'My Reminders', icon: Bell },
@@ -782,6 +795,7 @@ export default function SalesPage() {
               { id: 'devices' as Tab, label: 'Devices', icon: Smartphone },
             ]
           : [
+              { id: 'dashboard' as Tab, label: 'Dashboard', icon: BarChart3 },
               { id: 'today' as Tab, label: 'Today', icon: Sun },
               { id: 'leads' as Tab, label: 'Leads', icon: Users },
               { id: 'reminders' as Tab, label: 'My Reminders', icon: Bell },
@@ -858,8 +872,8 @@ export default function SalesPage() {
               –<input type="date" value={followTo} onChange={(e) => setFollowTo(e.target.value)} className="px-2 py-1.5 border rounded-lg text-sm" />
             </label>
             <AdvancedFilter scope="leads" fields={leadFilterFields(employees)} value={advFilter} onChange={setAdvFilter} />
-            {(statusFilter || activityFilter || assignedFilter || sourceFilter || scoutFilter || createdFrom || createdTo || followFrom || followTo || followUpFilter) && (
-              <button onClick={() => { setStatusFilter(''); setActivityFilter(''); setAssignedFilter(''); setSourceFilter(''); setScoutFilter(''); setCreatedFrom(''); setCreatedTo(''); setFollowFrom(''); setFollowTo(''); setFollowUpFilter(''); }} className="text-xs text-blue-600 hover:underline">Clear all filters</button>
+            {(statusFilter || activityFilter || assignedFilter || sourceFilter || scoutFilter || createdFrom || createdTo || followFrom || followTo || followUpFilter || nameLike || phoneLike || emailLike || sortBy) && (
+              <button onClick={() => { setStatusFilter(''); setActivityFilter(''); setAssignedFilter(''); setSourceFilter(''); setScoutFilter(''); setCreatedFrom(''); setCreatedTo(''); setFollowFrom(''); setFollowTo(''); setFollowUpFilter(''); setNameLike(''); setPhoneLike(''); setEmailLike(''); setSortBy(''); }} className="text-xs text-blue-600 hover:underline">Clear all filters & sort</button>
             )}
           </div>
 
@@ -869,18 +883,21 @@ export default function SalesPage() {
               <thead className="bg-muted/50 text-left text-xs uppercase text-muted-foreground">
                 <tr>
                   <th className="px-3 py-3">#</th>
-                  <th className="px-3 py-3">Name</th>
-                  <th className="px-3 py-3">Phone</th>
-                  <th className="px-3 py-3">Email</th>
-                  <th className="px-3 py-3">Status</th>
-                  <th className="px-3 py-3">Lead Stage</th>
-                  <th className="px-3 py-3">Assigned</th>
-                  <th className="px-3 py-3">Source</th>
-                  <th className="px-3 py-3">Lead Scout</th>
+                  <ColumnHeader label="Name" sortKey="name" sortBy={sortBy} sortDir={sortDir} onSort={onSort} text={nameLike} onText={setNameLike} />
+                  <ColumnHeader label="Phone" sortKey="phone" sortBy={sortBy} sortDir={sortDir} onSort={onSort} text={phoneLike} onText={setPhoneLike} />
+                  <ColumnHeader label="Email" sortKey="email" sortBy={sortBy} sortDir={sortDir} onSort={onSort} text={emailLike} onText={setEmailLike} />
+                  <ColumnHeader label="Status" options={[...ACTIVITY_STATUSES_LIVE(), { value: 'NONE', label: 'No status yet' }]} value={activityFilter} onChange={setActivityFilter} />
+                  <ColumnHeader label="Lead Stage" sortKey="status" sortBy={sortBy} sortDir={sortDir} onSort={onSort} options={stageOptionsLive().map((o) => ({ value: o.value, label: o.label }))} value={statusFilter} onChange={setStatusFilter} />
+                  <ColumnHeader label="Assigned" sortKey="assignedTo" sortBy={sortBy} sortDir={sortDir} onSort={onSort}
+                    {...(isAdmin ? { options: [{ value: 'NONE', label: 'Unassigned' }, ...employees.map((e) => ({ value: e.id, label: `${e.firstName} ${e.lastName}` }))], value: assignedFilter, onChange: setAssignedFilter } : {})} />
+                  <ColumnHeader label="Source" sortKey="source" sortBy={sortBy} sortDir={sortDir} onSort={onSort}
+                    options={[...Array.from(new Set([...cfg.sources.map((x) => x.label), ...sourceOptions])).map((x) => ({ value: x, label: x })), { value: 'Unknown', label: 'Unknown' }]} value={sourceFilter} onChange={setSourceFilter} />
+                  <ColumnHeader label="Lead Scout" sortKey="scoutKey" sortBy={sortBy} sortDir={sortDir} onSort={onSort}
+                    options={[...cfg.scouts.map((x) => ({ value: x.key, label: x.label })), { value: 'NONE', label: 'No scout' }]} value={scoutFilter} onChange={setScoutFilter} />
                   <th className="px-3 py-3">Demo</th>
-                  <th className="px-3 py-3">Reminder</th>
-                  <th className="px-3 py-3">Last Contact</th>
-                  <th className="px-3 py-3">Created</th>
+                  <ColumnHeader label="Reminder" sortKey="nextFollowUpAt" sortBy={sortBy} sortDir={sortDir} onSort={onSort} />
+                  <ColumnHeader label="Last Contact" sortKey="lastContactAt" sortBy={sortBy} sortDir={sortDir} onSort={onSort} />
+                  <ColumnHeader label="Created" sortKey="createdAt" sortBy={sortBy} sortDir={sortDir} onSort={onSort} />
                   <th className="px-3 py-3">Lead Age</th>
                   <th className="px-3 py-3">Date Of Demo</th>
                   {isAdmin && <th className="px-3 py-3"></th>}
@@ -895,7 +912,7 @@ export default function SalesPage() {
                   const latestDemo = lead.demos?.[0];
                   return (
                     <tr key={lead.id} className="hover:bg-muted/30">
-                      <td className="px-3 py-3 text-muted-foreground">{(page - 1) * PAGE_SIZE + i + 1}</td>
+                      <td className="px-3 py-3 text-muted-foreground">{(page - 1) * (pageSize === 'all' ? 0 : Number(pageSize)) + i + 1}</td>
                       <td className="px-3 py-3 font-medium whitespace-nowrap">
                         <button onClick={() => openLeadDetail(lead.id)} className="text-blue-600 hover:underline text-left">
                           {lead.name}
@@ -980,24 +997,26 @@ export default function SalesPage() {
           </div>
 
           {!loading && meta && meta.total > 0 && (
-            <div className="flex items-center justify-between pt-1 text-sm text-muted-foreground">
-              <span>{meta.total} lead{meta.total === 1 ? '' : 's'} · page {meta.page} of {meta.totalPages}</span>
-              <div className="flex items-center gap-2">
-                <button
-                  disabled={page <= 1}
-                  onClick={() => setPage((p) => Math.max(p - 1, 1))}
-                  className="flex items-center gap-1 px-2 py-1.5 border rounded-lg disabled:opacity-40 hover:bg-muted/50"
-                >
-                  <ChevronLeft className="w-3.5 h-3.5" /> Prev
-                </button>
-                <button
-                  disabled={page >= meta.totalPages}
-                  onClick={() => setPage((p) => Math.min(p + 1, meta.totalPages))}
-                  className="flex items-center gap-1 px-2 py-1.5 border rounded-lg disabled:opacity-40 hover:bg-muted/50"
-                >
-                  Next <ChevronRight className="w-3.5 h-3.5" />
-                </button>
+            <div className="flex flex-wrap items-center justify-between gap-2 pt-1 text-sm text-muted-foreground">
+              <div className="flex items-center gap-3">
+                <span>{meta.total} lead{meta.total === 1 ? '' : 's'}{pageSize !== 'all' && meta.totalPages > 1 ? ` · page ${meta.page} of ${meta.totalPages}` : ''}</span>
+                <label className="flex items-center gap-1.5">Show
+                  <select value={pageSize} onChange={(e) => changePageSize(e.target.value)} className="border rounded-lg px-2 py-1 text-sm text-foreground bg-background">
+                    {PAGE_SIZES.map((v) => <option key={v} value={v}>{v === 'all' ? 'All' : v}</option>)}
+                  </select>
+                  per page
+                </label>
               </div>
+              {pageSize !== 'all' && meta.totalPages > 1 && (
+                <div className="flex items-center gap-2">
+                  <button disabled={page <= 1} onClick={() => setPage((p) => Math.max(p - 1, 1))} className="flex items-center gap-1 px-2 py-1.5 border rounded-lg disabled:opacity-40 hover:bg-muted/50">
+                    <ChevronLeft className="w-3.5 h-3.5" /> Prev
+                  </button>
+                  <button disabled={page >= meta.totalPages} onClick={() => setPage((p) => Math.min(p + 1, meta.totalPages))} className="flex items-center gap-1 px-2 py-1.5 border rounded-lg disabled:opacity-40 hover:bg-muted/50">
+                    Next <ChevronRight className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              )}
             </div>
           )}
         </>
@@ -1009,9 +1028,11 @@ export default function SalesPage() {
 
       {tab === 'liveDemos' && isAdmin && <LiveDemosPanel />}
 
-      {tab === 'reminders' && <RemindersPanel onOpenLead={openLeadDetail} />}
+      {tab === 'reminders' && <TaskBoard isAdmin={isAdmin} canEdit={canEdit} employees={employees} onOpenLead={openLeadDetail} manage={false} />}
 
-      {tab === 'tasks' && <TasksPanel isAdmin={isAdmin} canEdit={canEdit} employees={employees} onOpenLead={openLeadDetail} />}
+      {tab === 'tasks' && <TaskBoard isAdmin={isAdmin} canEdit={canEdit} employees={employees} onOpenLead={openLeadDetail} manage />}
+
+      {tab === 'dashboard' && <DashboardPanel isAdmin={isAdmin} employees={employees} go={setTab} />}
 
       {tab === 'today' && <TodayPanel isAdmin={isAdmin} employees={employees} onOpenLead={openLeadDetail} />}
       {tab === 'callAnalytics' && <CallAnalyticsPanel isAdmin={isAdmin} employees={employees} />}
@@ -1195,10 +1216,10 @@ function AddLeadModal({ employees, saving, setSaving, onClose, onSaved, setError
                 </select>
               ) : <input className={inp} placeholder="e.g. Instagram, Referral" value={form.source} onChange={(e) => set('source', e.target.value)} />}
             </label>
-            {isAdmin && activeScouts.length > 0 && (
+            {isAdmin && (
               <label className={lab}>Lead scout
                 <select className={inp} value={form.scoutKey} onChange={(e) => set('scoutKey', e.target.value)}>
-                  <option value="">— None —</option>
+                  <option value="">{activeScouts.length ? '— None —' : 'No scouts yet — add them in Config'}</option>
                   {activeScouts.map((s) => <option key={s.key} value={s.key}>{s.label}</option>)}
                 </select>
               </label>
@@ -1362,10 +1383,10 @@ function BulkUploadLeadsModal({ onClose, setError, onSaved, isAdmin, employees }
                   <label className={lab}>Batch label (to track this upload)
                     <input className={inp} placeholder="e.g. Instagram Oct-26" value={defaults.batchLabel} onChange={(e) => { setDefaults({ ...defaults, batchLabel: e.target.value }); setPreview(null); }} />
                   </label>
-                  {isAdmin && activeScouts.length > 0 && (
+                  {isAdmin && (
                     <label className={lab}>Lead scout
                       <select className={inp} value={defaults.scoutKey} onChange={(e) => { setDefaults({ ...defaults, scoutKey: e.target.value }); setPreview(null); }}>
-                        <option value="">— None —</option>
+                        <option value="">{activeScouts.length ? '— None —' : 'No scouts yet — add them in Config'}</option>
                         {activeScouts.map((s) => <option key={s.key} value={s.key}>{s.label}</option>)}
                       </select>
                     </label>
@@ -1568,6 +1589,15 @@ function LeadDetailModal({ lead, employees, canEdit, isAdmin, onClose, onChanged
     : callPick;
   const pickedCall = linkableCalls.find((c) => c.id === effectiveCallPick) || null;
 
+  // Calls/meetings + every status/stage change (and status-only updates), newest first.
+  const timeline = useMemo(() => {
+    const items: { key: string; at: number; call?: CallLog; h?: LeadHistoryRow }[] = [];
+    callLogs.forEach((c) => items.push({ key: `c-${c.id}`, at: new Date(c.calledAt).getTime(), call: c }));
+    history.filter((h) => h.type === 'STATUS' || h.type === 'STAGE' || (h.type === 'ACTIVITY' && h.summary.startsWith('Status updated (no call)')))
+      .forEach((h) => items.push({ key: `h-${h.id}`, at: new Date(h.createdAt).getTime(), h }));
+    return items.sort((a, b) => b.at - a.at);
+  }, [callLogs, history]);
+
   const submitCall = async () => {
     if (!callActivityStatus) { setLocalError('Choose the Update Status first'); return; }
     // DNP (did not pick) needs no notes; every other status does.
@@ -1674,9 +1704,7 @@ function LeadDetailModal({ lead, employees, canEdit, isAdmin, onClose, onChanged
       if (!actionOutcome) { setLocalError('Pick an outcome'); return; }
     }
     if (actingDemo.type === 'complete') {
-      const heldInPortal = existingDemo?.mode === 'ONLINE' && !!existingDemo?.roomName && !!existingDemo?.startedAt;
       if (!actionOutcome) { setLocalError('Pick an outcome before marking this demo Conducted'); return; }
-      if (!heldInPortal && !actionProofFile && !existingDemo?.proofUrl) { setLocalError('Attach a photo/screenshot as proof the demo was conducted'); return; }
     }
     if (actingDemo.type === 'reschedule' && !actionRescheduleReason.trim()) {
       setLocalError('A reason for rescheduling is required'); return;
@@ -1775,7 +1803,7 @@ function LeadDetailModal({ lead, employees, canEdit, isAdmin, onClose, onChanged
               )}
               {actingDemo.type === 'complete' && !(d.mode === 'ONLINE' && d.roomName && d.startedAt) && (
                 <label className="text-xs text-muted-foreground flex items-center gap-2">
-                  Proof of demo {d.proofUrl ? '(already attached — pick a file to replace it)' : '*'}:
+                  Proof of demo (optional){d.proofUrl ? ' — already attached, pick a file to replace it' : ''}:
                   <input type="file" accept="image/*" className="text-xs" onChange={(e) => setActionProofFile(e.target.files?.[0] || null)} />
                 </label>
               )}
@@ -1833,7 +1861,7 @@ function LeadDetailModal({ lead, employees, canEdit, isAdmin, onClose, onChanged
           {/* Pipeline — where the lead is right now; click a step to move it */}
           {(() => {
             const cur = lead.stageKey || lead.status;
-            const steps = stageOptionsLive(cur).filter((o) => stageBase(o.value) !== 'LOST' || o.value === cur);
+            const steps = stageOptionsLive(cur);
             const idx = steps.findIndex((o) => o.value === cur);
             return (
               <div className="flex flex-wrap gap-1">
@@ -2073,7 +2101,7 @@ function LeadDetailModal({ lead, employees, canEdit, isAdmin, onClose, onChanged
                   Lead stage
                   <select className="px-2 py-1.5 border rounded-lg text-sm bg-white" value={callStage} onChange={(e) => setCallStage(e.target.value)} disabled={statusGoesToLost(callActivityStatus)}>
                     <option value="">Auto → {statusStageLabel(callActivityStatus)}</option>
-                    {!statusGoesToLost(callActivityStatus) && stageOptionsLive().filter((s) => !['LOST', 'NEW'].includes(stageBase(s.value))).map((s) => <option key={s.value} value={s.value}>{s.label}</option>)}
+                    {!statusGoesToLost(callActivityStatus) && stageOptionsLive().map((s) => <option key={s.value} value={s.value}>{s.label}</option>)}
                   </select>
                   <span className="text-[11px]">Follows the status; change only if needed.</span>
                 </label>
@@ -2106,21 +2134,22 @@ function LeadDetailModal({ lead, employees, canEdit, isAdmin, onClose, onChanged
           </div>
         ))}
 
-        {/* Call history */}
+        {/* Activity history: calls/meetings plus every status / stage change, each with who made it */}
         {leadTab === 'activity' && <div>
-          <h3 className="font-semibold text-sm mb-2">Activity History {lead._count?.callLogs ? `(${lead._count.callLogs})` : ''}</h3>
+          <h3 className="font-semibold text-sm mb-2">Activity History {timeline.length ? `(${timeline.length})` : ''}</h3>
           {loadingHistory ? (
             <p className="text-sm text-muted-foreground">Loading...</p>
-          ) : callLogs.length === 0 ? (
+          ) : timeline.length === 0 ? (
             <p className="text-sm text-muted-foreground">No activity logged yet.</p>
           ) : (
-            <div className="space-y-2 max-h-56 overflow-y-auto pr-1">
-              {callLogs.map((c) => (
-                <div key={c.id} className="border rounded-lg p-3 text-sm">
+            <div className="space-y-2 max-h-[28rem] overflow-y-auto pr-1">
+              {timeline.map((it) => it.call ? (() => { const c = it.call; return (
+                <div key={it.key} className="border rounded-lg p-3 text-sm">
                   <div className="flex items-center justify-between text-xs text-muted-foreground mb-1">
                     <span>
-                      {c.calledBy ? `${c.calledBy.firstName} ${c.calledBy.lastName}` : 'Unknown'}
+                      <b className="text-foreground">{c.calledBy ? `${c.calledBy.firstName} ${c.calledBy.lastName}` : 'Unknown'}</b>
                       {' · '}{c.activityType === 'MEETING' ? 'Meeting' : 'Call'}
+                      {c.durationSeconds != null && c.source === 'AUTO' && <span> · {callDurLabel(c.durationSeconds)}</span>}
                       {c.activityStatus && <span className="ml-1 font-medium text-foreground">· {ACTIVITY_STATUS_LABEL[c.activityStatus]}</span>}
                     </span>
                     <span>{formatDateTime(c.calledAt)}</span>
@@ -2128,6 +2157,14 @@ function LeadDetailModal({ lead, employees, canEdit, isAdmin, onClose, onChanged
                   {c.notes ? <p>{c.notes}</p> : <p className="text-xs text-muted-foreground italic">No notes</p>}
                   {c.recordingUrl && <div className="mt-2 flex flex-wrap items-center gap-4"><RecordingPlayer url={c.recordingUrl} /><TranscriptButton type="CALL" id={c.id} /></div>}
                   {c.nextFollowUpAt && <p className="text-xs text-amber-600 mt-1">Next follow-up: {formatDateTime(c.nextFollowUpAt)}</p>}
+                </div>
+              ); })() : (
+                <div key={it.key} className="border border-dashed rounded-lg px-3 py-2 text-sm bg-muted/20">
+                  <div className="flex items-center justify-between text-xs text-muted-foreground">
+                    <span><b className="text-foreground">{it.h!.actor ? `${it.h!.actor.firstName} ${it.h!.actor.lastName}` : 'System'}</b> · {it.h!.type === 'STAGE' ? 'Stage change' : it.h!.type === 'STATUS' ? 'Status change' : 'Status update (no call)'}</span>
+                    <span>{formatDateTime(it.h!.createdAt)}</span>
+                  </div>
+                  <p className="mt-0.5">{it.h!.summary}</p>
                 </div>
               ))}
             </div>
@@ -2140,12 +2177,12 @@ function LeadDetailModal({ lead, employees, canEdit, isAdmin, onClose, onChanged
           {history.length === 0 ? (
             <p className="text-sm text-muted-foreground">No history yet.</p>
           ) : (
-            <ol className="relative border-l pl-4 space-y-2 max-h-60 overflow-y-auto pr-1">
+            <ol className="relative border-l pl-4 space-y-3 max-h-[28rem] overflow-y-auto pr-1">
               {history.map((h) => (
                 <li key={h.id} className="text-xs">
                   <span className="absolute -left-[5px] mt-1 w-2.5 h-2.5 rounded-full bg-blue-500" />
                   <p className="text-foreground">{h.summary}</p>
-                  <p className="text-muted-foreground">{h.actor ? `${h.actor.firstName} ${h.actor.lastName}` : 'System'} · {formatDateTime(h.createdAt)}</p>
+                  <p className="text-muted-foreground">by <b className="text-foreground">{h.actor ? `${h.actor.firstName} ${h.actor.lastName}` : 'System (automatic)'}</b> · {formatDateTime(h.createdAt)}</p>
                 </li>
               ))}
             </ol>
@@ -2231,128 +2268,44 @@ function LeadDetailModal({ lead, employees, canEdit, isAdmin, onClose, onChanged
   );
 }
 
-// ── My Reminders: follow-ups due + open tasks, grouped by urgency ────────────
-interface TaskRow {
-  id: string; title: string; description?: string | null; dueAt?: string | null; status: 'OPEN' | 'DONE' | 'CANCELLED';
-  completedAt?: string | null; bucket?: string; kind?: 'MANUAL' | 'FOLLOW_UP' | 'DEMO'; demoId?: string | null;
-  lead?: { id: string; name: string; phone?: string } | null;
-  assignedTo?: EmployeeLite; createdBy?: EmployeeLite | null;
+// ── Tasks & reminders: Overdue / Pending / Completed. Salespeople see their own; Sales Admin can switch to anyone or the whole team. ──
+type DatePreset = 'any' | 'today' | 'week' | 'month' | 'custom';
+const ymd = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+function presetDates(p: DatePreset): { from: string; to: string } {
+  const now = new Date();
+  if (p === 'today') return { from: ymd(now), to: ymd(now) };
+  if (p === 'week') { const s = new Date(now); s.setDate(now.getDate() - ((now.getDay() + 6) % 7)); const e = new Date(s); e.setDate(s.getDate() + 6); return { from: ymd(s), to: ymd(e) }; }
+  if (p === 'month') return { from: ymd(new Date(now.getFullYear(), now.getMonth(), 1)), to: ymd(new Date(now.getFullYear(), now.getMonth() + 1, 0)) };
+  return { from: '', to: '' };
 }
-interface FollowUpRow {
-  id: string; name: string; phone: string; status: LeadStatus; activityStatus?: ActivityStatus | null;
-  courseInterest?: string | null; nextFollowUpAt: string; bucket: string;
-}
-const BUCKETS: { id: string; label: string; cls: string }[] = [
-  { id: 'overdue', label: 'Overdue', cls: 'text-red-600' },
-  { id: 'today', label: 'Today', cls: 'text-amber-600' },
-  { id: 'upcoming', label: 'Upcoming', cls: 'text-foreground' },
-];
-
-function RemindersPanel({ onOpenLead }: { onOpenLead: (id: string) => void }) {
-  const [followUps, setFollowUps] = useState<FollowUpRow[]>([]);
-  const [tasks, setTasks] = useState<TaskRow[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState('');
-  const load = useCallback(async () => {
-    setLoading(true); setError('');
-    try {
-      const r = (await api.get('/api/sales/reminders')).data.data;
-      setFollowUps(r.followUps); setTasks(r.tasks);
-    } catch (err: unknown) { setError((err as { response?: { data?: { message?: string } } }).response?.data?.message || 'Failed to load reminders'); }
-    finally { setLoading(false); }
-  }, []);
-  useEffect(() => { load(); }, [load]);
-
-  const done = async (id: string) => {
-    try { await api.put(`/api/sales/tasks/${id}`, { status: 'DONE' }); load(); }
-    catch (err: unknown) { setError((err as { response?: { data?: { message?: string } } }).response?.data?.message || 'Failed'); }
-  };
-
-  return (
-    <div className="space-y-6">
-      {error && <div className="bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg px-4 py-3">{error}</div>}
-      <div className="flex items-center justify-between">
-        <p className="text-xs text-muted-foreground">Your lead follow-ups and open tasks. Log an activity on a lead to set or clear its follow-up.</p>
-        <button onClick={load} disabled={loading} className="flex items-center gap-2 px-3 py-2 border rounded-lg text-sm font-medium hover:bg-muted/50 disabled:opacity-50">
-          <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} /> Refresh
-        </button>
-      </div>
-      {BUCKETS.map((b) => {
-        const f = followUps.filter((x) => x.bucket === b.id);
-        const t = tasks.filter((x) => x.bucket === b.id);
-        if (!f.length && !t.length) return null;
-        return (
-          <div key={b.id} className="space-y-2">
-            <h3 className={`text-sm font-semibold ${b.cls}`}>{b.label} ({f.length + t.length})</h3>
-            <div className="bg-card border rounded-xl divide-y">
-              {f.map((l) => (
-                <div key={`f-${l.id}`} className="flex items-center justify-between gap-3 px-4 py-3 text-sm">
-                  <div className="min-w-0">
-                    <button onClick={() => onOpenLead(l.id)} className="text-blue-600 hover:underline font-medium">{l.name}</button>
-                    <span className="text-xs text-muted-foreground ml-2">{l.phone}{l.courseInterest ? ` · ${l.courseInterest}` : ''}</span>
-                    <p className="text-xs text-muted-foreground">Follow-up · {l.activityStatus ? ACTIVITY_STATUS_LABEL[l.activityStatus] : l.status.replace(/_/g, ' ')}</p>
-                  </div>
-                  <span className={`text-xs whitespace-nowrap ${b.cls}`}>{formatDateTime(l.nextFollowUpAt)}</span>
-                </div>
-              ))}
-              {t.map((x) => (
-                <div key={`t-${x.id}`} className="flex items-center justify-between gap-3 px-4 py-3 text-sm">
-                  <div className="min-w-0">
-                    <span className="font-medium">{x.title}</span>
-                    {x.lead && <button onClick={() => onOpenLead(x.lead!.id)} className="text-xs text-blue-600 hover:underline ml-2">{x.lead.name}</button>}
-                    <p className="text-xs text-muted-foreground">Task{x.createdBy ? ` · from ${x.createdBy.firstName} ${x.createdBy.lastName}` : ''}</p>
-                  </div>
-                  <div className="flex items-center gap-3">
-                    {x.dueAt && <span className={`text-xs whitespace-nowrap ${b.cls}`}>{formatDateTime(x.dueAt)}</span>}
-                    <button onClick={() => done(x.id)} className="text-xs font-medium text-green-600 hover:underline">Done</button>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-        );
-      })}
-      {tasks.filter((x) => x.bucket === 'later').length > 0 && (
-        <div className="space-y-2">
-          <h3 className="text-sm font-semibold">No due date</h3>
-          <div className="bg-card border rounded-xl divide-y">
-            {tasks.filter((x) => x.bucket === 'later').map((x) => (
-              <div key={x.id} className="flex items-center justify-between px-4 py-3 text-sm">
-                <span className="font-medium">{x.title}</span>
-                <button onClick={() => done(x.id)} className="text-xs font-medium text-green-600 hover:underline">Done</button>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-      {!loading && followUps.length === 0 && tasks.length === 0 && <p className="text-sm text-muted-foreground text-center py-10">Nothing pending — you're all caught up.</p>}
-    </div>
-  );
-}
-
-// ── Manage Tasks: create tasks (Sales Admin can assign to anyone) ───────────
-function TasksPanel({ isAdmin, canEdit, employees, onOpenLead }: { isAdmin: boolean; canEdit: boolean; employees: EmployeeLite[]; onOpenLead: (id: string) => void }) {
+function TaskBoard({ isAdmin, canEdit, employees, onOpenLead, manage }: { isAdmin: boolean; canEdit: boolean; employees: EmployeeLite[]; onOpenLead: (id: string) => void; manage: boolean }) {
   const [rows, setRows] = useState<TaskRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
-  const [statusF, setStatusF] = useState('OPEN');
-  const [assigneeF, setAssigneeF] = useState('');
+  const [who, setWho] = useState<string>(isAdmin && manage ? '' : 'ME'); // '' = whole team, 'ME' = me, else an employee id
+  const [preset, setPreset] = useState<DatePreset>('any');
+  const [cFrom, setCFrom] = useState('');
+  const [cTo, setCTo] = useState('');
+  const [showDone, setShowDone] = useState(true);
   const [title, setTitle] = useState('');
   const [desc, setDesc] = useState('');
   const [due, setDue] = useState('');
   const [assignee, setAssignee] = useState('');
   const [saving, setSaving] = useState(false);
+  const range = preset === 'custom' ? { from: cFrom, to: cTo } : presetDates(preset);
 
   const load = useCallback(async () => {
     setLoading(true); setError('');
     try {
-      const params: Record<string, string> = {};
-      if (statusF) params.status = statusF;
-      if (isAdmin && assigneeF) params.assignedToId = assigneeF;
+      const params: Record<string, string> = { limit: '300' };
+      if (isAdmin && who) params.assignedToId = who;
+      if (range.from) params.from = range.from;
+      if (range.to) params.to = range.to;
       setRows((await api.get('/api/sales/tasks', { params })).data.data);
     } catch (err: unknown) { setError((err as { response?: { data?: { message?: string } } }).response?.data?.message || 'Failed to load tasks'); }
     finally { setLoading(false); }
-  }, [statusF, assigneeF, isAdmin]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isAdmin, who, range.from, range.to]);
   useEffect(() => { load(); }, [load]);
 
   const add = async () => {
@@ -2370,10 +2323,57 @@ function TasksPanel({ isAdmin, canEdit, employees, onOpenLead }: { isAdmin: bool
     catch (err: unknown) { setError((err as { response?: { data?: { message?: string } } }).response?.data?.message || 'Failed'); }
   };
 
+  const now = Date.now();
+  const at = (t: TaskRow) => (t.dueAt ? new Date(t.dueAt).getTime() : Infinity);
+  const overdue = rows.filter((t) => t.status === 'OPEN' && t.dueAt && at(t) < now).sort((a, b) => at(a) - at(b));
+  const pending = rows.filter((t) => t.status === 'OPEN' && !(t.dueAt && at(t) < now)).sort((a, b) => at(a) - at(b));
+  const completed = rows.filter((t) => t.status === 'DONE').sort((a, b) => new Date(b.completedAt || 0).getTime() - new Date(a.completedAt || 0).getTime());
+  const showOwner = isAdmin && who !== 'ME';
+
+  const row = (t: TaskRow, tone: 'overdue' | 'pending' | 'done') => (
+    <div key={t.id} className="flex items-center justify-between gap-3 px-4 py-3 text-sm">
+      <div className="min-w-0">
+        {t.kind && t.kind !== 'MANUAL' && <span className={`mr-2 text-[10px] font-semibold rounded-full px-2 py-0.5 ${t.kind === 'DEMO' ? 'bg-purple-100 text-purple-700' : 'bg-blue-100 text-blue-700'}`}>{t.kind === 'DEMO' ? 'Demo' : 'Follow-up'}</span>}
+        <span className="font-medium">{t.title}</span>
+        {t.lead && <button onClick={() => onOpenLead(t.lead!.id)} className="text-xs text-blue-600 hover:underline ml-2">{t.lead.name}</button>}
+        {t.description && <p className="text-xs text-muted-foreground">{t.description}</p>}
+        <p className="text-xs text-muted-foreground">
+          {showOwner && t.assignedTo ? `${t.assignedTo.firstName} ${t.assignedTo.lastName}` : ''}
+          {showOwner && t.assignedTo && t.createdBy ? ' · ' : ''}
+          {t.createdBy && (!t.assignedTo || t.createdBy.id !== t.assignedTo.id) ? `from ${t.createdBy.firstName} ${t.createdBy.lastName}` : ''}
+        </p>
+      </div>
+      <div className="flex items-center gap-3 whitespace-nowrap">
+        {tone === 'done'
+          ? <span className="text-xs font-medium text-green-700 bg-green-50 rounded-full px-2.5 py-1">✓ {t.completedAt ? formatDateTime(t.completedAt) : 'Completed'}</span>
+          : t.dueAt && <span className={`text-xs ${tone === 'overdue' ? 'text-red-600 font-medium' : 'text-muted-foreground'}`}>{formatDateTime(t.dueAt)}</span>}
+        {canEdit && tone !== 'done' && (<>
+          <button onClick={() => setStatus(t.id, 'DONE')} className="text-xs font-medium text-green-600 hover:underline">Done</button>
+          <button onClick={() => setStatus(t.id, 'CANCELLED')} className="text-xs text-muted-foreground hover:underline">Cancel</button>
+        </>)}
+        {canEdit && tone === 'done' && <button onClick={() => setStatus(t.id, 'OPEN')} className="text-xs text-blue-600 hover:underline">Reopen</button>}
+      </div>
+    </div>
+  );
+  const section = (label: string, cls: string, list: TaskRow[], tone: 'overdue' | 'pending' | 'done', collapsible = false) => (
+    <section className="space-y-2">
+      <div className="flex items-center justify-between">
+        <h3 className={`text-sm font-semibold ${cls}`}>{label} ({list.length})</h3>
+        {collapsible && <button onClick={() => setShowDone((v) => !v)} className="text-xs text-muted-foreground hover:underline">{showDone ? 'Hide' : 'Show'}</button>}
+      </div>
+      {(!collapsible || showDone) && (
+        <div className="bg-card border rounded-xl divide-y">
+          {list.length === 0 ? <p className="px-4 py-4 text-sm text-muted-foreground">{loading ? 'Loading…' : 'Nothing here'}</p> : list.map((t) => row(t, tone))}
+        </div>
+      )}
+    </section>
+  );
+
   return (
-    <div className="space-y-4">
+    <div className="space-y-5">
       {error && <div className="bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg px-4 py-3">{error}</div>}
-      {canEdit && (
+
+      {manage && canEdit && (
         <div className="border rounded-xl p-4 space-y-3 bg-muted/20">
           <h3 className="font-semibold text-sm">{isAdmin ? 'Create / assign a task' : 'Add a task for yourself'}</h3>
           <div className="flex flex-wrap gap-2">
@@ -2385,52 +2385,63 @@ function TasksPanel({ isAdmin, canEdit, employees, onOpenLead }: { isAdmin: bool
                 {employees.map((e) => <option key={e.id} value={e.id}>{e.firstName} {e.lastName}</option>)}
               </select>
             )}
-            <button onClick={add} disabled={saving} className="px-4 py-2 text-sm rounded-lg bg-blue-600 text-white disabled:opacity-50">{saving ? 'Saving...' : 'Add task'}</button>
+            <button onClick={add} disabled={saving} className="px-4 py-2 text-sm rounded-lg bg-blue-600 text-white disabled:opacity-50">{saving ? 'Saving…' : 'Add task'}</button>
           </div>
           <textarea className="w-full px-3 py-2 border rounded-lg text-sm" rows={2} placeholder="Details (optional)" value={desc} onChange={(e) => setDesc(e.target.value)} />
         </div>
       )}
-      <div className="flex flex-wrap items-center gap-3">
-        <select value={statusF} onChange={(e) => setStatusF(e.target.value)} className="px-3 py-2 border rounded-lg text-sm">
-          <option value="OPEN">Open</option><option value="DONE">Done</option><option value="CANCELLED">Cancelled</option><option value="">All</option>
-        </select>
+
+      <div className="flex flex-wrap items-center gap-2">
         {isAdmin && (
-          <select value={assigneeF} onChange={(e) => setAssigneeF(e.target.value)} className="px-3 py-2 border rounded-lg text-sm">
-            <option value="">Everyone</option>
+          <select value={who} onChange={(e) => setWho(e.target.value)} className="px-3 py-2 border rounded-lg text-sm bg-background">
+            <option value="ME">My own</option>
+            <option value="">Whole sales team</option>
             {employees.map((e) => <option key={e.id} value={e.id}>{e.firstName} {e.lastName}</option>)}
           </select>
         )}
+        <div className="inline-flex rounded-lg border bg-white overflow-hidden text-xs">
+          {([['any', 'Any date'], ['today', 'Today'], ['week', 'This week'], ['month', 'This month'], ['custom', 'Custom']] as [DatePreset, string][]).map(([v, l]) => (
+            <button key={v} onClick={() => setPreset(v)} className={`px-3 py-2 ${preset === v ? 'bg-blue-600 text-white' : 'hover:bg-muted'}`}>{l}</button>
+          ))}
+        </div>
+        {preset === 'custom' && (
+          <span className="flex items-center gap-1 text-xs text-muted-foreground">
+            <input type="date" value={cFrom} onChange={(e) => setCFrom(e.target.value)} className="px-2 py-1.5 border rounded-lg text-sm" /> –
+            <input type="date" value={cTo} onChange={(e) => setCTo(e.target.value)} className="px-2 py-1.5 border rounded-lg text-sm" />
+          </span>
+        )}
+        <button onClick={load} disabled={loading} className="ml-auto flex items-center gap-2 px-3 py-2 border rounded-lg text-sm hover:bg-muted/50 disabled:opacity-50">
+          <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} /> Refresh
+        </button>
       </div>
-      <div className="bg-card border rounded-xl overflow-x-auto">
-        <table className="w-full text-sm">
-          <thead className="bg-muted/50 text-left text-xs uppercase text-muted-foreground">
-            <tr><th className="px-3 py-3">Task</th><th className="px-3 py-3">Lead</th>{isAdmin && <th className="px-3 py-3">Assigned to</th>}<th className="px-3 py-3">Due</th><th className="px-3 py-3">Status</th><th className="px-3 py-3"></th></tr>
-          </thead>
-          <tbody className="divide-y">
-            {rows.length === 0 ? (
-              <tr><td colSpan={6} className="px-4 py-8 text-center text-muted-foreground">{loading ? 'Loading...' : 'No tasks'}</td></tr>
-            ) : rows.map((t) => (
-              <tr key={t.id} className="hover:bg-muted/30">
-                <td className="px-3 py-3">{t.kind && t.kind !== 'MANUAL' && <span className={`mr-2 text-[10px] font-semibold rounded-full px-2 py-0.5 ${t.kind === 'DEMO' ? 'bg-purple-100 text-purple-700' : 'bg-blue-100 text-blue-700'}`}>{t.kind === 'DEMO' ? 'Demo' : 'Follow-up'}</span>}<span className="font-medium">{t.title}</span>{t.description && <p className="text-xs text-muted-foreground">{t.description}</p>}</td>
-                <td className="px-3 py-3 text-xs">{t.lead ? <button onClick={() => onOpenLead(t.lead!.id)} className="text-blue-600 hover:underline">{t.lead.name}</button> : '—'}</td>
-                {isAdmin && <td className="px-3 py-3 text-xs">{t.assignedTo ? `${t.assignedTo.firstName} ${t.assignedTo.lastName}` : '—'}</td>}
-                <td className="px-3 py-3 text-xs whitespace-nowrap">{t.dueAt ? formatDateTime(t.dueAt) : '—'}</td>
-                <td className="px-3 py-3 text-xs">{t.status === 'DONE' ? <span className="text-green-600">Done</span> : t.status === 'CANCELLED' ? <span className="text-muted-foreground">Cancelled</span> : <span className="text-amber-600">Open</span>}</td>
-                <td className="px-3 py-3 whitespace-nowrap space-x-3">
-                  {t.status === 'OPEN' && canEdit && (<>
-                    <button onClick={() => setStatus(t.id, 'DONE')} className="text-xs font-medium text-green-600 hover:underline">Done</button>
-                    <button onClick={() => setStatus(t.id, 'CANCELLED')} className="text-xs text-muted-foreground hover:underline">Cancel</button>
-                  </>)}
-                  {t.status !== 'OPEN' && canEdit && <button onClick={() => setStatus(t.id, 'OPEN')} className="text-xs text-blue-600 hover:underline">Reopen</button>}
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
+      <p className="text-xs text-muted-foreground">Overdue and Pending are filtered by due date; Completed by the day it was finished{preset === 'any' ? ' (last 14 days)' : ''}. Follow-ups and booked demos appear here automatically.</p>
+
+      {section('Overdue', 'text-red-600', overdue, 'overdue')}
+      {section('Pending', 'text-foreground', pending, 'pending')}
+      {section('Completed', 'text-green-700', completed, 'done', true)}
     </div>
   );
 }
+
+// ── My Reminders: follow-ups due + open tasks, grouped by urgency ────────────
+interface TaskRow {
+  id: string; title: string; description?: string | null; dueAt?: string | null; status: 'OPEN' | 'DONE' | 'CANCELLED';
+  completedAt?: string | null; bucket?: string; kind?: 'MANUAL' | 'FOLLOW_UP' | 'DEMO'; demoId?: string | null;
+  lead?: { id: string; name: string; phone?: string } | null;
+  assignedTo?: EmployeeLite; createdBy?: EmployeeLite | null;
+}
+interface FollowUpRow {
+  id: string; name: string; phone: string; status: LeadStatus; activityStatus?: ActivityStatus | null;
+  courseInterest?: string | null; nextFollowUpAt: string; bucket: string;
+}
+const BUCKETS: { id: string; label: string; cls: string }[] = [
+  { id: 'overdue', label: 'Overdue', cls: 'text-red-600' },
+  { id: 'today', label: 'Today', cls: 'text-amber-600' },
+  { id: 'upcoming', label: 'Upcoming', cls: 'text-foreground' },
+];
+
+
+// ── Manage Tasks: create tasks (Sales Admin can assign to anyone) ───────────
 
 // ── My Base (Sales Admin): pool of unassigned leads — bulk hand-out and pull-back ──
 interface BaseSummary {
@@ -5385,6 +5396,172 @@ function TranscriptsPanel({ onOpenLead }: { onOpenLead: (id: string) => void }) 
         </div>
       )}
       {open && <TranscriptModal type={open.sourceType} id={open.sourceId} onClose={() => setOpen(null)} />}
+    </div>
+  );
+}
+
+// ── Dashboard: one-screen snapshot for a salesperson (own numbers) or Sales Admin (team, or one person) ──
+interface DashData {
+  admin: boolean; scope: 'me' | 'team' | 'person';
+  today: { calls: number; talkMinutes: number; demos: number; followUps: number; overdue: number; tasks: number; pendingOutcome: number; untouchedNew: number };
+  month: { newLeads: number; enrolled: number; demosDone: number; goal: number; revenueGoal: number; dayOfMonth: number; daysInMonth: number };
+  funnel: Record<string, number>; openTotal: number;
+  callsTrend: { date: string; count: number }[];
+  sources: { source: string; leads: number; enrolled: number; rate: number }[];
+  pool: number;
+  team: { employeeId: string; name: string; open: number; overdue: number; callsToday: number; enrolled: number; goal: number }[];
+}
+function DashboardPanel({ isAdmin, employees, go }: { isAdmin: boolean; employees: EmployeeLite[]; go: (t: Tab) => void }) {
+  const [data, setData] = useState<DashData | null>(null);
+  const [emp, setEmp] = useState('');
+  const [error, setError] = useState('');
+  const [loading, setLoading] = useState(true);
+  useEffect(() => {
+    setLoading(true); setError('');
+    api.get('/api/sales/dashboard', { params: emp ? { employeeId: emp } : {} })
+      .then((r) => setData(r.data.data))
+      .catch((err: unknown) => setError((err as { response?: { data?: { message?: string } } }).response?.data?.message || 'Failed to load the dashboard'))
+      .finally(() => setLoading(false));
+  }, [emp]);
+
+  if (error) return <div className="bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg px-4 py-3">{error}</div>;
+  if (!data) return <p className="text-sm text-muted-foreground py-8 text-center">{loading ? 'Loading dashboard…' : ''}</p>;
+
+  const t = data.today, m = data.month;
+  const expected = m.goal ? Math.round((m.goal * m.dayOfMonth) / m.daysInMonth) : 0;
+  const pct = m.goal ? Math.min(100, Math.round((m.enrolled / m.goal) * 100)) : 0;
+  const pace = m.goal ? (m.enrolled >= expected ? 'On track' : `${expected - m.enrolled} behind pace`) : '';
+  const maxCalls = Math.max(1, ...data.callsTrend.map((c) => c.count));
+  const funnelOrder = CFG.stages.length ? CFG.stages.filter((x) => x.active && x.base !== 'LOST').map((x) => x.key) : ['NEW', 'CONTACTED', 'DEMO_SCHEDULED', 'DEMO_DONE', 'NEGOTIATION', 'ENROLLED'];
+  const funnelMax = Math.max(1, ...funnelOrder.map((k) => data.funnel[k] || 0));
+  const tile = (label: string, value: number | string, sub: string, tone: string, onClick?: () => void) => (
+    <button onClick={onClick} disabled={!onClick} className={`text-left rounded-xl border p-4 bg-card ${onClick ? 'hover:shadow-sm' : 'cursor-default'}`}>
+      <p className="text-xs text-muted-foreground">{label}</p>
+      <p className={`text-3xl font-bold mt-1 ${tone}`}>{value}</p>
+      <p className="text-xs text-muted-foreground mt-1">{sub}</p>
+    </button>
+  );
+
+  return (
+    <div className="space-y-5">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div>
+          <h2 className="font-semibold text-lg">{data.scope === 'team' ? 'Team dashboard' : data.scope === 'person' ? 'Salesperson view' : 'My dashboard'}</h2>
+          <p className="text-xs text-muted-foreground">{new Date().toLocaleDateString('en-IN', { weekday: 'long', day: 'numeric', month: 'long' })}</p>
+        </div>
+        {isAdmin && (
+          <select value={emp} onChange={(e) => setEmp(e.target.value)} className="border rounded-lg px-3 py-2 text-sm bg-background">
+            <option value="">Whole team</option>
+            {employees.map((e) => <option key={e.id} value={e.id}>{e.firstName} {e.lastName}</option>)}
+          </select>
+        )}
+      </div>
+
+      {(t.overdue > 0 || t.pendingOutcome > 0) && (
+        <div className="flex flex-wrap gap-2">
+          {t.overdue > 0 && <button onClick={() => go('today')} className="text-sm rounded-lg border border-red-300 bg-red-50 text-red-800 px-3 py-2"><b>{t.overdue}</b> overdue follow-up{t.overdue === 1 ? '' : 's'} — act on them first</button>}
+          {t.pendingOutcome > 0 && <button onClick={() => go(isAdmin ? 'leads' : 'demoBooked')} className="text-sm rounded-lg border border-amber-300 bg-amber-50 text-amber-800 px-3 py-2"><b>{t.pendingOutcome}</b> demo{t.pendingOutcome === 1 ? '' : 's'} waiting for an outcome</button>}
+        </div>
+      )}
+
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+        {tile('Calls today', t.calls, `${t.talkMinutes} min talk time`, 'text-blue-600', () => go('callLog'))}
+        {tile('Follow-ups due today', t.followUps, t.overdue ? `+ ${t.overdue} overdue` : 'nothing overdue', t.overdue ? 'text-red-600' : 'text-foreground', () => go('today'))}
+        {tile('Demos today', t.demos, 'scheduled for today', 'text-purple-600', () => go(isAdmin ? 'liveDemos' : 'demoBooked'))}
+        {tile('Open tasks due', t.tasks, 'incl. follow-ups & demos', 'text-foreground', () => go(isAdmin ? 'tasks' : 'reminders'))}
+      </div>
+
+      <div className="grid lg:grid-cols-3 gap-4">
+        <section className="border rounded-xl bg-card p-4 space-y-3 lg:col-span-1">
+          <h3 className="font-semibold text-sm">This month</h3>
+          <div className="grid grid-cols-3 gap-2 text-center">
+            <div><p className="text-2xl font-bold">{m.newLeads}</p><p className="text-[11px] text-muted-foreground">New leads</p></div>
+            <div><p className="text-2xl font-bold">{m.demosDone}</p><p className="text-[11px] text-muted-foreground">Demos done</p></div>
+            <div><p className="text-2xl font-bold text-green-600">{m.enrolled}</p><p className="text-[11px] text-muted-foreground">Enrolled</p></div>
+          </div>
+          {m.goal > 0 ? (
+            <div className="space-y-1">
+              <div className="flex justify-between text-xs"><span>Target {m.enrolled}/{m.goal}</span><span className={m.enrolled >= expected ? 'text-green-700' : 'text-amber-700'}>{pace}</span></div>
+              <div className="h-2.5 rounded-full bg-slate-100 overflow-hidden relative">
+                <div className="h-full bg-green-500" style={{ width: `${pct}%` }} />
+                <div className="absolute top-0 bottom-0 w-0.5 bg-slate-500" style={{ left: `${Math.min(100, Math.round((expected / m.goal) * 100))}%` }} title="Where you should be today" />
+              </div>
+              <p className="text-[11px] text-muted-foreground">The dark tick is where you should be by today.</p>
+            </div>
+          ) : <p className="text-xs text-muted-foreground">No enrolment target set for this month.</p>}
+        </section>
+
+        <section className="border rounded-xl bg-card p-4 space-y-2 lg:col-span-1">
+          <h3 className="font-semibold text-sm">Pipeline <span className="text-muted-foreground font-normal">· {data.openTotal} open</span></h3>
+          {funnelOrder.map((k) => (
+            <div key={k} className="flex items-center gap-2 text-xs">
+              <span className="w-28 text-muted-foreground truncate">{stageLabel(k)}</span>
+              <div className="flex-1 h-4 rounded bg-slate-100 overflow-hidden"><div className="h-full bg-blue-500/80" style={{ width: `${((data.funnel[k] || 0) / funnelMax) * 100}%` }} /></div>
+              <span className="w-8 text-right font-medium">{data.funnel[k] || 0}</span>
+            </div>
+          ))}
+        </section>
+
+        <section className="border rounded-xl bg-card p-4 space-y-2 lg:col-span-1">
+          <h3 className="font-semibold text-sm">Calls — last 7 days</h3>
+          <div className="flex items-end gap-2 h-28">
+            {data.callsTrend.map((c) => (
+              <div key={c.date} className="flex-1 flex flex-col items-center justify-end gap-1 h-full">
+                <span className="text-[10px] text-muted-foreground">{c.count || ''}</span>
+                <div className="w-full rounded-t bg-blue-500/80" style={{ height: `${Math.max(3, (c.count / maxCalls) * 100)}%` }} />
+                <span className="text-[10px] text-muted-foreground">{new Date(`${c.date}T12:00:00`).toLocaleDateString('en-IN', { weekday: 'short' }).slice(0, 2)}</span>
+              </div>
+            ))}
+          </div>
+        </section>
+      </div>
+
+      <div className="grid lg:grid-cols-2 gap-4">
+        <section className="border rounded-xl bg-card p-4 space-y-2">
+          <h3 className="font-semibold text-sm">Best sources <span className="text-muted-foreground font-normal">· last 30 days</span></h3>
+          {data.sources.length === 0 ? <p className="text-xs text-muted-foreground">No leads in the last 30 days.</p> : (
+            <table className="w-full text-sm">
+              <thead className="text-left text-xs text-muted-foreground"><tr><th className="py-1">Source</th><th>Leads</th><th>Enrolled</th><th>Conversion</th></tr></thead>
+              <tbody className="divide-y">
+                {data.sources.map((s) => <tr key={s.source}><td className="py-1.5">{s.source}</td><td>{s.leads}</td><td>{s.enrolled}</td><td className={s.rate >= 10 ? 'text-green-700 font-medium' : ''}>{s.rate}%</td></tr>)}
+              </tbody>
+            </table>
+          )}
+        </section>
+
+        {data.scope === 'team' ? (
+          <section className="border rounded-xl bg-card p-4 space-y-2">
+            <div className="flex items-center justify-between">
+              <h3 className="font-semibold text-sm">Team</h3>
+              {data.pool > 0 && <button onClick={() => go('myBase')} className="text-xs text-blue-600 hover:underline">{data.pool} unassigned in My Base →</button>}
+            </div>
+            <table className="w-full text-sm">
+              <thead className="text-left text-xs text-muted-foreground"><tr><th className="py-1">Name</th><th>Open</th><th>Overdue</th><th>Calls today</th><th>Enrolled</th></tr></thead>
+              <tbody className="divide-y">
+                {data.team.map((p) => (
+                  <tr key={p.employeeId} className="cursor-pointer hover:bg-muted/30" onClick={() => setEmp(p.employeeId)}>
+                    <td className="py-1.5">{p.name}</td><td>{p.open}</td>
+                    <td className={p.overdue ? 'text-red-600 font-medium' : ''}>{p.overdue}</td>
+                    <td className={p.callsToday === 0 ? 'text-amber-700' : ''}>{p.callsToday}</td>
+                    <td>{p.enrolled}{p.goal ? <span className="text-muted-foreground">/{p.goal}</span> : ''}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            <p className="text-[11px] text-muted-foreground">Click a name to see their dashboard.</p>
+          </section>
+        ) : (
+          <section className="border rounded-xl bg-card p-4 space-y-2">
+            <h3 className="font-semibold text-sm">Needs attention</h3>
+            <ul className="text-sm space-y-1.5">
+              <li className="flex justify-between"><span>New leads never contacted</span><b>{t.untouchedNew}</b></li>
+              <li className="flex justify-between"><span>Overdue follow-ups</span><b className={t.overdue ? 'text-red-600' : ''}>{t.overdue}</b></li>
+              <li className="flex justify-between"><span>Demos awaiting outcome</span><b>{t.pendingOutcome}</b></li>
+            </ul>
+            <button onClick={() => go('today')} className="mt-1 text-xs text-blue-600 hover:underline">Open my Today list →</button>
+          </section>
+        )}
+      </div>
     </div>
   );
 }
