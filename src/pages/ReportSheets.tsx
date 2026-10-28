@@ -2,10 +2,11 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Bold, AlignLeft, AlignCenter, AlignRight, Plus, Trash2, Eraser } from 'lucide-react';
 import api from '@/lib/api';
 import { useModuleAccess } from '@/hooks/useModuleAccess';
+import LiveSheet from '@/components/BrdLiveSheets';
 
 interface Cell { v: string; bg?: string; fg?: string; b?: 1; i?: 1; al?: 'l' | 'c' | 'r' }
 interface Content { rows: number; cols: number; colWidths: number[]; rowHeights: Record<string, number>; merges: { r: number; c: number; rs: number; cs: number }[]; cells: Record<string, Cell>; frozenRows: number }
-interface SheetRow { id: string; name: string; content: Content }
+interface SheetRow { id: string; name: string; kind?: string; liveKey?: string | null; content: Content }
 interface BookRow { id: string; name: string; sheets: SheetRow[] }
 interface BookLite { id: string; name: string }
 
@@ -52,7 +53,7 @@ export default function ReportSheetsPage() {
       setBook(b);
       const first = b.sheets[0];
       setSheetId(first?.id || '');
-      setContent(first?.content || null);
+      setContent(first && first.kind !== 'LIVE' ? first.content : null);
       setSel({ r: 0, c: 0 }); setEditing(null);
     } catch (e) { setError(errMsg(e, 'Could not open the spreadsheet')); }
   }, [flush]);
@@ -78,7 +79,8 @@ export default function ReportSheetsPage() {
       const b: BookRow = r.data.data;
       setBook(b);
       setSheetId(id);
-      setContent(b.sheets.find((s) => s.id === id)?.content || null);
+      const target = b.sheets.find((s) => s.id === id);
+      setContent(target && target.kind !== 'LIVE' ? target.content : null);
       setSel({ r: 0, c: 0 }); setEditing(null);
     } catch (e) { setError(errMsg(e, 'Could not open the sheet')); }
   };
@@ -199,13 +201,14 @@ export default function ReportSheetsPage() {
   }, [content?.merges]);
 
   const cur = content ? cellAt(sel.r, sel.c) : undefined;
+  const activeSheet = book?.sheets.find((x) => x.id === sheetId);
 
   return (
     <div className="space-y-3">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div>
           <h1 className="text-2xl font-bold">Report Sheets</h1>
-          <p className="text-sm text-muted-foreground">Spreadsheets for the team's reports. Cells hold plain values — formulas are not calculated.</p>
+          <p className="text-sm text-muted-foreground">Live reports from the Sales data, plus free sheets (plain values — formulas are not calculated).</p>
         </div>
         <span className={`text-xs ${saveState === 'error' ? 'text-red-600' : 'text-muted-foreground'}`}>{saveState === 'saving' ? 'Saving…' : saveState === 'error' ? 'Not saved' : 'All changes saved'}</span>
       </div>
@@ -218,7 +221,9 @@ export default function ReportSheetsPage() {
         {isAdmin && <button onClick={newBook} className="px-3 py-1.5 rounded-lg border border-dashed text-sm flex items-center gap-1 hover:bg-muted/50"><Plus className="w-3.5 h-3.5" /> New spreadsheet</button>}
       </div>
 
-      {content && (
+      {activeSheet?.kind === 'LIVE' && activeSheet.liveKey && <LiveSheet key={activeSheet.id} liveKey={activeSheet.liveKey} canAdmin={isAdmin} />}
+
+      {content && activeSheet?.kind !== 'LIVE' && (
         <>
           <div className="flex flex-wrap items-center gap-1.5 border rounded-lg px-2 py-1.5 bg-card text-sm">
             <span className="font-mono text-xs px-2 py-1 bg-muted rounded">{colName(sel.c)}{sel.r + 1}</span>
@@ -300,7 +305,11 @@ export default function ReportSheetsPage() {
             </table>
           </div>
 
-          <div className="flex items-center gap-1 border-t pt-2 overflow-x-auto">
+        </>
+      )}
+
+      {book && (
+        <div className="flex items-center gap-1 border-t pt-2 overflow-x-auto">
             {canEdit && <button onClick={addSheet} className="p-1.5 rounded hover:bg-muted" title="Add sheet"><Plus className="w-4 h-4" /></button>}
             {book?.sheets.map((s) => (
               <button key={s.id} onClick={() => switchSheet(s.id)} onDoubleClick={() => renameSheet(s)}
@@ -309,7 +318,6 @@ export default function ReportSheetsPage() {
               </button>
             ))}
           </div>
-        </>
       )}
     </div>
   );
