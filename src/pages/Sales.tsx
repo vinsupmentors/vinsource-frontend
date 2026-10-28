@@ -5,7 +5,7 @@ import api, { BASE_URL } from '@/lib/api';
 import { useModuleAccess } from '@/hooks/useModuleAccess';
 import ColumnHeader from '@/components/ColumnHeader';
 import DateTimeField from '@/components/DateTimeField';
-import { OnboardingModal, LeadFeesPanel, type OnboardingInfo } from './SalesOnboarding';
+import { OnboardingModal, LeadFeesPanel, CourseFeesModal, type OnboardingInfo } from './SalesOnboarding';
 import AdvancedFilter, { type FilterField, type FilterGroup } from '@/components/AdvancedFilter';
 import { formatDate, formatDateTime, formatTime } from '@/lib/utils';
 import {
@@ -553,6 +553,7 @@ export default function SalesPage() {
 
   const [searchParams, setSearchParams] = useSearchParams();
   const tabFromUrl = searchParams.get('tab') as Tab | null;
+  const [showCourseFees, setShowCourseFees] = useState(false);
   const [tab, setTabState] = useState<Tab>(tabFromUrl && VALID_TABS.includes(tabFromUrl) ? tabFromUrl : 'dashboard');
   const setTab = (t: Tab) => { setTabState(t); setSearchParams({ tab: t }, { replace: true }); };
   useEffect(() => {
@@ -828,11 +829,14 @@ export default function SalesPage() {
             </button>
           );
         })}
+        {isAdmin && <button onClick={() => setShowCourseFees(true)} className="ml-auto whitespace-nowrap px-3 py-1.5 mb-1 text-xs font-medium border rounded-lg hover:bg-muted/50">Course fees</button>}
       </div>
 
       {error && (
         <div className="bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg px-4 py-3">{error}</div>
       )}
+
+      {showCourseFees && <CourseFeesModal base="/api/sales" onClose={() => setShowCourseFees(false)} />}
 
       {tab === 'leads' && (
         <>
@@ -2193,7 +2197,7 @@ function LeadDetailModal({ lead, employees, canEdit, isAdmin, onClose, onChanged
           )}
         </div>}
 
-        {leadTab === 'fees' && onboarding && <LeadFeesPanel leadId={lead.id} onboarding={onboarding} canEdit={canEdit} onChanged={onChanged} />}
+        {leadTab === 'fees' && onboarding && <LeadFeesPanel leadId={lead.id} onboarding={onboarding} canEdit={canEdit} isAdmin={isAdmin} onChanged={() => { onChanged(); loadOnboarding(); }} />}
         {showOnboard && <OnboardingModal leadId={lead.id} leadName={lead.name} defaultCourse={lead.courseInterest} onClose={() => setShowOnboard(false)} onDone={() => { setShowOnboard(false); loadOnboarding(); setLeadTab('fees'); onChanged(); }} />}
 
         {/* Full lead history — from creation, never edited */}
@@ -5431,11 +5435,11 @@ interface DashData {
   today: { calls: number; talkMinutes: number; demos: number; followUps: number; overdue: number; tasks: number; pendingOutcome: number; untouchedNew: number };
   month: { newLeads: number; enrolled: number; demosDone: number; goal: number; revenueGoal: number; dayOfMonth: number; daysInMonth: number };
   funnel: Record<string, number>; openTotal: number;
-  money?: { collectedMonth: number; awaitingAmount: number; awaitingCount: number; overdueAmount: number; overdueCount: number };
+  money?: { collectedMonth: number; awaitingAmount: number; awaitingCount: number; overdueAmount: number; overdueCount: number; onboardedMonth?: number; onboardedFullyPaid?: number };
   callsTrend: { date: string; count: number }[];
   sources: { source: string; leads: number; enrolled: number; rate: number }[];
   pool: number;
-  team: { employeeId: string; name: string; open: number; overdue: number; callsToday: number; enrolled: number; goal: number }[];
+  team: { employeeId: string; name: string; open: number; overdue: number; callsToday: number; onboarded?: number; enrolled: number; goal: number }[];
 }
 function DashboardPanel({ isAdmin, employees, go }: { isAdmin: boolean; employees: EmployeeLite[]; go: (t: Tab) => void }) {
   const [data, setData] = useState<DashData | null>(null);
@@ -5498,10 +5502,11 @@ function DashboardPanel({ isAdmin, employees, go }: { isAdmin: boolean; employee
       </div>
 
       {data.money && (
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
           {tile('Collected this month', formatCurrency(data.money.collectedMonth), 'verified by Finance', 'text-green-700', () => go('collections'))}
           {tile('Waiting for Finance', formatCurrency(data.money.awaitingAmount), `${data.money.awaitingCount} payment${data.money.awaitingCount === 1 ? '' : 's'} to verify`, 'text-amber-700', () => go('collections'))}
           {tile('Overdue fees', formatCurrency(data.money.overdueAmount), `${data.money.overdueCount} instalment${data.money.overdueCount === 1 ? '' : 's'} to chase`, data.money.overdueCount ? 'text-red-600' : 'text-foreground', () => go('collections'))}
+          {tile('Onboarded this month', String(data.money.onboardedMonth ?? 0), `${data.money.onboardedFullyPaid ?? 0} fully paid (${data.money.onboardedMonth ? Math.round(((data.money.onboardedFullyPaid ?? 0) / data.money.onboardedMonth) * 100) : 0}%)`, 'text-blue-700', () => go('collections'))}
         </div>
       )}
 
@@ -5570,13 +5575,14 @@ function DashboardPanel({ isAdmin, employees, go }: { isAdmin: boolean; employee
               {data.pool > 0 && <button onClick={() => go('myBase')} className="text-xs text-blue-600 hover:underline">{data.pool} unassigned in My Base →</button>}
             </div>
             <table className="w-full text-sm">
-              <thead className="text-left text-xs text-muted-foreground"><tr><th className="py-1">Name</th><th>Open</th><th>Overdue</th><th>Calls today</th><th>Enrolled</th></tr></thead>
+              <thead className="text-left text-xs text-muted-foreground"><tr><th className="py-1">Name</th><th>Open</th><th>Overdue</th><th>Calls today</th><th>Onboarded</th><th>Enrolled</th></tr></thead>
               <tbody className="divide-y">
                 {data.team.map((p) => (
                   <tr key={p.employeeId} className="cursor-pointer hover:bg-muted/30" onClick={() => setEmp(p.employeeId)}>
                     <td className="py-1.5">{p.name}</td><td>{p.open}</td>
                     <td className={p.overdue ? 'text-red-600 font-medium' : ''}>{p.overdue}</td>
                     <td className={p.callsToday === 0 ? 'text-amber-700' : ''}>{p.callsToday}</td>
+                    <td>{p.onboarded ?? 0}</td>
                     <td>{p.enrolled}{p.goal ? <span className="text-muted-foreground">/{p.goal}</span> : ''}</td>
                   </tr>
                 ))}

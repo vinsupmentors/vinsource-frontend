@@ -157,6 +157,8 @@ const moduleNavItems: ModuleNavItem[] = [
   // (batch/course drill-down + report filters), not another Leads/Demos tab.
   { label: 'My Students',        to: '/my-students',       icon: GraduationCap, module: 'SALES' },
   { label: 'Finance (Sales)',    to: '/finance/sales',     icon: Wallet,        module: 'FINANCE_SALES' },
+  { label: 'EMI',                to: '/emi',               icon: CalendarClock, module: 'EMI' },
+  { label: 'Report Sheets',      to: '/report-sheets',     icon: FileText,      module: 'REPORT_SHEETS' },
   {
     label: 'Finance (Admin)',
     to: '/finance/admin',

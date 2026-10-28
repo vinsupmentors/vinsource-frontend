@@ -98,6 +98,8 @@ const Pills = ({ value, options, onChange }: { value: string; options: [string, 
   </div>
 );
 
+export interface EmiQuote { downPaymentPct: number; downPayment: number; balance: number; ratePct: number; interest: number; totalPayable: number; monthly: number[]; months: number }
+
 // ── Onboarding form ──
 export function OnboardingModal({ leadId, leadName, defaultCourse, onClose, onDone }: { leadId: string; leadName: string; defaultCourse?: string | null; onClose: () => void; onDone: () => void }) {
   const [courses, setCourses] = useState<{ id: string; name: string }[]>([]);
@@ -107,11 +109,35 @@ export function OnboardingModal({ leadId, leadName, defaultCourse, onClose, onDo
   const [mode, setMode] = useState('');
   const [method, setMethod] = useState('');
   const [totalFee, setTotalFee] = useState('');
+  const [emiMonths, setEmiMonths] = useState(0);
+  const [allowed, setAllowed] = useState<number[]>([]);
+  const [quote, setQuote] = useState<EmiQuote | null>(null);
+  const [feeMaster, setFeeMaster] = useState<{ courseName: string; fee: number }[]>([]);
   const [regPaid, setRegPaid] = useState(false);
   const [pay, setPay] = useState<PayState>(emptyPay());
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
-  useEffect(() => { api.get('/api/sales/courses').then((r) => setCourses(r.data.data)).catch(() => setCourses([])); }, []);
+  useEffect(() => {
+    api.get('/api/sales/courses').then((r) => setCourses(r.data.data)).catch(() => setCourses([]));
+    api.get('/api/sales/course-fees').then((r) => setFeeMaster(r.data.data)).catch(() => setFeeMaster([]));
+  }, []);
+  useEffect(() => {
+    const m = feeMaster.find((f) => f.courseName.toLowerCase() === course.trim().toLowerCase());
+    if (m) setTotalFee(String(m.fee));
+  }, [course, feeMaster]);
+
+  useEffect(() => {
+    if (method !== 'EMI' || !Number(totalFee)) { setAllowed([]); setEmiMonths(0); setQuote(null); return; }
+    api.get('/api/sales/emi/quote', { params: { fee: totalFee } }).then((r) => {
+      const a: number[] = r.data.data.allowedMonths || [];
+      setAllowed(a);
+      setEmiMonths((m) => (a.includes(m) ? m : 0));
+    }).catch(() => setAllowed([]));
+  }, [method, totalFee]);
+  useEffect(() => {
+    if (method !== 'EMI' || !emiMonths || !Number(totalFee)) { setQuote(null); return; }
+    api.get('/api/sales/emi/quote', { params: { fee: totalFee, months: emiMonths } }).then((r) => setQuote(r.data.data)).catch(() => setQuote(null));
+  }, [method, emiMonths, totalFee]);
 
   const submit = async () => {
     setError('');
@@ -120,12 +146,16 @@ export function OnboardingModal({ leadId, leadName, defaultCourse, onClose, onDo
     if (!timing) return setError('Choose the timing');
     if (!mode) return setError('Choose Offline or Online');
     if (!method) return setError('Choose the payment method');
+    if (method === 'EMI' && !Number(totalFee)) return setError('Enter the course fee to set up the EMI');
+    if (method === 'EMI' && !emiMonths) return setError('Choose the number of EMI months');
+    if (quote && regPaid && Number(pay.amount) > quote.downPayment + 0.5) return setError(`The amount collected can't be more than the down payment (${formatCurrency(quote.downPayment)})`);
     if (regPaid && (!Number(pay.amount) || !pay.file)) return setError('Enter the amount collected and attach the screenshot');
     setSaving(true);
     try {
       const fd = new FormData();
       fd.append('courseName', course.trim()); fd.append('daysType', daysType); fd.append('timing', timing); fd.append('mode', mode); fd.append('paymentMethod', method);
       if (totalFee) fd.append('totalFee', totalFee);
+      if (method === 'EMI') fd.append('emiMonths', String(emiMonths));
       fd.append('registrationPaid', String(regPaid));
       if (regPaid) appendPay(fd, pay);
       await api.post(`/api/sales/leads/${leadId}/onboarding`, fd);
@@ -151,9 +181,23 @@ export function OnboardingModal({ leadId, leadName, defaultCourse, onClose, onDo
         <div><p className="text-xs text-muted-foreground mb-1">Timing</p><Pills value={timing} onChange={setTiming} options={[['MORNING', 'Morning'], ['AFTERNOON', 'Afternoon'], ['EVENING', 'Evening']]} /></div>
         <div><p className="text-xs text-muted-foreground mb-1">Mode</p><Pills value={mode} onChange={setMode} options={[['OFFLINE', 'Offline'], ['ONLINE', 'Online']]} /></div>
         <div><p className="text-xs text-muted-foreground mb-1">Payment method</p><Pills value={method} onChange={setMethod} options={[['FULL', 'Full payment'], ['PART', 'Part payment'], ['EMI', 'EMI']]} /></div>
-        <label className="block text-xs text-muted-foreground">Total course fee (₹, optional — used for balance and the 60% stage)
+        <label className="block text-xs text-muted-foreground">Total course fee (₹ — auto-filled from the course, change if needed)
           <input type="number" min={0} value={totalFee} onChange={(e) => setTotalFee(e.target.value)} className="mt-1 w-full px-3 py-2 border rounded-lg text-sm text-foreground bg-background" />
         </label>
+
+        {method === 'EMI' && (
+          <div className="border rounded-xl p-3 space-y-2 bg-muted/20">
+            <p className="text-xs text-muted-foreground">EMI months{!Number(totalFee) ? ' — enter the course fee first' : ''}</p>
+            <Pills value={String(emiMonths)} onChange={(v) => setEmiMonths(Number(v))} options={allowed.map((m) => [String(m), `${m} months`] as [string, string])} />
+            {quote && (
+              <div className="text-xs space-y-0.5">
+                <p>Down payment ({quote.downPaymentPct}%): <b>{formatCurrency(quote.downPayment)}</b> · Balance: <b>{formatCurrency(quote.balance)}</b></p>
+                <p>Interest {quote.ratePct}% on the balance only: <b>{formatCurrency(quote.interest)}</b> · Total payable: <b>{formatCurrency(quote.totalPayable)}</b></p>
+                <p>Monthly EMI: <b>{formatCurrency(quote.monthly[0])}</b> × {quote.months}</p>
+              </div>
+            )}
+          </div>
+        )}
 
         <label className="flex items-center gap-2 text-sm font-medium cursor-pointer">
           <input type="checkbox" checked={regPaid} onChange={(e) => setRegPaid(e.target.checked)} className="w-4 h-4" /> Registration paid
@@ -171,8 +215,8 @@ export function OnboardingModal({ leadId, leadName, defaultCourse, onClose, onDo
 }
 
 // ── Add a further payment (goes to Finance) ──
-function RecordPaymentModal({ leadId, needFee, onClose, onDone }: { leadId: string; needFee: boolean; onClose: () => void; onDone: () => void }) {
-  const [pay, setPay] = useState<PayState>(emptyPay());
+function RecordPaymentModal({ leadId, needFee, installment, onClose, onDone }: { leadId: string; needFee: boolean; installment?: { id: string; amount: number; title: string }; onClose: () => void; onDone: () => void }) {
+  const [pay, setPay] = useState<PayState>({ ...emptyPay(), amount: installment ? String(installment.amount) : '' });
   const [totalFee, setTotalFee] = useState('');
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
@@ -184,8 +228,8 @@ function RecordPaymentModal({ leadId, needFee, onClose, onDone }: { leadId: stri
     try {
       const fd = new FormData();
       appendPay(fd, pay);
-      if (totalFee) fd.append('totalFee', totalFee);
-      await api.post(`/api/sales/leads/${leadId}/payments`, fd);
+      if (totalFee && !installment) fd.append('totalFee', totalFee);
+      await api.post(installment ? `/api/sales/installments/${installment.id}/pay` : `/api/sales/leads/${leadId}/payments`, fd);
       onDone();
     } catch (e) { setError(errMsg(e, 'Could not record the payment')); }
     finally { setSaving(false); }
@@ -193,10 +237,10 @@ function RecordPaymentModal({ leadId, needFee, onClose, onDone }: { leadId: stri
   return (
     <div className="fixed inset-0 bg-black/50 z-[60] flex items-center justify-center p-4">
       <div className="bg-card rounded-2xl w-full max-w-md max-h-[92vh] overflow-y-auto p-6 space-y-4">
-        <div className="flex items-start justify-between"><h3 className="font-semibold text-lg">Add payment</h3><button onClick={onClose}><X className="w-4 h-4" /></button></div>
+        <div className="flex items-start justify-between"><h3 className="font-semibold text-lg">{installment ? installment.title : 'Add payment'}</h3><button onClick={onClose}><X className="w-4 h-4" /></button></div>
         {error && <div className="bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg px-3 py-2">{error}</div>}
         <PaymentBlock pay={pay} setPay={(fn) => setPay(fn)} />
-        {needFee && (
+        {needFee && !installment && (
           <label className="block text-xs text-muted-foreground">Total course fee (₹, optional)
             <input type="number" min={0} value={totalFee} onChange={(e) => setTotalFee(e.target.value)} className="mt-1 w-full px-3 py-2 border rounded-lg text-sm text-foreground bg-background" />
           </label>
@@ -215,6 +259,7 @@ function RecordPaymentModal({ leadId, needFee, onClose, onDone }: { leadId: stri
 interface FeeInst {
   id: string; dueDate: string; amount: number; status: 'PENDING' | 'PENDING_APPROVAL' | 'PAID' | 'OVERDUE' | 'WAIVED';
   paidAt?: string | null; mode?: string | null; reference?: string | null; hasProof?: boolean; amountMatched?: boolean | null; ocrAmount?: number | null;
+  rejected?: boolean; rejectReason?: string | null; emiMonthNumber?: number | null; scheduled?: boolean; kind?: string | null;
 }
 interface FeeData {
   total: number; totalKnown: boolean; paid: number; awaiting: number; overdue: number; balance: number; pct: number; nextDue: { dueDate: string; amount: number } | null;
@@ -229,6 +274,59 @@ const FEE_STATUS: Record<string, { label: string; cls: string }> = {
 };
 const LABEL: Record<string, string> = { WEEKDAY: 'Weekday', WEEKEND: 'Weekend', MORNING: 'Morning', AFTERNOON: 'Afternoon', EVENING: 'Evening', OFFLINE: 'Offline', ONLINE: 'Online', FULL: 'Full payment', PART: 'Part payment', EMI: 'EMI' };
 
+/** Inline payment screenshot (loaded through the authenticated API); click to open full size. */
+export function ProofThumb({ url }: { url: string }) {
+  const [src, setSrc] = useState<string | null>(null);
+  const [failed, setFailed] = useState(false);
+  useEffect(() => {
+    let obj: string | null = null;
+    api.get(url, { responseType: 'blob' }).then((r) => { obj = URL.createObjectURL(r.data); setSrc(obj); }).catch(() => setFailed(true));
+    return () => { if (obj) URL.revokeObjectURL(obj); };
+  }, [url]);
+  if (failed) return <span className="text-[11px] text-muted-foreground">Screenshot unavailable</span>;
+  if (!src) return <span className="text-[11px] text-muted-foreground">Loading…</span>;
+  return <a href={src} target="_blank" rel="noreferrer"><img src={src} alt="Payment proof" className="mt-1 h-24 rounded border object-cover" /></a>;
+}
+
+/** Fee master: what each course costs. Sales Admin / Finance (Sales) Admin only. */
+export function CourseFeesModal({ base, onClose }: { base: '/api/sales' | '/api/finance-sales'; onClose: () => void }) {
+  const [rows, setRows] = useState<{ id: string; courseName: string; fee: number }[]>([]);
+  const [courses, setCourses] = useState<{ id: string; name: string }[]>([]);
+  const [name, setName] = useState('');
+  const [fee, setFee] = useState('');
+  const [error, setError] = useState('');
+  const load = () => api.get(`${base}/course-fees`).then((r) => setRows(r.data.data)).catch((e) => setError(errMsg(e, 'Could not load')));
+  useEffect(() => { load(); api.get('/api/sales/courses').then((r) => setCourses(r.data.data)).catch(() => {}); }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  const save = async (courseName: string, f: string) => {
+    setError('');
+    try { await api.put(`${base}/course-fees`, { courseName, fee: Number(f) }); setName(''); setFee(''); load(); }
+    catch (e) { setError(errMsg(e, 'Could not save')); }
+  };
+  return (
+    <div className="fixed inset-0 bg-black/50 z-[60] flex items-center justify-center p-4">
+      <div className="bg-card rounded-2xl w-full max-w-lg max-h-[90vh] overflow-y-auto p-6 space-y-4">
+        <div className="flex items-start justify-between"><div><h3 className="font-semibold text-lg">Course fees</h3><p className="text-xs text-muted-foreground">Onboarding pre-fills the total fee from here. Salespeople can still change a student's fee.</p></div><button onClick={onClose}><X className="w-4 h-4" /></button></div>
+        {error && <div className="bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg px-3 py-2">{error}</div>}
+        <div className="flex gap-2">
+          <input list="cf-courses" value={name} onChange={(e) => setName(e.target.value)} placeholder="Course" className="flex-1 px-3 py-2 border rounded-lg text-sm bg-background" />
+          <datalist id="cf-courses">{courses.map((c) => <option key={c.id} value={c.name} />)}</datalist>
+          <input type="number" value={fee} onChange={(e) => setFee(e.target.value)} placeholder="Fee ₹" className="w-28 px-3 py-2 border rounded-lg text-sm bg-background" />
+          <button onClick={() => save(name, fee)} disabled={!name.trim() || !Number(fee)} className="px-3 py-2 text-sm rounded-lg bg-blue-600 text-white disabled:opacity-50">Add</button>
+        </div>
+        <div className="border rounded-xl divide-y">
+          {rows.length === 0 ? <p className="p-4 text-sm text-center text-muted-foreground">No course fees yet</p> : rows.map((r) => (
+            <div key={r.id} className="flex items-center gap-2 px-3 py-2 text-sm">
+              <span className="flex-1">{r.courseName}</span>
+              <input type="number" defaultValue={r.fee} onBlur={(e) => { if (Number(e.target.value) > 0 && Number(e.target.value) !== r.fee) save(r.courseName, e.target.value); }} className="w-28 px-2 py-1 border rounded-lg text-sm bg-background" />
+              <button onClick={async () => { await api.delete(`${base}/course-fees/${r.id}`).catch(() => {}); load(); }} className="text-xs text-red-600 hover:underline">Remove</button>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function ProofLink({ id }: { id: string }) {
   const [busy, setBusy] = useState(false);
   const open = async () => {
@@ -241,10 +339,26 @@ function ProofLink({ id }: { id: string }) {
   return <button onClick={open} disabled={busy} className="text-xs text-blue-600 hover:underline disabled:opacity-50">{busy ? '…' : 'View'}</button>;
 }
 
-export function LeadFeesPanel({ leadId, onboarding, canEdit, onChanged }: { leadId: string; onboarding: OnboardingInfo; canEdit: boolean; onChanged: () => void }) {
+export function LeadFeesPanel({ leadId, onboarding, canEdit, isAdmin, onChanged }: { leadId: string; onboarding: OnboardingInfo; canEdit: boolean; isAdmin: boolean; onChanged: () => void }) {
   const [data, setData] = useState<FeeData | null>(null);
   const [error, setError] = useState('');
   const [adding, setAdding] = useState(false);
+  const [collecting, setCollecting] = useState<{ id: string; amount: number; title: string } | null>(null);
+  const [busy, setBusy] = useState(false);
+  const editFee = async () => {
+    const v = window.prompt('New total course fee (₹)', data?.totalKnown ? String(data.total) : '');
+    if (!v) return;
+    const reason = window.prompt('Reason for the change (e.g. course changed)', '') || '';
+    setBusy(true);
+    try { await api.put(`/api/sales/leads/${leadId}/total-fee`, { totalFee: Number(v), reason }); load(); onChanged(); }
+    catch (e) { setError(errMsg(e, 'Could not change the fee')); } finally { setBusy(false); }
+  };
+  const undo = async () => {
+    if (!window.confirm('Undo this onboarding? Any payments still waiting for Finance will be removed.')) return;
+    setBusy(true);
+    try { await api.delete(`/api/sales/leads/${leadId}/onboarding`); onChanged(); }
+    catch (e) { setError(errMsg(e, 'Could not undo')); } finally { setBusy(false); }
+  };
   const load = () => {
     api.get(`/api/sales/leads/${leadId}/fees`).then((r) => setData(r.data.data))
       .catch((err: unknown) => setError(errMsg(err, 'Could not load fees')));
@@ -258,7 +372,11 @@ export function LeadFeesPanel({ leadId, onboarding, canEdit, onChanged }: { lead
     <div className="space-y-4">
       <div className="border rounded-xl p-3 text-sm bg-muted/20 flex flex-wrap items-center justify-between gap-2">
         <span><span className="font-medium">{onboarding.courseName}</span> · {LABEL[onboarding.daysType]} · {LABEL[onboarding.timing]} · {LABEL[onboarding.mode]} · {LABEL[onboarding.paymentMethod]}</span>
-        {canEdit && <button onClick={() => setAdding(true)} className="px-3 py-1.5 text-sm rounded-lg bg-blue-600 text-white">+ Add payment</button>}
+        <span className="flex items-center gap-2">
+          {canEdit && <button onClick={editFee} disabled={busy} className="px-3 py-1.5 text-sm border rounded-lg hover:bg-muted/50">Edit course fee</button>}
+          {isAdmin && <button onClick={undo} disabled={busy} className="px-3 py-1.5 text-sm border border-red-300 text-red-700 rounded-lg hover:bg-red-50">Undo onboarding</button>}
+          {canEdit && <button onClick={() => setAdding(true)} className="px-3 py-1.5 text-sm rounded-lg bg-blue-600 text-white">+ Add payment</button>}
+        </span>
       </div>
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
         {([['Course fee', data.totalKnown ? formatCurrency(data.total) : 'Not set', ''], ['Approved', formatCurrency(data.paid), 'text-green-700'], ['With Finance', formatCurrency(data.awaiting), 'text-amber-700'], ['Balance', data.totalKnown ? formatCurrency(data.balance) : '—', '']] as [string, string, string][]).map(([l, v, c]) => (
@@ -268,17 +386,18 @@ export function LeadFeesPanel({ leadId, onboarding, canEdit, onChanged }: { lead
       {data.totalKnown && <div><div className="h-2.5 rounded-full bg-slate-100 overflow-hidden"><div className="h-full bg-green-500" style={{ width: `${pct}%` }} /></div><p className="text-xs text-muted-foreground mt-1">{pct}% paid</p></div>}
       <div className="border rounded-xl overflow-hidden">
         <table className="w-full text-sm">
-          <thead className="text-left text-xs text-muted-foreground bg-muted/40"><tr><th className="px-4 py-2">Date</th><th>Amount</th><th>Status</th><th>Mode / ref</th><th>Proof</th></tr></thead>
+          <thead className="text-left text-xs text-muted-foreground bg-muted/40"><tr><th className="px-4 py-2">Date</th><th>For</th><th>Amount</th><th>Status</th><th>Mode / ref</th><th>Proof</th></tr></thead>
           <tbody className="divide-y">
-            {rows.length === 0 ? <tr><td colSpan={5} className="px-4 py-6 text-center text-muted-foreground">No payments yet</td></tr> : rows.map((i) => {
-              const st = i.status === 'PENDING' && new Date(i.dueDate) < new Date() ? FEE_STATUS.OVERDUE : FEE_STATUS[i.status];
+            {rows.length === 0 ? <tr><td colSpan={6} className="px-4 py-6 text-center text-muted-foreground">No payments yet</td></tr> : rows.map((i) => {
+              const st = i.rejected ? { label: 'Rejected', cls: 'bg-red-100 text-red-700' } : i.status === 'PENDING' && new Date(i.dueDate) < new Date() ? FEE_STATUS.OVERDUE : FEE_STATUS[i.status];
               return (
                 <tr key={i.id}>
-                  <td className="px-4 py-2">{formatDate(i.paidAt || i.dueDate)}</td>
+                  <td className="px-4 py-2">{formatDate(i.status === 'PENDING' || i.status === 'OVERDUE' ? i.dueDate : (i.paidAt || i.dueDate))}</td>
+                  <td className="text-xs">{i.kind === 'EMI' ? `EMI ${i.emiMonthNumber}` : i.kind === 'DOWN_PAYMENT' ? 'Down payment' : i.kind === 'REGISTRATION_FEE' ? 'Registration' : 'Payment'}</td>
                   <td>{formatCurrency(i.amount)}{i.amountMatched === false && <span title={`Screenshot shows ${formatCurrency(i.ocrAmount || 0)}`} className="ml-1 text-red-600">⚠</span>}</td>
                   <td><span className={`text-[11px] font-medium rounded-full px-2 py-0.5 ${st.cls}`}>{st.label}</span></td>
-                  <td className="text-xs text-muted-foreground">{i.mode ? i.mode.replace('_', ' ') : '—'}{i.reference ? ` · ${i.reference}` : ''}</td>
-                  <td>{i.hasProof ? <ProofLink id={i.id} /> : <span className="text-xs text-muted-foreground">—</span>}</td>
+                  <td className="text-xs text-muted-foreground">{i.mode ? i.mode.replace('_', ' ') : '—'}{i.reference ? ` · ${i.reference}` : ''}{i.rejected && i.rejectReason && <p className="text-red-600">Reason: {i.rejectReason}</p>}</td>
+                  <td>{i.hasProof ? <ProofLink id={i.id} /> : (i.status === 'PENDING' || i.status === 'OVERDUE') && canEdit ? <button onClick={() => setCollecting({ id: i.id, amount: i.amount, title: `Collect ${i.kind === 'EMI' ? `EMI ${i.emiMonthNumber}` : 'down payment'}` })} className="text-xs text-blue-600 hover:underline">Collect</button> : <span className="text-xs text-muted-foreground">—</span>}</td>
                 </tr>
               );
             })}
@@ -286,7 +405,56 @@ export function LeadFeesPanel({ leadId, onboarding, canEdit, onChanged }: { lead
         </table>
       </div>
       <p className="text-xs text-muted-foreground">Add each payment here with its screenshot. Finance approves it, and the lead stage then moves automatically (Registration Done → Partial Payment at 60% → Enrolled when fully paid).</p>
+      {collecting && <RecordPaymentModal leadId={leadId} needFee={false} installment={collecting} onClose={() => setCollecting(null)} onDone={() => { setCollecting(null); load(); onChanged(); }} />}
       {adding && <RecordPaymentModal leadId={leadId} needFee={!data.totalKnown} onClose={() => setAdding(false)} onDone={() => { setAdding(false); load(); onChanged(); }} />}
+    </div>
+  );
+}
+
+// ── EMI menu ──
+interface EmiRow {
+  planId: string; courseName: string; months?: number | null; ratePct?: number | null; fee: number; total: number; paid: number; awaiting: number; balance: number;
+  paidCount: number; overdueCount: number; overdueAmount: number; nextDue: { dueDate: string; amount: number } | null;
+  lead: { id: string; name: string; phone: string; assignedTo?: { firstName: string; lastName: string } | null };
+}
+export function EmiPanel() {
+  const [rows, setRows] = useState<EmiRow[] | null>(null);
+  const [error, setError] = useState('');
+  const [onlyOverdue, setOnlyOverdue] = useState(false);
+  useEffect(() => {
+    api.get('/api/emi/plans').then((r) => setRows(r.data.data)).catch((e) => setError(errMsg(e, 'Could not load EMI students')));
+  }, []);
+  if (error) return <div className="bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg px-4 py-3">{error}</div>;
+  if (!rows) return <p className="text-sm text-muted-foreground py-8 text-center">Loading…</p>;
+  const list = onlyOverdue ? rows.filter((r) => r.overdueCount > 0) : rows;
+  const sum = (f: (r: EmiRow) => number) => list.reduce((n, r) => n + f(r), 0);
+  return (
+    <div className="space-y-4">
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+        {([['EMI students', String(list.length), ''], ['Collected', formatCurrency(sum((r) => r.paid)), 'text-green-700'], ['Balance to collect', formatCurrency(sum((r) => r.balance)), ''], ['Overdue', formatCurrency(sum((r) => r.overdueAmount)), 'text-red-600']] as [string, string, string][]).map(([l, v, c]) => (
+          <div key={l} className="border rounded-xl p-3"><p className="text-xs text-muted-foreground">{l}</p><p className={`text-lg font-bold ${c}`}>{v}</p></div>
+        ))}
+      </div>
+      <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={onlyOverdue} onChange={(e) => setOnlyOverdue(e.target.checked)} /> Only students with overdue EMIs</label>
+      <div className="border rounded-xl overflow-x-auto bg-card">
+        <table className="w-full text-sm">
+          <thead className="text-left text-xs text-muted-foreground bg-muted/40"><tr><th className="px-4 py-2">Student</th><th>Course</th><th>Owner</th><th>Plan</th><th>Paid</th><th>Balance</th><th>Next due</th><th>Overdue</th></tr></thead>
+          <tbody className="divide-y">
+            {list.length === 0 ? <tr><td colSpan={8} className="px-4 py-8 text-center text-muted-foreground">No EMI students</td></tr> : list.map((r) => (
+              <tr key={r.planId} className="hover:bg-muted/30">
+                <td className="px-4 py-2 font-medium">{r.lead.name}<p className="text-xs text-muted-foreground font-normal">{r.lead.phone}</p></td>
+                <td>{r.courseName}</td>
+                <td className="text-xs">{r.lead.assignedTo ? `${r.lead.assignedTo.firstName} ${r.lead.assignedTo.lastName}` : '—'}</td>
+                <td className="text-xs">{r.months ?? '—'} months{r.ratePct != null ? ` · ${r.ratePct}%` : ''}<p className="text-muted-foreground">{r.paidCount}/{r.months ?? '?'} EMIs paid</p></td>
+                <td className="text-green-700">{formatCurrency(r.paid)}{r.awaiting > 0 && <p className="text-[11px] text-amber-700">+{formatCurrency(r.awaiting)} with Finance</p>}</td>
+                <td>{formatCurrency(r.balance)}</td>
+                <td className="text-xs">{r.nextDue ? `${formatDate(r.nextDue.dueDate)} · ${formatCurrency(r.nextDue.amount)}` : '—'}</td>
+                <td className={r.overdueCount ? 'text-red-600 font-medium' : 'text-muted-foreground'}>{r.overdueCount ? `${r.overdueCount} · ${formatCurrency(r.overdueAmount)}` : '—'}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
     </div>
   );
 }

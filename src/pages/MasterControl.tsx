@@ -20,6 +20,8 @@ const MODULES: { key: ModuleName; label: string }[] = [
   { key: 'STUDENT_ONBOARDING', label: 'Student Onboarding' },
   { key: 'ADMISSION', label: 'Admission' },
   { key: 'LIVE_CLASSES', label: 'Live Classes' },
+  { key: 'EMI', label: 'EMI' },
+  { key: 'REPORT_SHEETS', label: 'Report Sheets' },
 ];
 
 const LEVELS: { key: AccessLevel; label: string }[] = [

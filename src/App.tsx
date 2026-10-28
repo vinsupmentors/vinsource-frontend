@@ -31,6 +31,8 @@ import PermissionsPage from './pages/Permissions';
 import MasterControlPage from './pages/MasterControl';
 import FinanceAdminPage from './pages/FinanceAdmin';
 import FinanceSalesPage from './pages/FinanceSales';
+import EmiPage from './pages/Emi';
+import ReportSheetsPage from './pages/ReportSheets';
 import AdminOpsPage from './pages/AdminOps';
 import PlacementsPage from './pages/Placements';
 import ProductionPage from './pages/Production';
@@ -237,6 +239,8 @@ export default function App() {
             <Route path="admission" element={<AdmissionPage />} />
             <Route path="live-classes" element={<LiveClassesPage />} />
             <Route path="finance/sales" element={<FinanceSalesPage />} />
+            <Route path="emi" element={<EmiPage />} />
+            <Route path="report-sheets" element={<ReportSheetsPage />} />
             <Route path="finance/admin" element={<FinanceAdminPage />} />
             <Route path="admin-ops" element={<AdminOpsPage />} />
             <Route path="production" element={<ProductionPage />} />

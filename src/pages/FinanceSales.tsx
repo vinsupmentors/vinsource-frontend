@@ -1,4 +1,5 @@
 import { useEffect, useState, useCallback } from 'react';
+import { ProofThumb, CourseFeesModal } from './SalesOnboarding';
 import api from '@/lib/api';
 import { useModuleAccess } from '@/hooks/useModuleAccess';
 import { Lock, Plus, X, Wallet, TrendingUp, Receipt, Search, Trash2, CheckCircle2, Ban, Users, AlertTriangle, Percent } from 'lucide-react';
@@ -153,6 +154,7 @@ export default function FinanceSalesPage() {
   const canApprove = hasModule('FINANCE_SALES', 'ADMIN');
 
   const [tab, setTab] = useState<'ledger' | 'plans' | 'approvals' | 'dashboard'>('plans');
+  const [showCourseFees, setShowCourseFees] = useState(false);
 
   const [collections, setCollections] = useState<Collection[]>([]);
   const [stats, setStats] = useState<Stats | null>(null);
@@ -318,7 +320,9 @@ export default function FinanceSalesPage() {
             {t.label}
           </button>
         ))}
+        {canApprove && <button onClick={() => setShowCourseFees(true)} className="ml-auto mb-1 px-3 py-1.5 text-xs font-medium border rounded-lg hover:bg-muted/50">Course fees</button>}
       </div>
+      {showCourseFees && <CourseFeesModal base="/api/finance-sales" onClose={() => setShowCourseFees(false)} />}
 
       {tab === 'dashboard' ? (
         <DashboardPanel employees={employees} courseOptions={courseOptions} />
@@ -1196,6 +1200,22 @@ function ApprovalsPanel({ onChanged }: { onChanged: () => void }) {
     }
   };
 
+  const rejectPayment = async (id: string) => {
+    const reason = window.prompt('Why is this payment being rejected? The salesperson will see this.');
+    if (!reason || !reason.trim()) return;
+    setBusyId(id);
+    try {
+      await api.post(`/api/finance-sales/installments/${id}/reject`, { reason: reason.trim() });
+      await load();
+      onChanged();
+    } catch (err: unknown) {
+      const e = err as { response?: { data?: { message?: string } } };
+      setError(e.response?.data?.message || 'Failed to reject the payment');
+    } finally {
+      setBusyId(null);
+    }
+  };
+
   const completeRefund = async (id: string) => {
     setBusyId(id);
     try {
@@ -1315,12 +1335,7 @@ function ApprovalsPanel({ onChanged }: { onChanged: () => void }) {
                     <td className="px-4 py-3">
                       <span className="text-xs font-medium px-2 py-1 rounded-full bg-purple-100 text-purple-700">{(a.mode || 'UPI').replace('_', ' ')}</span>
                       {a.reference && <p className="text-[11px] text-muted-foreground mt-1">Ref {a.reference}</p>}
-                      {a.proofFile && (
-                        <button
-                          onClick={async () => { try { const r = await api.get(`/api/finance-sales/installments/${a.id}/proof`, { responseType: 'blob' }); window.open(URL.createObjectURL(r.data), '_blank'); } catch { /* ignore */ } }}
-                          className="block text-[11px] text-blue-600 hover:underline"
-                        >View screenshot</button>
-                      )}
+                      {a.proofFile && <ProofThumb url={`/api/finance-sales/installments/${a.id}/proof`} />}
                     </td>
                     <td className="px-4 py-3">{a.receivedBy ? `${a.receivedBy.firstName} ${a.receivedBy.lastName}` : '—'}</td>
                     <td className="px-4 py-3 text-muted-foreground">{a.paidAt ? new Date(a.paidAt).toLocaleDateString() : '—'}</td>
@@ -1332,6 +1347,11 @@ function ApprovalsPanel({ onChanged }: { onChanged: () => void }) {
                       >
                         <CheckCircle2 className="w-3.5 h-3.5" /> {busyId === a.id ? 'Approving…' : 'Approve'}
                       </button>
+                      <button
+                        onClick={() => rejectPayment(a.id)}
+                        disabled={busyId === a.id}
+                        className="mt-1 text-xs font-medium text-red-600 hover:underline disabled:opacity-50"
+                      >Reject</button>
                     </td>
                   </tr>
                 ))

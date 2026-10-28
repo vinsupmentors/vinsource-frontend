@@ -63,7 +63,9 @@ export type ModuleName =
   | 'CERTIFICATES'
   | 'STUDENT_ONBOARDING'
   | 'ADMISSION'
-  | 'LIVE_CLASSES';
+  | 'LIVE_CLASSES'
+  | 'EMI'
+  | 'REPORT_SHEETS';
 
 export type AccessLevel = 'NONE' | 'VIEW' | 'EDIT' | 'ADMIN';
 
