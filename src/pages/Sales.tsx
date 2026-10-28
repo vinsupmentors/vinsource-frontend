@@ -5,6 +5,7 @@ import api, { BASE_URL } from '@/lib/api';
 import { useModuleAccess } from '@/hooks/useModuleAccess';
 import ColumnHeader from '@/components/ColumnHeader';
 import DateTimeField from '@/components/DateTimeField';
+import { OnboardingModal, LeadFeesPanel, type OnboardingInfo } from './SalesOnboarding';
 import AdvancedFilter, { type FilterField, type FilterGroup } from '@/components/AdvancedFilter';
 import { formatDate, formatDateTime, formatTime } from '@/lib/utils';
 import {
@@ -76,6 +77,7 @@ interface Lead {
   notes?: string | null;
   lastContactAt?: string | null;
   nextFollowUpAt?: string | null;
+  dnpCount?: number;
   // Student intake — captured during Log a Call, carried forward onto any
   // demo booked later for this lead.
   city?: string | null;
@@ -866,6 +868,7 @@ export default function SalesPage() {
               <option value="">All reminders</option>
               <option value="today">Due today</option>
               <option value="overdue">Overdue</option>
+              <option value="none">No reminder</option>
             </select>
             <label className="text-xs text-muted-foreground flex items-center gap-1">Created
               <input type="date" value={createdFrom} onChange={(e) => setCreatedFrom(e.target.value)} className="px-2 py-1.5 border rounded-lg text-sm" />
@@ -932,7 +935,7 @@ export default function SalesPage() {
                       </td>
                       <td className="px-3 py-3 whitespace-nowrap">
                         {lead.activityStatus
-                          ? <span className="text-xs font-medium rounded-full px-2 py-1 bg-slate-100 text-slate-700">{ACTIVITY_STATUS_LABEL[lead.statusKey || lead.activityStatus]}</span>
+                          ? <span className="inline-flex items-center gap-1.5"><span className="text-xs font-medium rounded-full px-2 py-1 bg-slate-100 text-slate-700">{ACTIVITY_STATUS_LABEL[lead.statusKey || lead.activityStatus]}</span>{(lead.dnpCount ?? 0) > 0 && lead.activityStatus === 'DNP' && <span title={`Did not pick ${lead.dnpCount} time(s) in a row — 5 makes the lead Unresponsive`} className={`text-[11px] font-semibold rounded-full px-1.5 py-0.5 ${(lead.dnpCount ?? 0) >= 4 ? 'bg-red-100 text-red-700' : 'bg-amber-100 text-amber-700'}`}>DNP ×{lead.dnpCount}</span>}</span>
                           : <span className="text-xs text-muted-foreground">—</span>}
                       </td>
                       <td className="px-3 py-3">
@@ -978,7 +981,7 @@ export default function SalesPage() {
                         ) : <span className="text-muted-foreground text-xs">Not booked</span>}
                       </td>
                       <td className={`px-3 py-3 text-xs whitespace-nowrap ${reminderColor(lead.nextFollowUpAt)}`}>
-                        {lead.nextFollowUpAt ? formatDateTime(lead.nextFollowUpAt) : '—'}
+                        {lead.nextFollowUpAt ? formatDateTime(lead.nextFollowUpAt) : (lead.status === 'LOST' || lead.status === 'ENROLLED' ? '—' : <span className="text-red-500">No reminder</span>)}
                       </td>
                       <td className="px-3 py-3 text-xs text-muted-foreground whitespace-nowrap">
                         {lead.lastContactAt ? formatDateTime(lead.lastContactAt) : 'Never'}
@@ -1515,6 +1518,12 @@ function LeadDetailModal({ lead, employees, canEdit, isAdmin, onClose, onChanged
   const [localError, setLocalError] = useState('');
 
   const [leadTab, setLeadTab] = useState<LeadTab>('activity');
+  const [onboarding, setOnboarding] = useState<OnboardingInfo | null>(null);
+  const [showOnboard, setShowOnboard] = useState(false);
+  const loadOnboarding = useCallback(() => {
+    api.get(`/api/sales/leads/${lead.id}/onboarding`).then((r) => setOnboarding(r.data.data || null)).catch(() => setOnboarding(null));
+  }, [lead.id]);
+  useEffect(() => { loadOnboarding(); }, [loadOnboarding]);
   const [history, setHistory] = useState<LeadHistoryRow[]>([]);
   const [leadNotes, setLeadNotes] = useState<{ id: string; body: string; createdAt: string; author?: EmployeeLite | null }[]>([]);
   const [leadTasks, setLeadTasks] = useState<TaskRow[]>([]);
@@ -1854,6 +1863,7 @@ function LeadDetailModal({ lead, employees, canEdit, isAdmin, onClose, onChanged
                 <h2 className="font-semibold text-xl truncate">{lead.name}</h2>
                 <span className={`text-xs font-semibold rounded-full px-2.5 py-1 ${stageChipClass(lead.stageKey || lead.status)}`}>{stageLabel(lead.stageKey || lead.status)}</span>
                 {lead.status === 'LOST' && lead.lostReason && <span className="text-xs text-muted-foreground">({LOST_REASON_LABEL[lead.lostReason]})</span>}
+                {(lead.dnpCount ?? 0) > 0 && lead.status !== 'LOST' && <span className={`text-xs font-semibold rounded-full px-2.5 py-1 ${(lead.dnpCount ?? 0) >= 4 ? 'bg-red-100 text-red-700' : 'bg-amber-100 text-amber-700'}`}>DNP ×{lead.dnpCount} · {5 - (lead.dnpCount ?? 0)} more → Unresponsive</span>}
               </div>
               <div className="flex flex-wrap items-center gap-x-4 gap-y-1 mt-1.5 text-xs text-muted-foreground">
                 <span className="flex items-center gap-1"><Phone className="w-3 h-3" /> {lead.phone}</span>
@@ -1864,7 +1874,14 @@ function LeadDetailModal({ lead, employees, canEdit, isAdmin, onClose, onChanged
                 {!isAdmin && lead.assignedTo && <span>Owner: {lead.assignedTo.firstName} {lead.assignedTo.lastName}</span>}
               </div>
             </div>
-            <button onClick={onClose}><X className="w-4 h-4" /></button>
+            <div className="flex items-start gap-3 shrink-0">
+              {onboarding ? (
+                <button onClick={() => setLeadTab('fees')} className="px-3 py-1.5 text-sm rounded-lg bg-green-100 text-green-700 font-medium">Onboarded ✓</button>
+              ) : canEdit && lead.status !== 'LOST' ? (
+                <button onClick={() => setShowOnboard(true)} className="px-3 py-1.5 text-sm rounded-lg bg-blue-600 text-white font-medium hover:bg-blue-700">Onboarding</button>
+              ) : null}
+              <button onClick={onClose}><X className="w-4 h-4" /></button>
+            </div>
           </div>
 
           <div className="flex flex-wrap items-center gap-2">
@@ -1895,7 +1912,8 @@ function LeadDetailModal({ lead, employees, canEdit, isAdmin, onClose, onChanged
         <div className="flex flex-wrap gap-1 border-b -mt-2">
           {([
             ['profile', 'Profile'], ['activity', 'Activity'], ['tasks', 'Tasks / Reminders'],
-            ['demo', `Meeting / Demo${demos.length ? ` (${demos.length})` : ''}`], ['fees', 'Fees'], ['notes', 'Notes'], ['history', 'History'],
+            ['demo', `Meeting / Demo${demos.length ? ` (${demos.length})` : ''}`], ['notes', 'Notes'], ['history', 'History'],
+            ...(onboarding ? [['fees', 'Fees']] : []),
           ] as [LeadTab, string][]).map(([id, label]) => (
             <button key={id} onClick={() => setLeadTab(id)}
               className={`px-3 py-2 text-sm font-medium border-b-2 -mb-px ${leadTab === id ? 'border-blue-600 text-blue-600' : 'border-transparent text-muted-foreground hover:text-foreground'}`}>
@@ -2056,6 +2074,12 @@ function LeadDetailModal({ lead, employees, canEdit, isAdmin, onClose, onChanged
                   </div>
                 )}
 
+                {statusBase(callActivityStatus) === 'DNP' && (
+                  <p className={`text-xs rounded-lg px-3 py-2 ${(lead.dnpCount ?? 0) >= 3 ? 'bg-red-50 text-red-700' : 'bg-amber-50 text-amber-800'}`}>
+                    This will be DNP <b>{(lead.dnpCount ?? 0) + 1}</b> of 5 in a row{(lead.dnpCount ?? 0) + 1 >= 5 ? ' — the lead will be marked Unresponsive.' : '. At 5 the lead becomes Unresponsive automatically.'}
+                  </p>
+                )}
+
                 {needsFollowUp(callActivityStatus) && (
                   <label className="text-xs text-muted-foreground flex flex-wrap items-center gap-2">
                     {statusBase(callActivityStatus) === 'DEMO_BOOKED' ? 'Demo date & time *' : 'Follow-up date & time *'}
@@ -2169,7 +2193,8 @@ function LeadDetailModal({ lead, employees, canEdit, isAdmin, onClose, onChanged
           )}
         </div>}
 
-        {leadTab === 'fees' && <LeadFeesTab leadId={lead.id} />}
+        {leadTab === 'fees' && onboarding && <LeadFeesPanel leadId={lead.id} onboarding={onboarding} canEdit={canEdit} onChanged={onChanged} />}
+        {showOnboard && <OnboardingModal leadId={lead.id} leadName={lead.name} defaultCourse={lead.courseInterest} onClose={() => setShowOnboard(false)} onDone={() => { setShowOnboard(false); loadOnboarding(); setLeadTab('fees'); onChanged(); }} />}
 
         {/* Full lead history — from creation, never edited */}
         {leadTab === 'history' && <div>
@@ -5571,77 +5596,6 @@ function DashboardPanel({ isAdmin, employees, go }: { isAdmin: boolean; employee
           </section>
         )}
       </div>
-    </div>
-  );
-}
-
-// ── Fees on a lead: what was quoted, what Finance has verified, what is still due ──
-interface FeeInst { id: string; dueDate: string; amount: number; status: 'PENDING' | 'PENDING_APPROVAL' | 'PAID' | 'OVERDUE' | 'WAIVED'; paidAt?: string | null; mode?: string | null; reference?: string | null }
-interface FeeData {
-  total: number; paid: number; awaiting: number; overdue: number; balance: number; pct: number; nextDue: { dueDate: string; amount: number } | null;
-  plans: { id: string; courseName: string; totalFee: number; planType: string; admissionId?: string | null; status: string; installments: FeeInst[] }[];
-}
-const FEE_STATUS: Record<string, { label: string; cls: string }> = {
-  PAID: { label: 'Paid', cls: 'bg-green-100 text-green-700' },
-  PENDING_APPROVAL: { label: 'With Finance', cls: 'bg-amber-100 text-amber-700' },
-  PENDING: { label: 'Due', cls: 'bg-slate-100 text-slate-700' },
-  OVERDUE: { label: 'Overdue', cls: 'bg-red-100 text-red-700' },
-  WAIVED: { label: 'Waived', cls: 'bg-slate-100 text-slate-500' },
-};
-function LeadFeesTab({ leadId }: { leadId: string }) {
-  const [data, setData] = useState<FeeData | null>(null);
-  const [error, setError] = useState('');
-  useEffect(() => {
-    api.get(`/api/sales/leads/${leadId}/fees`).then((r) => setData(r.data.data))
-      .catch((err: unknown) => setError((err as { response?: { data?: { message?: string } } }).response?.data?.message || 'Could not load fees'));
-  }, [leadId]);
-  if (error) return <p className="text-sm text-red-700">{error}</p>;
-  if (!data) return <p className="text-sm text-muted-foreground">Loading…</p>;
-  if (data.plans.length === 0) {
-    return (
-      <div className="border border-dashed rounded-xl p-6 text-center space-y-2">
-        <p className="text-sm text-muted-foreground">No fee plan yet for this lead.</p>
-        <a href="/admission" target="_blank" rel="noreferrer" className="inline-block px-4 py-2 text-sm rounded-lg bg-blue-600 text-white">Start admission</a>
-      </div>
-    );
-  }
-  const pct = Math.min(100, Math.round(data.pct * 100));
-  return (
-    <div className="space-y-4">
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-        {([['Total fee', data.total, ''], ['Paid (verified)', data.paid, 'text-green-700'], ['With Finance', data.awaiting, 'text-amber-700'], ['Balance', data.balance, data.overdue > 0 ? 'text-red-600' : '']] as [string, number, string][]).map(([l, v, c]) => (
-          <div key={l} className="border rounded-xl p-3"><p className="text-xs text-muted-foreground">{l}</p><p className={`text-lg font-bold ${c}`}>{formatCurrency(v)}</p></div>
-        ))}
-      </div>
-      <div>
-        <div className="h-2.5 rounded-full bg-slate-100 overflow-hidden"><div className="h-full bg-green-500" style={{ width: `${pct}%` }} /></div>
-        <p className="text-xs text-muted-foreground mt-1">{pct}% paid{data.nextDue ? ` · next due ${formatDate(data.nextDue.dueDate)} (${formatCurrency(data.nextDue.amount)})` : ''}{data.overdue > 0 ? ` · ${formatCurrency(data.overdue)} overdue` : ''}</p>
-      </div>
-      {data.plans.map((p) => (
-        <div key={p.id} className="border rounded-xl overflow-hidden">
-          <div className="px-4 py-2 bg-muted/40 text-sm flex flex-wrap items-center justify-between gap-2">
-            <span className="font-medium">{p.courseName} <span className="text-xs text-muted-foreground">· {p.planType.replace(/_/g, ' ')}{p.admissionId ? ` · ${p.admissionId}` : ''}</span></span>
-            <span className="text-xs text-muted-foreground">Fee {formatCurrency(p.totalFee)}</span>
-          </div>
-          <table className="w-full text-sm">
-            <thead className="text-left text-xs text-muted-foreground"><tr><th className="px-4 py-1.5">Due</th><th>Amount</th><th>Status</th><th>Paid on</th><th>Mode / ref</th></tr></thead>
-            <tbody className="divide-y">
-              {p.installments.map((i) => {
-                const st = i.status === 'PENDING' && new Date(i.dueDate) < new Date() ? FEE_STATUS.OVERDUE : FEE_STATUS[i.status];
-                return (
-                  <tr key={i.id}>
-                    <td className="px-4 py-1.5">{formatDate(i.dueDate)}</td><td>{formatCurrency(i.amount)}</td>
-                    <td><span className={`text-[11px] font-medium rounded-full px-2 py-0.5 ${st.cls}`}>{st.label}</span></td>
-                    <td className="text-xs text-muted-foreground">{i.paidAt ? formatDate(i.paidAt) : '—'}</td>
-                    <td className="text-xs text-muted-foreground">{i.mode ? i.mode.replace('_', ' ') : '—'}{i.reference ? ` · ${i.reference}` : ''}</td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
-      ))}
-      <p className="text-xs text-muted-foreground">Payments are collected and verified in Finance; once Finance verifies one, this lead's stage moves automatically (Registration Done → Partial Payment at 60% → Enrolled when fully paid).</p>
     </div>
   );
 }

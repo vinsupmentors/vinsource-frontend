@@ -52,6 +52,7 @@ interface FeePlan {
 // A collected-but-unconfirmed installment, as returned by the approval queue.
 interface ApprovalItem {
   id: string; amount: number; mode?: PaymentMode | null; paidAt?: string | null; status: FeeInstallmentStatus;
+  reference?: string | null; proofFile?: string | null; ocrAmount?: number | null; amountMatched?: boolean | null;
   receivedBy?: EmployeeLite | null;
   plan: { id: string; courseName: string; totalFee: number; planType: FeePlanType; lead: LeadLite };
 }
@@ -1306,9 +1307,20 @@ function ApprovalsPanel({ onChanged }: { onChanged: () => void }) {
                       <p className="text-xs text-muted-foreground font-normal">{a.plan.lead.phone}</p>
                     </td>
                     <td className="px-4 py-3 text-muted-foreground">{a.plan.courseName}</td>
-                    <td className="px-4 py-3 font-semibold">{fmt(a.amount)}</td>
+                    <td className="px-4 py-3 font-semibold">
+                      {fmt(a.amount)}
+                      {a.amountMatched === false && <p className="text-[11px] font-normal text-red-600">⚠ Screenshot shows {fmt(a.ocrAmount || 0)}</p>}
+                      {a.amountMatched === true && <p className="text-[11px] font-normal text-green-600">✓ Matches screenshot</p>}
+                    </td>
                     <td className="px-4 py-3">
                       <span className="text-xs font-medium px-2 py-1 rounded-full bg-purple-100 text-purple-700">{(a.mode || 'UPI').replace('_', ' ')}</span>
+                      {a.reference && <p className="text-[11px] text-muted-foreground mt-1">Ref {a.reference}</p>}
+                      {a.proofFile && (
+                        <button
+                          onClick={async () => { try { const r = await api.get(`/api/finance-sales/installments/${a.id}/proof`, { responseType: 'blob' }); window.open(URL.createObjectURL(r.data), '_blank'); } catch { /* ignore */ } }}
+                          className="block text-[11px] text-blue-600 hover:underline"
+                        >View screenshot</button>
+                      )}
                     </td>
                     <td className="px-4 py-3">{a.receivedBy ? `${a.receivedBy.firstName} ${a.receivedBy.lastName}` : '—'}</td>
                     <td className="px-4 py-3 text-muted-foreground">{a.paidAt ? new Date(a.paidAt).toLocaleDateString() : '—'}</td>
