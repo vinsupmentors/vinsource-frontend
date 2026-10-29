@@ -158,7 +158,7 @@ export function OnboardingModal({ leadId, leadName, defaultCourse, onClose, onDo
       if (method === 'EMI') fd.append('emiMonths', String(emiMonths));
       fd.append('registrationPaid', String(regPaid));
       if (regPaid) appendPay(fd, pay);
-      await api.post(`/api/sales/leads/${leadId}/onboarding`, fd);
+      await api.post(`/api/sales/leads/${leadId}/onboarding`, fd, { headers: { 'Content-Type': 'multipart/form-data' } });
       onDone();
     } catch (e) { setError(errMsg(e, 'Could not onboard this lead')); }
     finally { setSaving(false); }
@@ -229,7 +229,7 @@ function RecordPaymentModal({ leadId, needFee, installment, onClose, onDone }: {
       const fd = new FormData();
       appendPay(fd, pay);
       if (totalFee && !installment) fd.append('totalFee', totalFee);
-      await api.post(installment ? `/api/sales/installments/${installment.id}/pay` : `/api/sales/leads/${leadId}/payments`, fd);
+      await api.post(installment ? `/api/sales/installments/${installment.id}/pay` : `/api/sales/leads/${leadId}/payments`, fd, { headers: { 'Content-Type': 'multipart/form-data' } });
       onDone();
     } catch (e) { setError(errMsg(e, 'Could not record the payment')); }
     finally { setSaving(false); }

@@ -534,8 +534,8 @@ function MultiSelect({ label, options, value, onChange }: {
 }
 
 // ── Main page ────────────────────────────────────────────────────────────
-type Tab = 'collections' | 'dashboard' | 'leads' | 'reminders' | 'tasks' | 'summaries' | 'activityMonitor' | 'pulse' | 'leadQuality' | 'liveDemos' | 'demoBooked' | 'demoRescheduled' | 'demoConducted' | 'devices' | 'unmatchedCalls' | 'callLog' | 'leaderboard' | 'targets' | 'myBase' | 'batches' | 'leadControl' | 'today' | 'callAnalytics' | 'config' | 'transcripts';
-const VALID_TABS: Tab[] = ['collections', 'dashboard', 'transcripts', 'config', 'leads', 'reminders', 'tasks', 'summaries', 'activityMonitor', 'pulse', 'leadQuality', 'liveDemos', 'demoBooked', 'demoRescheduled', 'demoConducted', 'devices', 'unmatchedCalls', 'callLog', 'leaderboard', 'targets', 'myBase', 'batches', 'leadControl', 'today', 'callAnalytics'];
+type Tab = 'collections' | 'dashboard' | 'leads' | 'reminders' | 'tasks' | 'summaries' | 'activityMonitor' | 'pulse' | 'leadQuality' | 'liveDemos' | 'demoBooked' | 'demoRescheduled' | 'demoConducted' | 'devices' | 'unmatchedCalls' | 'callLog' | 'leaderboard' | 'targets' | 'myBase' | 'batches' | 'leadControl' | 'today' | 'callAnalytics' | 'config' | 'transcripts' | 'teams';
+const VALID_TABS: Tab[] = ['collections', 'dashboard', 'transcripts', 'config', 'leads', 'reminders', 'tasks', 'summaries', 'activityMonitor', 'pulse', 'leadQuality', 'liveDemos', 'demoBooked', 'demoRescheduled', 'demoConducted', 'devices', 'unmatchedCalls', 'callLog', 'leaderboard', 'targets', 'myBase', 'batches', 'leadControl', 'today', 'callAnalytics', 'teams'];
 // Sales Pulse / Lead Quality are aggregate, cross-rep views — admin only.
 // BDAs get Demo Booked/Rescheduled/Conducted instead, scoped to their own leads.
 // Devices (issuing call-tracking tokens) is admin-only too. Unmatched Calls
@@ -543,7 +543,7 @@ const VALID_TABS: Tab[] = ['collections', 'dashboard', 'transcripts', 'config', 
 // and BDAs can see and work it. Leaderboard/Targets are management-level KPI
 // views, same access tier as Pulse/Lead Quality. "My Students" lives on its
 // own top-level page (see MyStudents.tsx), not as a Sales tab.
-const ADMIN_ONLY_TABS: Tab[] = ['config', 'myBase', 'batches', 'leadControl', 'summaries', 'activityMonitor', 'pulse', 'leadQuality', 'liveDemos', 'devices', 'leaderboard', 'targets'];
+const ADMIN_ONLY_TABS: Tab[] = ['config', 'myBase', 'batches', 'leadControl', 'summaries', 'activityMonitor', 'pulse', 'leadQuality', 'liveDemos', 'devices', 'leaderboard', 'targets', 'teams'];
 const BDA_ONLY_TABS: Tab[] = ['demoBooked', 'demoRescheduled', 'demoConducted'];
 const EDIT_REQUIRED_TABS: Tab[] = ['unmatchedCalls'];
 
@@ -797,6 +797,7 @@ export default function SalesPage() {
               { id: 'pulse' as Tab, label: 'Sales Pulse', icon: Activity },
               { id: 'leaderboard' as Tab, label: 'Leaderboard', icon: Trophy },
               { id: 'targets' as Tab, label: 'Targets', icon: TargetIcon },
+              { id: 'teams' as Tab, label: 'Teams', icon: Users },
               { id: 'leadQuality' as Tab, label: 'Lead Quality', icon: Percent },
               { id: 'liveDemos' as Tab, label: 'Live Demos', icon: Video },
               { id: 'unmatchedCalls' as Tab, label: 'Unmatched Calls', icon: PhoneIncoming },
@@ -1066,6 +1067,7 @@ export default function SalesPage() {
       {tab === 'leaderboard' && isAdmin && <LeaderboardPanel />}
 
       {tab === 'targets' && isAdmin && <TargetsPanel employees={employees} />}
+      {tab === 'teams' && isAdmin && <TeamsPanel employees={employees} />}
 
       {tab === 'demoBooked' && !isAdmin && <DemoListPanel status="SCHEDULED" emptyLabel="No demos booked" onOpenLead={openLeadDetail} />}
 
@@ -4912,6 +4914,57 @@ function LeaderboardPanel() {
 }
 
 // ── Targets tab: monthly enrollment + revenue goals per salesperson.
+function TeamsPanel({ employees }: { employees: EmployeeLite[] }) {
+  const [map, setMap] = useState<Record<string, string>>({});
+  const [error, setError] = useState('');
+  const [saving, setSaving] = useState('');
+  const load = useCallback(() => { api.get('/api/sales/team-map').then((r) => setMap(Object.fromEntries((r.data.data as { employeeId: string; tlId: string }[]).map((m) => [m.employeeId, m.tlId])))).catch(() => setError('Could not load the team mapping')); }, []);
+  useEffect(() => { load(); }, [load]);
+  const name = (id: string) => { const e = employees.find((x) => x.id === id); return e ? `${e.firstName} ${e.lastName}` : '—'; };
+  const set = async (employeeId: string, tlId: string) => {
+    setSaving(employeeId); setError('');
+    try { await api.put('/api/sales/team-map', { employeeId, tlId }); load(); }
+    catch (err) { setError((err as { response?: { data?: { message?: string } } }).response?.data?.message || 'Could not save'); }
+    finally { setSaving(''); }
+  };
+  const tlIds = new Set(Object.values(map));
+  const teams = [...tlIds].map((id) => ({ id, members: Object.keys(map).filter((k) => map[k] === id) }));
+  return (
+    <div className="space-y-4">
+      <p className="text-sm text-muted-foreground">Pick the Team Lead for each sales person. The TL columns in Report Sheets (BRD Tracker, Revenue Consideration) follow this mapping.</p>
+      {error && <div className="bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg px-4 py-3">{error}</div>}
+      <div className="grid lg:grid-cols-2 gap-4">
+        <div className="bg-card border rounded-xl overflow-hidden">
+          <table className="w-full text-sm">
+            <thead className="bg-muted/50 text-left text-xs uppercase text-muted-foreground"><tr><th className="px-3 py-2">Sales person</th><th className="px-3 py-2">Team Lead</th></tr></thead>
+            <tbody className="divide-y">
+              {employees.map((e) => (
+                <tr key={e.id}>
+                  <td className="px-3 py-2">{e.firstName} {e.lastName}{tlIds.has(e.id) && <span className="ml-2 text-[10px] bg-blue-100 text-blue-700 rounded-full px-2 py-0.5">TL</span>}</td>
+                  <td className="px-3 py-2">
+                    <select disabled={saving === e.id} value={map[e.id] || ''} onChange={(ev) => set(e.id, ev.target.value)} className="px-2 py-1.5 border rounded-lg text-sm bg-background">
+                      <option value="">{tlIds.has(e.id) ? '— (is a Team Lead)' : 'No team (Direct Reporting)'}</option>
+                      {employees.filter((t) => t.id !== e.id && !map[t.id]).map((t) => <option key={t.id} value={t.id}>{t.firstName} {t.lastName}</option>)}
+                    </select>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+        <div className="space-y-3">
+          {teams.length === 0 ? <p className="text-sm text-muted-foreground">No teams yet — choose a Team Lead against a sales person.</p> : teams.map((t) => (
+            <div key={t.id} className="bg-card border rounded-xl p-3">
+              <p className="font-semibold text-sm">{name(t.id)}'s team <span className="text-xs font-normal text-muted-foreground">({t.members.length})</span></p>
+              <p className="text-xs text-muted-foreground mt-1">{t.members.map(name).join(', ')}</p>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function TargetsPanel({ employees }: { employees: EmployeeLite[] }) {
   const now = new Date();
   const [month, setMonth] = useState(now.getMonth() + 1);
