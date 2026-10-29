@@ -7,13 +7,13 @@ import { ArrowUp, ArrowDown, ChevronDown, Filter } from 'lucide-react';
  * `value` is a comma-separated list of ticked option values — same convention as the other multi-selects.
  */
 export default function ColumnHeader({
-  label, sortKey, sortBy, sortDir, onSort, options, value, onChange, text, onText, className = '',
+  label, sortKey, sortBy, sortDir, onSort, options, value, onChange, text, onText, className = '', style, bare,
 }: {
   label: string;
   sortKey?: string; sortBy?: string; sortDir?: 'asc' | 'desc'; onSort?: (key: string, dir: 'asc' | 'desc' | '') => void;
   options?: { value: string; label: string }[]; value?: string; onChange?: (v: string) => void;
   text?: string; onText?: (v: string) => void;
-  className?: string;
+  className?: string; style?: React.CSSProperties; bare?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const [q, setQ] = useState('');
@@ -40,9 +40,9 @@ export default function ColumnHeader({
   const shown = (options || []).filter((o) => !q || o.label.toLowerCase().includes(q.toLowerCase()));
 
   return (
-    <th className={`px-3 py-3 ${className}`}>
+    <th style={style} className={`${bare ? '' : 'px-3 py-3'} ${className}`}>
       <button ref={btn} type="button" onClick={() => { setOpen((o) => !o); setQ(''); }}
-        className={`inline-flex items-center gap-1 uppercase ${filtered || sorted ? 'text-blue-700' : ''} hover:text-foreground`}>
+        className={`inline-flex items-center gap-1 ${bare ? '' : 'uppercase'} ${filtered || sorted ? 'text-blue-700' : ''} hover:text-foreground`}>
         {label}
         {sorted && (sortDir === 'asc' ? <ArrowUp className="w-3 h-3" /> : <ArrowDown className="w-3 h-3" />)}
         {filtered ? <Filter className="w-3 h-3" /> : <ChevronDown className="w-3 h-3 opacity-50" />}

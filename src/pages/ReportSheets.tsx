@@ -3,6 +3,7 @@ import { Bold, AlignLeft, AlignCenter, AlignRight, Plus, Trash2, Eraser } from '
 import api from '@/lib/api';
 import { useModuleAccess } from '@/hooks/useModuleAccess';
 import LiveSheet from '@/components/BrdLiveSheets';
+import RevenueSheet from '@/components/RevenueLiveSheets';
 
 interface Cell { v: string; bg?: string; fg?: string; b?: 1; i?: 1; al?: 'l' | 'c' | 'r' }
 interface Content { rows: number; cols: number; colWidths: number[]; rowHeights: Record<string, number>; merges: { r: number; c: number; rs: number; cs: number }[]; cells: Record<string, Cell>; frozenRows: number }
@@ -221,7 +222,9 @@ export default function ReportSheetsPage() {
         {isAdmin && <button onClick={newBook} className="px-3 py-1.5 rounded-lg border border-dashed text-sm flex items-center gap-1 hover:bg-muted/50"><Plus className="w-3.5 h-3.5" /> New spreadsheet</button>}
       </div>
 
-      {activeSheet?.kind === 'LIVE' && activeSheet.liveKey && <LiveSheet key={activeSheet.id} liveKey={activeSheet.liveKey} canAdmin={isAdmin} />}
+      {activeSheet?.kind === 'LIVE' && activeSheet.liveKey && (activeSheet.liveKey.startsWith('REV_')
+        ? <RevenueSheet key={activeSheet.id} liveKey={activeSheet.liveKey} canEdit={canEdit} canAdmin={isAdmin} />
+        : <LiveSheet key={activeSheet.id} liveKey={activeSheet.liveKey} canAdmin={isAdmin} canEdit={canEdit} />)}
 
       {content && activeSheet?.kind !== 'LIVE' && (
         <>

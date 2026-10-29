@@ -1,3 +1,4 @@
+import { ReleaseFeedbackButton } from '@/components/DemoFeedbackForm';
 import { useEffect, useState, useCallback, useMemo } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import * as XLSX from 'xlsx';
@@ -2256,6 +2257,7 @@ function LeadDetailModal({ lead, employees, canEdit, isAdmin, onClose, onChanged
                   )}
                   {d.bookingComments && <p className="text-xs text-muted-foreground italic">"{d.bookingComments}"</p>}
                   {d.conductedBy && <p className="text-xs text-muted-foreground">Conducted by {d.conductedBy.firstName} {d.conductedBy.lastName}</p>}
+                  {(d.status === 'SCHEDULED' || d.status === 'COMPLETED') && <ReleaseFeedbackButton demoId={d.id} />}
                   {d.mode === 'ONLINE' && d.roomName && d.status === 'SCHEDULED' && (
                     <div className="flex flex-wrap items-center gap-2 text-xs">
                       {d.closedAt ? (
@@ -4063,7 +4065,7 @@ function DemoListPanel({ status, emptyLabel, onOpenLead }: {
   useEffect(() => { load(); }, [load]);
 
   const extraCol = status === 'COMPLETED' ? 'Outcome' : status === 'RESCHEDULED' ? 'Reason' : null;
-  const colCount = extraCol ? 6 : 5;
+  const colCount = (extraCol ? 6 : 5) + (status === 'COMPLETED' ? 1 : 0);
 
   return (
     <div className="space-y-4">
@@ -4086,6 +4088,7 @@ function DemoListPanel({ status, emptyLabel, onOpenLead }: {
               <th className="px-3 py-3">Scheduled</th>
               <th className="px-3 py-3">Mode</th>
               {extraCol && <th className="px-3 py-3">{extraCol}</th>}
+              {status === 'COMPLETED' && <th className="px-3 py-3">Student review</th>}
             </tr>
           </thead>
           <tbody className="divide-y">
@@ -4118,6 +4121,7 @@ function DemoListPanel({ status, emptyLabel, onOpenLead }: {
                     {d.rescheduleReason || '—'}
                   </td>
                 )}
+                {status === 'COMPLETED' && <td className="px-3 py-3"><ReleaseFeedbackButton demoId={d.id} /></td>}
               </tr>
             ))}
           </tbody>

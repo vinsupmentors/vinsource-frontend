@@ -76,6 +76,7 @@ import LiveClassesPage from './pages/LiveClasses';
 import LiveClassroom from './pages/LiveClassroom';
 import DemoRequestsPage from './pages/DemoRequests';
 import DemoJoinPage from './pages/DemoJoin';
+import DemoFeedbackPage from './pages/DemoFeedback';
 import SalesDemoRoomPage from './pages/SalesDemoRoom';
 import CalendarPage from './pages/Calendar';
 import StudentCalendarPage from './pages/student/StudentCalendar';
@@ -170,6 +171,7 @@ export default function App() {
 
           {/* Public demo sit-in join (prospect enters link/code + email) */}
           <Route path="/demo-join" element={<DemoJoinPage />} />
+          <Route path="/demo-feedback/:token" element={<DemoFeedbackPage />} />
 
           {/* Student portal routes */}
           <Route

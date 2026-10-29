@@ -34,7 +34,7 @@ function bestOcrAmount(p: PayState): number | null {
   return [...p.ocrAmounts].sort((x, y) => Math.abs(x - a) - Math.abs(y - a))[0];
 }
 function appendPay(fd: FormData, p: PayState) {
-  fd.append('amount', p.amount); fd.append('mode', p.mode);
+  fd.append('amount', p.amount); fd.append('mode', p.mode); fd.append('payMode', p.mode);
   if (p.reference) fd.append('reference', p.reference);
   const o = bestOcrAmount(p);
   if (o !== null) fd.append('ocrAmount', String(o));
