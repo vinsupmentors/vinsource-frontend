@@ -5,6 +5,7 @@ import { errMsg } from '@/lib/liveClasses';
 import { LiveKitRoom, VideoConference, RoomAudioRenderer } from '@livekit/components-react';
 import '@livekit/components-styles';
 import { Lobby, PipButton, roomOptionsFrom, type LocalUserChoices } from '@/components/classroom/ClassroomExtras';
+import { StudentFeedbackListener } from '@/components/DemoRoomFeedback';
 import { Loader2, Video, Timer } from 'lucide-react';
 
 interface Joined { token: string; url: string; title: string; course: string; expiresAt: string; maxMinutes?: number }
@@ -66,6 +67,7 @@ export default function DemoJoinPage() {
         <RoomAudioRenderer />
         <Countdown expiresAt={joined.expiresAt} title={`${joined.course} — demo`} onDone={() => setEnded('Your demo time is over. Thank you for joining — our team will be in touch!')} />
         <VideoConference />
+        <StudentFeedbackListener />
       </LiveKitRoom>
     );
   }

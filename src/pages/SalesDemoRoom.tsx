@@ -6,6 +6,7 @@ import { LiveKitRoom, VideoConference, RoomAudioRenderer } from '@livekit/compon
 import '@livekit/components-styles';
 import { Lobby, PipButton, roomOptionsFrom, type LocalUserChoices } from '@/components/classroom/ClassroomExtras';
 import { Timer, Copy, Eye, PhoneOff } from 'lucide-react';
+import { RoomReleaseButton } from '@/components/DemoRoomFeedback';
 import DateTimeField from '@/components/DateTimeField';
 
 interface Joined { token: string; url: string; title: string; course?: string | null; expiresAt?: string | null; accessCode?: string; joinLink?: string; closed?: boolean }
@@ -93,7 +94,7 @@ export default function SalesDemoRoomPage() {
     <LiveKitRoom serverUrl={joined.url} token={joined.token} connect video={observe ? false : choices.videoEnabled} audio={observe ? false : choices.audioEnabled}
       options={observe ? undefined : roomOptionsFrom(choices)} data-lk-theme="default" style={{ height: '100vh' }} onDisconnected={onDone}>
       <RoomAudioRenderer />
-      <TopBar joined={joined} observe={observe} onDone={onDone} onEnd={() => setEndOpen(true)} />
+      <TopBar demoId={id || ''} joined={joined} observe={observe} onDone={onDone} onEnd={() => setEndOpen(true)} />
       <VideoConference />
       {endOpen && (
         <div className="fixed inset-0 z-[90] bg-black/60 flex items-center justify-center p-4">
@@ -127,7 +128,7 @@ function Shell({ children }: { children: React.ReactNode }) {
   return <div className="fixed inset-0 bg-[#0f1115] flex items-center justify-center z-50 p-4 text-center">{children}</div>;
 }
 
-function TopBar({ joined, observe, onDone, onEnd }: { joined: Joined; observe: boolean; onDone: () => void; onEnd: () => void }) {
+function TopBar({ demoId, joined, observe, onDone, onEnd }: { demoId: string; joined: Joined; observe: boolean; onDone: () => void; onEnd: () => void }) {
   const [left, setLeft] = useState(() => (joined.expiresAt ? Math.max(0, new Date(joined.expiresAt).getTime() - Date.now()) : 0));
   const [copied, setCopied] = useState(false);
   useEffect(() => {
@@ -157,6 +158,7 @@ function TopBar({ joined, observe, onDone, onEnd }: { joined: Joined; observe: b
         <span className={`inline-flex items-center gap-1.5 text-xs font-semibold ${left < 300000 ? 'text-red-300' : ''}`}><Timer className="w-3.5 h-3.5" /> {m}:{String(s).padStart(2, '0')} left</span>
       )}
       <PipButton />
+      {!observe && <RoomReleaseButton demoId={demoId} />}
       {!observe && <button onClick={onEnd} className="inline-flex items-center gap-1 text-xs bg-red-600 hover:bg-red-700 rounded px-2.5 py-1 font-medium"><PhoneOff className="w-3.5 h-3.5" /> End demo</button>}
     </div>
   );
