@@ -67,6 +67,7 @@ interface Lead {
   phone: string;
   email?: string | null;
   source?: string | null;
+  createdBy?: { id: string; name: string } | null;
   courseInterest?: string | null;
   status: LeadStatus;
   activityStatus?: ActivityStatus | null;
@@ -973,7 +974,10 @@ export default function SalesPage() {
                           lead.assignedTo ? `${lead.assignedTo.firstName} ${lead.assignedTo.lastName}` : '—'
                         )}
                       </td>
-                      <td className="px-3 py-3 text-muted-foreground whitespace-nowrap">{lead.source || '—'}</td>
+                      <td className="px-3 py-3 text-muted-foreground whitespace-nowrap">
+                        {lead.source || '—'}
+                        {lead.createdBy && <div className="text-[10px]" title="Lead created by">by {lead.createdBy.name}</div>}
+                      </td>
                       <td className="px-3 py-3 text-muted-foreground whitespace-nowrap">{lead.scoutKey ? scoutLabel(lead.scoutKey) : '—'}</td>
                       <td className="px-3 py-3 whitespace-nowrap">
                         {latestDemo ? (
@@ -1241,7 +1245,7 @@ function AddLeadModal({ employees, saving, setSaving, onClose, onSaved, setError
             <label className={lab}>Assign to
               <select className={inp} value={form.assignedToId} onChange={(e) => set('assignedToId', e.target.value)}>
                 <option value="">{isAdmin ? 'My Base (unassigned)' : 'Me'}</option>
-                {employees.map((e) => <option key={e.id} value={e.id}>{e.firstName} {e.lastName}</option>)}
+                {isAdmin && employees.map((e) => <option key={e.id} value={e.id}>{e.firstName} {e.lastName}</option>)}
               </select>
             </label>
           </div>
@@ -1874,6 +1878,7 @@ function LeadDetailModal({ lead, employees, canEdit, isAdmin, onClose, onChanged
                 <span className="flex items-center gap-1"><Phone className="w-3 h-3" /> {lead.phone}</span>
                 {lead.email && <span className="flex items-center gap-1"><Mail className="w-3 h-3" /> {lead.email}</span>}
                 {lead.source && <span>Source: {lead.source}</span>}
+                {lead.createdBy && <span>Created by: {lead.createdBy.name}</span>}
                 {lead.courseInterest && <span>Course: {lead.courseInterest}</span>}
                 <span>Age: {leadAgeLabel(lead.createdAt)}</span>
                 {!isAdmin && lead.assignedTo && <span>Owner: {lead.assignedTo.firstName} {lead.assignedTo.lastName}</span>}
