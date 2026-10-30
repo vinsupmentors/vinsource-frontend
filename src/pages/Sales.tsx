@@ -1279,6 +1279,16 @@ function BulkUploadLeadsModal({ onClose, setError, onSaved, isAdmin, employees }
     ]);
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, 'Leads');
+    // Sheet 2: the exact values accepted in the Lead Stage / Lead Scout / Source / Assigned columns.
+    const stages = CFG.stages.filter((x) => x.active).map((x) => x.label);
+    const scouts = CFG.scouts.filter((x) => x.active).map((x) => x.label);
+    const sources = CFG.sources.filter((x) => x.active).map((x) => x.label);
+    const people = employees.map((e) => `${e.firstName} ${e.lastName}`.trim());
+    const n = Math.max(stages.length, scouts.length, sources.length, people.length);
+    const rows = Array.from({ length: n }, (_, i) => ({ 'Lead Stage': stages[i] || '', 'Lead Scout': scouts[i] || '', Source: sources[i] || '', 'Assigned (employee name)': people[i] || '' }));
+    const ws2 = XLSX.utils.json_to_sheet(rows.length ? rows : [{ 'Lead Stage': '', 'Lead Scout': '', Source: '', 'Assigned (employee name)': '' }]);
+    ws2['!cols'] = [{ wch: 28 }, { wch: 24 }, { wch: 24 }, { wch: 28 }];
+    XLSX.utils.book_append_sheet(wb, ws2, 'Lists');
     XLSX.writeFile(wb, 'lead_bulk_upload_template.xlsx');
   };
 
