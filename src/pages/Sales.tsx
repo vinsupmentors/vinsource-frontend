@@ -906,6 +906,7 @@ export default function SalesPage() {
                     {...(isAdmin ? { options: [{ value: 'NONE', label: 'Unassigned' }, ...employees.map((e) => ({ value: e.id, label: `${e.firstName} ${e.lastName}` }))], value: assignedFilter, onChange: setAssignedFilter } : {})} />
                   <ColumnHeader label="Source" sortKey="source" sortBy={sortBy} sortDir={sortDir} onSort={onSort}
                     options={[...Array.from(new Set([...cfg.sources.map((x) => x.label), ...sourceOptions])).map((x) => ({ value: x, label: x })), { value: 'Unknown', label: 'Unknown' }]} value={sourceFilter} onChange={setSourceFilter} />
+                  <th className="px-3 py-3">Created By</th>
                   <ColumnHeader label="Lead Scout" sortKey="scoutKey" sortBy={sortBy} sortDir={sortDir} onSort={onSort}
                     options={[...cfg.scouts.map((x) => ({ value: x.key, label: x.label })), { value: 'NONE', label: 'No scout' }]} value={scoutFilter} onChange={setScoutFilter} />
                   <th className="px-3 py-3">Demo</th>
@@ -919,9 +920,9 @@ export default function SalesPage() {
               </thead>
               <tbody className="divide-y">
                 {loading ? (
-                  <tr><td colSpan={16} className="px-4 py-8 text-center text-muted-foreground">Loading...</td></tr>
+                  <tr><td colSpan={17} className="px-4 py-8 text-center text-muted-foreground">Loading...</td></tr>
                 ) : leads.length === 0 ? (
-                  <tr><td colSpan={16}className="px-4 py-8 text-center text-muted-foreground">No leads found</td></tr>
+                  <tr><td colSpan={17} className="px-4 py-8 text-center text-muted-foreground">No leads found</td></tr>
                 ) : leads.map((lead, i) => {
                   const latestDemo = lead.demos?.[0];
                   return (
@@ -977,8 +978,8 @@ export default function SalesPage() {
                       </td>
                       <td className="px-3 py-3 text-muted-foreground whitespace-nowrap">
                         {lead.source || '—'}
-                        {lead.createdBy && <div className="text-[10px]" title="Lead created by">by {lead.createdBy.name}</div>}
                       </td>
+                      <td className="px-3 py-3 text-muted-foreground whitespace-nowrap">{lead.createdBy?.name || '—'}</td>
                       <td className="px-3 py-3 text-muted-foreground whitespace-nowrap">{lead.scoutKey ? scoutLabel(lead.scoutKey) : '—'}</td>
                       <td className="px-3 py-3 whitespace-nowrap">
                         {latestDemo ? (
