@@ -1274,8 +1274,8 @@ function BulkUploadLeadsModal({ onClose, setError, onSaved, isAdmin, employees }
 
   const downloadTemplate = () => {
     const ws = XLSX.utils.json_to_sheet([
-      { name: 'John Doe', phone: '9876543210', email: 'john@example.com', source: 'Instagram', courseInterest: 'Data Analytics', assignedToCode: '', campaign: '', notes: '' },
-      { name: 'Jane S', phone: '9876543211', email: '', source: 'Referral', courseInterest: 'MERN Stack', assignedToCode: '', campaign: '', notes: '' },
+      { name: 'John Doe', phone: '9876543210', email: 'john@example.com', leadStage: 'Followup', leadScout: '', source: 'Instagram', courseInterest: 'Data Analytics', assignedToCode: '', campaign: '', notes: '' },
+      { name: 'Jane S', phone: '9876543211', email: '', leadStage: '', leadScout: '', source: 'Referral', courseInterest: 'MERN Stack', assignedToCode: '', campaign: '', notes: '' },
     ]);
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, 'Leads');
@@ -1347,7 +1347,7 @@ function BulkUploadLeadsModal({ onClose, setError, onSaved, isAdmin, employees }
                 <button onClick={downloadTemplate} className="text-xs px-3 py-2 border rounded-lg hover:bg-muted/50 flex items-center gap-1"><Download className="w-3 h-3" /> Template</button>
               </div>
               <p className="text-[11px] text-muted-foreground">
-                Columns: <code>name, phone, email, source, courseInterest, assignedToCode, campaign, notes</code>. Old-CRM exports (Name, Phone, Status, Assigned, Source, Created, Reminder…) also work as-is.
+                Columns: <code>name, phone, email, leadStage (blank = New Lead), leadScout, source, courseInterest, assignedToCode, campaign, notes</code>. Old-CRM exports (Name, Phone, Status, Assigned, Source, Created, Reminder…) also work as-is.
                 Anything you set below fills only the rows that leave that column empty. Phones that already exist are skipped, so re-uploading is safe.
               </p>
               {fileName && <p className="text-xs text-muted-foreground">{fileName} — {rows.length} row{rows.length === 1 ? '' : 's'} read.</p>}
