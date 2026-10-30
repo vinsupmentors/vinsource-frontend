@@ -899,30 +899,23 @@ export default function SalesPage() {
                   <th className="px-3 py-3">#</th>
                   <ColumnHeader label="Name" sortKey="name" sortBy={sortBy} sortDir={sortDir} onSort={onSort} text={nameLike} onText={setNameLike} />
                   <ColumnHeader label="Phone" sortKey="phone" sortBy={sortBy} sortDir={sortDir} onSort={onSort} text={phoneLike} onText={setPhoneLike} />
-                  <ColumnHeader label="Email" sortKey="email" sortBy={sortBy} sortDir={sortDir} onSort={onSort} text={emailLike} onText={setEmailLike} />
                   <ColumnHeader label="Status" options={[...ACTIVITY_STATUSES_LIVE(), { value: 'NONE', label: 'No status yet' }]} value={activityFilter} onChange={setActivityFilter} />
                   <ColumnHeader label="Lead Stage" sortKey="status" sortBy={sortBy} sortDir={sortDir} onSort={onSort} options={stageOptionsLive().map((o) => ({ value: o.value, label: o.label }))} value={statusFilter} onChange={setStatusFilter} />
                   <ColumnHeader label="Assigned" sortKey="assignedTo" sortBy={sortBy} sortDir={sortDir} onSort={onSort}
                     {...(isAdmin ? { options: [{ value: 'NONE', label: 'Unassigned' }, ...employees.map((e) => ({ value: e.id, label: `${e.firstName} ${e.lastName}` }))], value: assignedFilter, onChange: setAssignedFilter } : {})} />
                   <ColumnHeader label="Source" sortKey="source" sortBy={sortBy} sortDir={sortDir} onSort={onSort}
                     options={[...Array.from(new Set([...cfg.sources.map((x) => x.label), ...sourceOptions])).map((x) => ({ value: x, label: x })), { value: 'Unknown', label: 'Unknown' }]} value={sourceFilter} onChange={setSourceFilter} />
-                  <th className="px-3 py-3">Created By</th>
-                  <ColumnHeader label="Lead Scout" sortKey="scoutKey" sortBy={sortBy} sortDir={sortDir} onSort={onSort}
-                    options={[...cfg.scouts.map((x) => ({ value: x.key, label: x.label })), { value: 'NONE', label: 'No scout' }]} value={scoutFilter} onChange={setScoutFilter} />
-                  <th className="px-3 py-3">Demo</th>
                   <ColumnHeader label="Reminder" sortKey="nextFollowUpAt" sortBy={sortBy} sortDir={sortDir} onSort={onSort} />
                   <ColumnHeader label="Last Contact" sortKey="lastContactAt" sortBy={sortBy} sortDir={sortDir} onSort={onSort} />
                   <ColumnHeader label="Created" sortKey="createdAt" sortBy={sortBy} sortDir={sortDir} onSort={onSort} />
-                  <th className="px-3 py-3">Lead Age</th>
-                  <th className="px-3 py-3">Date Of Demo</th>
                   {isAdmin && <th className="px-3 py-3"></th>}
                 </tr>
               </thead>
               <tbody className="divide-y">
                 {loading ? (
-                  <tr><td colSpan={17} className="px-4 py-8 text-center text-muted-foreground">Loading...</td></tr>
+                  <tr><td colSpan={11} className="px-4 py-8 text-center text-muted-foreground">Loading...</td></tr>
                 ) : leads.length === 0 ? (
-                  <tr><td colSpan={17} className="px-4 py-8 text-center text-muted-foreground">No leads found</td></tr>
+                  <tr><td colSpan={11} className="px-4 py-8 text-center text-muted-foreground">No leads found</td></tr>
                 ) : leads.map((lead, i) => {
                   const latestDemo = lead.demos?.[0];
                   return (
@@ -935,11 +928,6 @@ export default function SalesPage() {
                       </td>
                       <td className="px-3 py-3 whitespace-nowrap">
                         <div className="flex items-center gap-1 text-xs text-muted-foreground"><Phone className="w-3 h-3" /> {lead.phone}</div>
-                      </td>
-                      <td className="px-3 py-3 whitespace-nowrap">
-                        {lead.email ? (
-                          <div className="flex items-center gap-1 text-xs text-muted-foreground"><Mail className="w-3 h-3" /> {lead.email}</div>
-                        ) : '—'}
                       </td>
                       <td className="px-3 py-3 whitespace-nowrap">
                         {lead.activityStatus
@@ -979,18 +967,6 @@ export default function SalesPage() {
                       <td className="px-3 py-3 text-muted-foreground whitespace-nowrap">
                         {lead.source || '—'}
                       </td>
-                      <td className="px-3 py-3 text-muted-foreground whitespace-nowrap">{lead.createdBy?.name || '—'}</td>
-                      <td className="px-3 py-3 text-muted-foreground whitespace-nowrap">{lead.scoutKey ? scoutLabel(lead.scoutKey) : '—'}</td>
-                      <td className="px-3 py-3 whitespace-nowrap">
-                        {latestDemo ? (
-                          <span
-                            className={`text-xs font-medium rounded-full px-2 py-1 ${DEMO_STATUS_COLOR[latestDemo.status]}`}
-                            title={latestDemo.bookingNumber}
-                          >
-                            {DEMO_MODE_LABEL[latestDemo.mode]} · {DEMO_STATUS_LABEL[latestDemo.status]}
-                          </span>
-                        ) : <span className="text-muted-foreground text-xs">Not booked</span>}
-                      </td>
                       <td className={`px-3 py-3 text-xs whitespace-nowrap ${reminderColor(lead.nextFollowUpAt)}`}>
                         {lead.nextFollowUpAt ? formatDateTime(lead.nextFollowUpAt) : (lead.status === 'LOST' || lead.status === 'ENROLLED' ? '—' : <span className="text-red-500">No reminder</span>)}
                       </td>
@@ -998,10 +974,6 @@ export default function SalesPage() {
                         {lead.lastContactAt ? formatDateTime(lead.lastContactAt) : 'Never'}
                       </td>
                       <td className="px-3 py-3 text-xs text-muted-foreground whitespace-nowrap">{formatDate(lead.createdAt)}</td>
-                      <td className="px-3 py-3 text-xs text-muted-foreground whitespace-nowrap">{leadAgeLabel(lead.createdAt)}</td>
-                      <td className="px-3 py-3 text-xs text-muted-foreground whitespace-nowrap">
-                        {latestDemo ? formatDate(latestDemo.scheduledAt) : '—'}
-                      </td>
                       {isAdmin && (
                         <td className="px-3 py-3">
                           <button onClick={() => deleteLead(lead)} title="Remove from screen (kept in database)" className="text-xs text-red-600 hover:underline">Remove</button>
