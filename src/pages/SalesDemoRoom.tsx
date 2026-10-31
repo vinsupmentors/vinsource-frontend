@@ -13,7 +13,7 @@ interface Joined { token: string; url: string; title: string; course?: string | 
 
 /**
  * Portal-hosted sales demo room.
- *  /sales-demo/:id            → the BDA (host) — first entry starts the 60-minute clock
+ *  /sales-demo/:id            → the BDA (host) — first entry starts the 2-hour clock
  *  /sales-demo/:id?observe=1  → Sales Admin watching silently (no mic/camera)
  * When the time is up the room closes; the host can then request a reopen,
  * which a Sales Admin has to approve.
@@ -84,7 +84,7 @@ export default function SalesDemoRoomPage() {
   }
 
   if (!choices) {
-    return <Lobby title="Sales demo" subtitle="You are the host — the 60-minute clock starts when you join" name="Host" joinLabel="Start / join demo" onSubmit={(c) => enter(c)} />;
+    return <Lobby title="Sales demo" subtitle="You are the host — the 2-hour clock starts when you join" name="Host" joinLabel="Start / join demo" onSubmit={(c) => enter(c)} />;
   }
 
   if (!joined) return <Shell><p className="text-white">Opening the demo room…</p></Shell>;

@@ -1,5 +1,5 @@
 import { ReleaseFeedbackButton } from '@/components/DemoFeedbackForm';
-import { useEffect, useState, useCallback, useMemo } from 'react';
+import { useEffect, useState, useCallback, useMemo, useRef } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import * as XLSX from 'xlsx';
 import api, { BASE_URL } from '@/lib/api';
@@ -616,6 +616,8 @@ export default function SalesPage() {
   // Config lists (stages, statuses, lost reasons, sources, scouts) — kept in a module snapshot so every sub-component can read labels.
   const [cfg, setCfgState] = useState<CfgData>(CFG);
   const [scoutFilter, setScoutFilter] = useState('');
+  const [tlFilter, setTlFilter] = useState('');
+  const [teamMap, setTeamMap] = useState<Record<string, string>>({});
   const [pageSize, setPageSize] = useState<string>(() => { try { const v = localStorage.getItem('sales.pageSize'); return v && PAGE_SIZES.includes(v) ? v : '50'; } catch { return '50'; } });
   const [sortBy, setSortBy] = useState('');
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc');
@@ -633,7 +635,7 @@ export default function SalesPage() {
     } catch { /* keep built-in defaults */ }
   }, []);
   useEffect(() => { if (level) loadConfig(); }, [level, loadConfig]);
-  useEffect(() => { setPage(1); }, [scoutFilter]);
+  useEffect(() => { setPage(1); }, [scoutFilter, tlFilter]);
 
   const fetchAll = useCallback(async () => {
     setLoading(true);
@@ -648,6 +650,13 @@ export default function SalesPage() {
       if (assignedFilter) params.assignedToId = assignedFilter;
       if (sourceFilter) params.source = sourceFilter;
       if (scoutFilter) params.scoutKey = scoutFilter;
+      if (tlFilter) {
+        // Team Lead filter = the TL plus everyone mapped to them (Sales → Teams); combined with "Assigned to" it narrows further.
+        const tls = tlFilter.split(',');
+        let ids = Object.keys(teamMap).filter((e) => tls.includes(teamMap[e])).concat(tls);
+        if (assignedFilter) { const a = assignedFilter.split(','); ids = ids.filter((i) => a.includes(i)); }
+        params.assignedToId = ids.length ? Array.from(new Set(ids)).join(',') : '__none__';
+      }
       if (createdFrom) params.createdFrom = createdFrom;
       if (createdTo) params.createdTo = createdTo;
       if (followFrom) params.followUpFrom = followFrom;
@@ -667,7 +676,7 @@ export default function SalesPage() {
     } finally {
       setLoading(false);
     }
-  }, [page, search, statusFilter, activityFilter, followUpFilter, assignedFilter, sourceFilter, scoutFilter, createdFrom, createdTo, followFrom, followTo, advFilter, pageSize, sortBy, sortDir, nameLike, phoneLike, emailLike]);
+  }, [page, search, statusFilter, activityFilter, followUpFilter, assignedFilter, sourceFilter, scoutFilter, tlFilter, teamMap, createdFrom, createdTo, followFrom, followTo, advFilter, pageSize, sortBy, sortDir, nameLike, phoneLike, emailLike]);
 
   useEffect(() => { if (level && tab === 'leads') fetchAll(); }, [level, tab, fetchAll]);
 
@@ -686,6 +695,7 @@ export default function SalesPage() {
   useEffect(() => {
     if (!level) return;
     api.get('/api/sales/team').then((res) => setEmployees(res.data.data)).catch(() => setEmployees([]));
+    if (level === 'ADMIN') api.get('/api/sales/team-map').then((r) => setTeamMap(Object.fromEntries((r.data.data as { employeeId: string; tlId: string }[]).map((m) => [m.employeeId, m.tlId])))).catch(() => setTeamMap({}));
   }, [level]);
 
   const openLeadDetail = async (id: string) => {
@@ -702,6 +712,13 @@ export default function SalesPage() {
   };
 
   const closeLeadDetail = () => { setDetailLeadId(null); setFetchedDetailLead(null); };
+
+  // A lead opened from "Open in new tab" / a shared link: /sales?tab=leads&lead=<id>
+  const leadFromUrl = useRef(searchParams.get('lead'));
+  useEffect(() => {
+    if (leadFromUrl.current && level) { const id = leadFromUrl.current; leadFromUrl.current = null; openLeadDetail(id); }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [level]);
 
   const refreshDetailLead = async () => {
     if (tab === 'leads') fetchAll();
@@ -897,10 +914,12 @@ export default function SalesPage() {
               <MultiSelect label="Assigned to" value={assignedFilter} onChange={setAssignedFilter}
                 options={[{ value: 'NONE', label: 'Unassigned' }, ...employees.map((e) => ({ value: e.id, label: `${e.firstName} ${e.lastName}` }))]} />
             )}
+            {isAdmin && Object.keys(teamMap).length > 0 && (
+              <MultiSelect label="Team Lead" value={tlFilter} onChange={setTlFilter}
+                options={Array.from(new Set(Object.values(teamMap))).map((id) => { const e = employees.find((x) => x.id === id); return { value: id, label: e ? `${e.firstName} ${e.lastName}` : id }; })} />
+            )}
             <MultiSelect label="Source" value={sourceFilter} onChange={setSourceFilter}
               options={[...Array.from(new Set([...cfg.sources.map((s) => s.label), ...sourceOptions])).map((s) => ({ value: s, label: s })), { value: 'Unknown', label: 'Unknown' }]} />
-            <MultiSelect label="Lead Scout" value={scoutFilter} onChange={setScoutFilter}
-              options={[...cfg.scouts.map((s) => ({ value: s.key, label: s.label })), { value: 'NONE', label: 'No scout' }]} />
             <select value={followUpFilter} onChange={(e) => setFollowUpFilter(e.target.value)} className="px-3 py-2 border rounded-lg text-sm">
               <option value="">All reminders</option>
               <option value="today">Due today</option>
@@ -916,7 +935,7 @@ export default function SalesPage() {
               –<input type="date" value={followTo} onChange={(e) => setFollowTo(e.target.value)} className="px-2 py-1.5 border rounded-lg text-sm" />
             </label>
             <AdvancedFilter scope="leads" fields={leadFilterFields(employees)} value={advFilter} onChange={setAdvFilter} />
-            {(statusFilter || activityFilter || assignedFilter || sourceFilter || scoutFilter || createdFrom || createdTo || followFrom || followTo || followUpFilter || nameLike || phoneLike || emailLike || sortBy) && (
+            {(statusFilter || activityFilter || assignedFilter || tlFilter || sourceFilter || scoutFilter || createdFrom || createdTo || followFrom || followTo || followUpFilter || nameLike || phoneLike || emailLike || sortBy) && (
               <button onClick={() => { setStatusFilter(''); setActivityFilter(''); setAssignedFilter(''); setSourceFilter(''); setScoutFilter(''); setCreatedFrom(''); setCreatedTo(''); setFollowFrom(''); setFollowTo(''); setFollowUpFilter(''); setNameLike(''); setPhoneLike(''); setEmailLike(''); setSortBy(''); }} className="text-xs text-blue-600 hover:underline">Clear all filters & sort</button>
             )}
           </div>
@@ -983,12 +1002,14 @@ export default function SalesPage() {
                       {isAdmin && <td className="px-3 py-3"><input type="checkbox" checked={picked.has(lead.id)} onChange={() => setPicked((p) => { const n = new Set(p); if (n.has(lead.id)) n.delete(lead.id); else n.add(lead.id); return n; })} /></td>}
                       <td className="px-3 py-3 text-muted-foreground">{(page - 1) * (pageSize === 'all' ? 0 : Number(pageSize)) + i + 1}</td>
                       <td className="px-3 py-3 font-medium whitespace-nowrap">
-                        <button onClick={() => openLeadDetail(lead.id)} className="text-blue-600 hover:underline text-left">
+                        <a href={`/sales?tab=leads&lead=${lead.id}`} title={lead.name}
+                          onClick={(e) => { if (e.button === 0 && !e.ctrlKey && !e.metaKey && !e.shiftKey) { e.preventDefault(); openLeadDetail(lead.id); } }}
+                          className="text-blue-600 hover:underline text-left block max-w-[170px] truncate">
                           {lead.name}
-                        </button>
+                        </a>
                       </td>
                       <td className="px-3 py-3 whitespace-nowrap">
-                        <div className="flex items-center gap-1 text-xs text-muted-foreground"><Phone className="w-3 h-3" /> {lead.phone}</div>
+                        <div className="flex items-center gap-1 text-[15px] font-medium text-foreground"><Phone className="w-3.5 h-3.5 text-muted-foreground" /> {lead.phone}</div>
                       </td>
                       <td className="px-3 py-3 whitespace-nowrap">
                         {lead.activityStatus
@@ -1910,7 +1931,7 @@ function LeadDetailModal({ lead, employees, canEdit, isAdmin, onClose, onChanged
 
   return (
     <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
-      <div className="bg-white rounded-xl w-full max-w-3xl max-h-[90vh] overflow-y-auto p-6 space-y-6">
+      <div className="bg-white rounded-xl w-full max-w-5xl max-h-[92vh] overflow-y-auto p-7 space-y-6 text-base [&_.text-xs]:!text-[14px] [&_.text-sm]:!text-[16px] [&_.text-\[11px\]]:!text-[13px] [&_.text-\[10px\]]:!text-[12px]">
         <div className="space-y-4">
           <div className="flex items-start justify-between gap-3">
             <div className="min-w-0">
@@ -2165,7 +2186,7 @@ function LeadDetailModal({ lead, employees, canEdit, isAdmin, onClose, onChanged
                       )}
                     </div>
                     <p className="text-xs text-muted-foreground">
-                      {demoMode === 'ONLINE' ? 'Online demos run inside the portal for 60 minutes; Sales Admin is emailed and can watch live. ' : ''}
+                      {demoMode === 'ONLINE' ? 'Online demos run inside the portal for up to 2 hours; Sales Admin is emailed and can watch live. ' : ''}
                       The student and you both get a reminder 10 minutes before. {!lead.city && !lead.collegeName && <>Student details live in the <button type="button" onClick={() => setLeadTab('profile')} className="text-blue-600 underline">Profile</button> tab.</>}
                     </p>
                   </div>
@@ -2313,7 +2334,7 @@ function LeadDetailModal({ lead, employees, canEdit, isAdmin, onClose, onChanged
                     <div className="flex flex-wrap items-center gap-2 text-xs">
                       {d.closedAt ? (
                         <>
-                          <span className="text-red-600 font-medium">Room closed (60 min over)</span>
+                          <span className="text-red-600 font-medium">Room closed (2 hours over)</span>
                           {d.reopenRequestedAt
                             ? <span className="text-amber-600">Reopen request waiting for Sales Admin</span>
                             : <a href={`/sales-demo/${d.id}`} target="_blank" rel="noreferrer" className="text-blue-600 hover:underline font-medium">Request reopen</a>}
@@ -2323,7 +2344,7 @@ function LeadDetailModal({ lead, employees, canEdit, isAdmin, onClose, onChanged
                           <Video className="w-3 h-3" /> {d.startedAt ? 'Rejoin demo room' : 'Start demo room'}
                         </a>
                       )}
-                      {d.accessCode && <span className="text-muted-foreground">Code: <span className="font-mono">{d.accessCode}</span> · link emailed to student</span>}
+                      {d.accessCode && <DemoShare code={d.accessCode} leadName={lead.name} phone={lead.phone} when={d.scheduledAt} course={d.courseEnquired || ''} />}
                     </div>
                   )}
                   {d.mode === 'ONLINE' && d.roomName && d.startedAt && <div><TranscriptButton type="DEMO" id={d.id} label="Demo transcript" /></div>}
@@ -3033,7 +3054,8 @@ function TodayPanel({ isAdmin, employees, onOpenLead }: { isAdmin: boolean; empl
 // ── Call analytics ──
 interface CallAnalytics {
   totals: { calls: number; connected: number; notConnected: number; connectRate: number; talkSeconds: number; avgTalkSeconds: number; callsPerDay: number; missed: number; inbound: number; outbound: number };
-  perPerson: { employeeId: string; name: string; calls: number; connected: number; connectRate: number; talkSeconds: number; avgTalkSeconds: number; missed: number; activeDays: number; callsPerDay: number }[];
+  perPerson: { employeeId: string; name: string; calls: number; connected: number; connectRate: number; talkSeconds: number; avgTalkSeconds: number; missed: number; activeDays: number; callsPerDay: number; dnp: number; tl: string; firstCall: string; lastCall: string; avgCallSeconds: number; outcomes: Record<string, number>; byDay: { date: string; calls: number; connected: number; talk: number }[] }[];
+  perTl: { name: string; members: number; calls: number; connected: number; connectRate: number; talkSeconds: number; outcomes: Record<string, number> }[];
   days: { date: string; calls: number; connected: number; talkSeconds: number }[];
   hours: { hour: number; calls: number; connected: number; connectRate: number }[];
   weekdays: { dow: number; calls: number; connected: number; connectRate: number }[];
@@ -3056,6 +3078,27 @@ function CallAnalyticsPanel({ isAdmin, employees }: { isAdmin: boolean; employee
       .catch((err: unknown) => setError((err as { response?: { data?: { message?: string } } }).response?.data?.message || 'Failed to load call analytics'))
       .finally(() => setLoading(false));
   }, [from, to, emp]);
+  const [exporting, setExporting] = useState(false);
+  const clock = (iso: string) => new Date(iso).toLocaleTimeString('en-IN', { timeZone: 'Asia/Kolkata', hour: '2-digit', minute: '2-digit' });
+  const exportDetail = async () => {
+    setExporting(true);
+    try {
+      const r = await api.get('/api/sales/call-details', { params: { from, to, ...(emp ? { employeeId: emp } : {}) } });
+      const rows = (r.data.data as Record<string, string | number>[]).map((x) => ({ Date: x.date, Time: x.time, Salesperson: x.salesperson, Lead: x.lead, Phone: x.phone, Direction: x.direction, Source: x.source, Connected: x.connected, 'Duration (sec)': x.durationSeconds, Status: x.status, Notes: x.notes }));
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(rows), 'Calls');
+      if (data) {
+        XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(data.perPerson.map((p) => ({ Salesperson: p.name, 'Team lead': p.tl, Calls: p.calls, Connected: p.connected, DNP: p.dnp, 'Connect %': p.connectRate, 'Talk time (sec)': p.talkSeconds, 'Avg talk (sec)': p.avgTalkSeconds, 'First call': clock(p.firstCall), 'Last call': clock(p.lastCall), 'Active days': p.activeDays, 'Calls/day': p.callsPerDay }))), 'Per person');
+        const per: Record<string, string | number>[] = [];
+        data.perPerson.forEach((p) => p.byDay.forEach((d) => per.push({ Salesperson: p.name, Date: d.date, Calls: d.calls, Connected: d.connected, 'Talk time (sec)': d.talk })));
+        XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(per), 'Per day');
+      }
+      XLSX.writeFile(wb, `call-report-${from}-to-${to}.xlsx`);
+    } catch (e) { setError((e as { response?: { data?: { message?: string } } }).response?.data?.message || 'Export failed'); }
+    finally { setExporting(false); }
+  };
+  const outcomeKeys = Array.from(new Set((data?.perPerson || []).flatMap((p) => Object.keys(p.outcomes)))).sort();
+  const outLabel = (k: string) => k.replace(/_/g, ' ').toLowerCase().replace(/^\w/, (c) => c.toUpperCase());
   const t = data?.totals;
   const maxDay = Math.max(1, ...(data?.days || []).map((d) => d.calls));
   const hours = data?.hours || [];
@@ -3076,6 +3119,7 @@ function CallAnalyticsPanel({ isAdmin, employees }: { isAdmin: boolean; employee
             <select value={emp} onChange={(e) => setEmp(e.target.value)} className={`${inp} block mt-1`}><option value="">Everyone</option>{employees.map((e) => <option key={e.id} value={e.id}>{e.firstName} {e.lastName}</option>)}</select>
           </label>
         )}
+        <button onClick={exportDetail} disabled={exporting} className="px-4 py-2 bg-green-600 text-white rounded-lg text-sm font-medium disabled:opacity-50">{exporting ? 'Preparing...' : 'Export to Excel'}</button>
       </div>
       {error && <div className="bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg px-4 py-3">{error}</div>}
       {loading && <p className="text-sm text-muted-foreground">Loading...</p>}
@@ -3124,24 +3168,58 @@ function CallAnalyticsPanel({ isAdmin, employees }: { isAdmin: boolean; employee
           <p className="text-[11px] text-muted-foreground">Bars show the connect rate for each hour of the day (IST). Hours with fewer than 5 calls are not ranked.</p>
         </section>
 
-        {isAdmin && (
+        {isAdmin && (<>
           <section className="space-y-2">
             <h3 className="font-semibold text-sm">By salesperson</h3>
             <div className="bg-card border rounded-xl overflow-x-auto">
               <table className="w-full text-sm">
-                <thead className="bg-muted/50 text-left text-xs uppercase text-muted-foreground"><tr><th className={th}>Salesperson</th><th className={th}>Calls</th><th className={th}>Connected</th><th className={th}>Connect rate</th><th className={th}>Talk time</th><th className={th}>Avg talk</th><th className={th}>Missed</th><th className={th}>Active days</th><th className={th}>Calls / day</th></tr></thead>
+                <thead className="bg-muted/50 text-left text-xs uppercase text-muted-foreground"><tr><th className={th}>Salesperson</th><th className={th}>Team lead</th><th className={th}>Calls</th><th className={th}>Connected</th><th className={th}>DNP</th><th className={th}>Connect rate</th><th className={th}>Talk time</th><th className={th}>Avg talk</th><th className={th}>First call</th><th className={th}>Last call</th><th className={th}>Active days</th><th className={th}>Calls / day</th></tr></thead>
                 <tbody className="divide-y">
                   {data.perPerson.map((p) => (
-                    <tr key={p.employeeId} className="hover:bg-muted/30"><td className="px-3 py-2 font-medium whitespace-nowrap">{p.name}</td><td className="px-3 py-2 font-semibold">{p.calls}</td><td className="px-3 py-2 text-xs">{p.connected}</td>
+                    <tr key={p.employeeId} className="hover:bg-muted/30"><td className="px-3 py-2 font-medium whitespace-nowrap">{p.name}</td><td className="px-3 py-2 text-xs whitespace-nowrap">{p.tl || '—'}</td><td className="px-3 py-2 font-semibold">{p.calls}</td><td className="px-3 py-2 text-xs">{p.connected}</td><td className="px-3 py-2 text-xs">{p.dnp}</td>
                       <td className={`px-3 py-2 text-xs font-semibold ${p.connectRate >= 50 ? 'text-green-700' : p.connectRate < 30 ? 'text-red-600' : ''}`}>{p.connectRate}%</td>
-                      <td className="px-3 py-2 text-xs">{fmtDur(p.talkSeconds)}</td><td className="px-3 py-2 text-xs">{fmtDur(p.avgTalkSeconds)}</td><td className="px-3 py-2 text-xs">{p.missed}</td><td className="px-3 py-2 text-xs">{p.activeDays}</td><td className="px-3 py-2 text-xs">{p.callsPerDay}</td></tr>
+                      <td className="px-3 py-2 text-xs">{fmtDur(p.talkSeconds)}</td><td className="px-3 py-2 text-xs">{fmtDur(p.avgTalkSeconds)}</td><td className="px-3 py-2 text-xs">{clock(p.firstCall)}</td><td className="px-3 py-2 text-xs">{clock(p.lastCall)}</td><td className="px-3 py-2 text-xs">{p.activeDays}</td><td className="px-3 py-2 text-xs">{p.callsPerDay}</td></tr>
                   ))}
-                  {data.perPerson.length === 0 && <tr><td colSpan={9} className="px-4 py-6 text-center text-muted-foreground">No calls in this range</td></tr>}
+                  {data.perPerson.length === 0 && <tr><td colSpan={12} className="px-4 py-6 text-center text-muted-foreground">No calls in this range</td></tr>}
+                </tbody>
+              </table>
+            </div>
+            <p className="text-[11px] text-muted-foreground">First / last call show the earliest and latest call time in the range (IST).</p>
+          </section>
+
+          <section className="space-y-2">
+            <h3 className="font-semibold text-sm">Outcome by status</h3>
+            <div className="bg-card border rounded-xl overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead className="bg-muted/50 text-left text-xs uppercase text-muted-foreground"><tr><th className={th}>Team / person</th>{outcomeKeys.map((k) => <th key={k} className={th}>{outLabel(k)}</th>)}</tr></thead>
+                <tbody className="divide-y">
+                  {data.perTl.map((tl) => (
+                    <tr key={`tl-${tl.name}`} className="bg-blue-50/60 font-semibold"><td className="px-3 py-2 whitespace-nowrap">{tl.name} <span className="text-xs font-normal text-muted-foreground">team · {tl.calls} calls</span></td>{outcomeKeys.map((k) => <td key={k} className="px-3 py-2 text-xs">{tl.outcomes[k] || 0}</td>)}</tr>
+                  ))}
+                  {data.perPerson.map((p) => (
+                    <tr key={p.employeeId} className="hover:bg-muted/30"><td className="px-3 py-2 whitespace-nowrap pl-6">{p.name}</td>{outcomeKeys.map((k) => <td key={k} className="px-3 py-2 text-xs">{p.outcomes[k] || 0}</td>)}</tr>
+                  ))}
                 </tbody>
               </table>
             </div>
           </section>
-        )}
+
+          <section className="space-y-2">
+            <h3 className="font-semibold text-sm">Daily calls by person</h3>
+            <div className="bg-card border rounded-xl overflow-x-auto">
+              <table className="w-full text-xs">
+                <thead className="bg-muted/50 text-left uppercase text-muted-foreground"><tr><th className={th}>Salesperson</th>{data.days.slice(-14).map((d) => <th key={d.date} className="px-2 py-3">{d.date.slice(5)}</th>)}</tr></thead>
+                <tbody className="divide-y">
+                  {data.perPerson.map((p) => {
+                    const m = new Map(p.byDay.map((d) => [d.date, d]));
+                    return <tr key={p.employeeId}><td className="px-3 py-2 font-medium whitespace-nowrap">{p.name}</td>{data.days.slice(-14).map((d) => { const x = m.get(d.date); return <td key={d.date} className="px-2 py-2" title={x ? `${x.connected} connected, ${fmtDur(x.talk)} talk` : ''}>{x ? x.calls : <span className="text-muted-foreground">·</span>}</td>; })}</tr>;
+                  })}
+                </tbody>
+              </table>
+            </div>
+            <p className="text-[11px] text-muted-foreground">Last 14 days of the range. The Excel export has every day.</p>
+          </section>
+        </>)}
       </>)}
     </div>
   );
@@ -3809,7 +3887,7 @@ function LiveDemosPanel() {
     <div className="space-y-4">
       {error && <div className="bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg px-4 py-3">{error}</div>}
       <div className="flex items-center justify-between">
-        <p className="text-xs text-muted-foreground">Online demos hosted in the portal. Watch any running demo silently, and approve reopen requests once the 60 minutes are over.</p>
+        <p className="text-xs text-muted-foreground">Online demos hosted in the portal. Watch any running demo silently, and approve reopen requests once the 2 hours are over.</p>
         <button onClick={load} disabled={loading} className="flex items-center gap-2 px-3 py-2 border rounded-lg text-sm font-medium hover:bg-muted/50 disabled:opacity-50">
           <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} /> Refresh
         </button>
@@ -4092,6 +4170,26 @@ function LeadQualityPanel() {
 // ?status= — the backend already scopes results to the caller's own assigned
 // leads for anyone below SALES=ADMIN, so this component doesn't need to know
 // whose leads it's showing.
+/** Copy / WhatsApp-share the student's Demo Session link (works even when the student has no email). */
+function DemoShare({ code, leadName, phone, when, course }: { code: string; leadName: string; phone: string; when: string; course: string }) {
+  const [copied, setCopied] = useState(false);
+  const link = `${window.location.origin}/demo-join?code=${code}`;
+  const text = `Hi ${leadName}, your Demo Session${course ? ` for ${course}` : ''} at Vinsup Skill Academy is on ${formatDateTime(when)}.\n\nJoin link: ${link}\nAccess code: ${code}\n\nOpen the link at the scheduled time and enter your email address and the code. Please keep your camera and microphone ready.`;
+  const digits = phone.replace(/\D/g, '');
+  const wa = `https://wa.me/${digits.length === 10 ? `91${digits}` : digits}?text=${encodeURIComponent(text)}`;
+  return (
+    <span className="inline-flex flex-wrap items-center gap-2 text-muted-foreground">
+      <span>Code: <span className="font-mono">{code}</span></span>
+      <button onClick={() => { navigator.clipboard?.writeText(`${link}\nAccess code: ${code}`); setCopied(true); setTimeout(() => setCopied(false), 1500); }} className="inline-flex items-center gap-1 px-2 py-1 rounded-lg border text-foreground hover:bg-muted/50">
+        <Copy className="w-3 h-3" /> {copied ? 'Copied' : 'Copy link'}
+      </button>
+      <a href={wa} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 px-2 py-1 rounded-lg border border-green-300 text-green-700 hover:bg-green-50">
+        <MessageCircle className="w-3 h-3" /> Share on WhatsApp
+      </a>
+    </span>
+  );
+}
+
 function DemoListPanel({ status, emptyLabel, onOpenLead }: {
   status: DemoStatus; emptyLabel: string; onOpenLead: (id: string) => void;
 }) {

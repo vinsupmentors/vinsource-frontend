@@ -33,28 +33,49 @@ api.interceptors.request.use((config) => {
   return config;
 });
 
-// Auto-refresh on 401
+// Auto-refresh on 401. One refresh at a time (shared by every request and tab), and a temporary network
+// problem never signs anyone out — only a refresh the server actually rejects does.
+let refreshing: Promise<string> | null = null;
+function doRefresh(refreshToken: string): Promise<string> {
+  if (!refreshing) {
+    refreshing = axios
+      .post(`${BASE_URL}/api/auth/refresh`, { refreshToken }, { headers: { 'X-Device-Id': getDeviceId() } })
+      .then(({ data }) => {
+        const { token, refreshToken: newRefresh } = data.data;
+        localStorage.setItem('hrms_token', token);
+        if (newRefresh) localStorage.setItem('hrms_refresh_token', newRefresh);
+        return token as string;
+      })
+      .finally(() => { setTimeout(() => { refreshing = null; }, 0); });
+  }
+  return refreshing;
+}
+
 api.interceptors.response.use(
   (res) => res,
   async (error) => {
     const original = error.config;
-    if (error.response?.status === 401 && !original._retry) {
+    if (error.response?.status === 401 && original && !original._retry) {
       original._retry = true;
+      const usedToken = String(original.headers?.Authorization || '').replace('Bearer ', '');
+      const stored = localStorage.getItem('hrms_token');
+      // Another tab/request already got a fresh token while this one was failing — just use it.
+      if (stored && stored !== usedToken) {
+        original.headers.Authorization = `Bearer ${stored}`;
+        return api(original);
+      }
       const refreshToken = localStorage.getItem('hrms_refresh_token');
       if (refreshToken) {
         try {
-          const { data } = await axios.post(`${BASE_URL}/api/auth/refresh`, {
-            refreshToken,
-          }, { headers: { 'X-Device-Id': getDeviceId() } });
-          const { token, refreshToken: newRefresh } = data.data;
-          localStorage.setItem('hrms_token', token);
-          localStorage.setItem('hrms_refresh_token', newRefresh);
+          const token = await doRefresh(refreshToken);
           original.headers.Authorization = `Bearer ${token}`;
           return api(original);
         } catch (refreshErr) {
+          const r = refreshErr as { response?: { status?: number; data?: { code?: string; message?: string } } };
+          // No answer from the server (offline / restarting): keep the session, let the request fail normally.
+          if (!r.response) return Promise.reject(error);
           // A student whose account was moved to another device: say why on
           // the login screen instead of silently bouncing them there.
-          const r = refreshErr as { response?: { data?: { code?: string; message?: string } } };
           if (r.response?.data?.code === 'DEVICE_CHANGED') {
             sessionStorage.setItem('hrms_login_notice', r.response.data.message || 'Your account is now active on a different device.');
           }
