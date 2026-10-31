@@ -17,7 +17,7 @@ import {
   Target as TargetIcon, Trophy, Clock, PlayCircle, Bell, ListChecks, BarChart3, Eye, Inbox, Layers, ShieldCheck, Sun, MessageCircle, Send,
 } from 'lucide-react';
 
-const PAGE_SIZES = ['25', '50', '100', '250', 'all'];
+const PAGE_SIZES = ['25', '50', '100', '250', '500', 'all'];
 
 // ── Types ────────────────────────────────────────────────────────────────
 type LeadStatus = 'NEW' | 'CONTACTED' | 'DEMO_SCHEDULED' | 'DEMO_DONE' | 'NEGOTIATION' | 'ENROLLED' | 'LOST';
@@ -592,6 +592,13 @@ export default function SalesPage() {
   const [error, setError] = useState('');
   const [showAdd, setShowAdd] = useState(false);
   const [showBulkUpload, setShowBulkUpload] = useState(false);
+  // Bulk hand-out from the Leads tab (Sales Admin): tick leads (or "first N" of the list) → give them to one person.
+  const [picked, setPicked] = useState<Set<string>>(new Set());
+  const [firstN, setFirstN] = useState('');
+  const [bulkTo, setBulkTo] = useState('');
+  const [hideHistory, setHideHistory] = useState(false);
+  const [bulkBusy, setBulkBusy] = useState(false);
+  const [bulkMsg, setBulkMsg] = useState('');
   const [detailLeadId, setDetailLeadId] = useState<string | null>(null);
   // Populated when the detail modal is opened from somewhere other than the
   // Leads tab (e.g. a Demo Booked row), where we don't already have the full
@@ -723,6 +730,29 @@ export default function SalesPage() {
   const onStatusChange = (lead: Lead, status: string) => {
     if (stageBase(status) === 'LOST' && !['CUSTOM_NOT_INTERESTED', 'CUSTOM_UNRESPONSIVE'].includes(status)) { setLostStage(status); setLostReasonLead(lead); return; }
     updateLeadStatus(lead.id, status);
+  };
+
+  const bulkAssign = async () => {
+    if (!picked.size) return setError('Tick the leads to assign first');
+    if (!bulkTo) return setError('Choose who to assign them to');
+    const who = employees.find((e) => e.id === bulkTo);
+    if (!window.confirm(`Assign ${picked.size} lead${picked.size === 1 ? '' : 's'} to ${who ? `${who.firstName} ${who.lastName}` : 'this person'}?${hideHistory ? '\nPast history will be hidden from them.' : ''}`)) return;
+    setBulkBusy(true); setError(''); setBulkMsg('');
+    try {
+      const ids = Array.from(picked);
+      // Sent in chunks so a big selection never hits a request-size limit.
+      let done = 0;
+      for (let i = 0; i < ids.length; i += 500) {
+        const r = await api.post('/api/sales/mybase/assign', { employeeIds: [bulkTo], leadIds: ids.slice(i, i + 500), showHistory: !hideHistory });
+        done += r.data.data.assigned;
+      }
+      setBulkMsg(`Assigned ${done} lead${done === 1 ? '' : 's'}${who ? ` to ${who.firstName} ${who.lastName}` : ''}.${done < ids.length ? ` ${ids.length - done} were skipped (enrolled leads can't be moved).` : ''}`);
+      setPicked(new Set()); setBulkTo('');
+      fetchAll();
+    } catch (err: unknown) {
+      const e = err as { response?: { data?: { message?: string } } };
+      setError(e.response?.data?.message || 'Assignment failed');
+    } finally { setBulkBusy(false); }
   };
 
   const reassignLead = async (id: string, assignedToId: string) => {
@@ -891,11 +921,41 @@ export default function SalesPage() {
             )}
           </div>
 
+          {isAdmin && (
+            <div className="flex flex-wrap items-center gap-3 bg-card border rounded-xl px-3 py-2 text-sm">
+              <span className="font-medium">Assign leads</span>
+              <label className="flex items-center gap-1.5 text-muted-foreground">Select first
+                <input type="number" min={1} value={firstN} onChange={(e) => setFirstN(e.target.value)} className="w-20 px-2 py-1 border rounded-lg text-foreground bg-background" placeholder="200" />
+                <button onClick={() => { const n = Number(firstN); if (n > 0) setPicked(new Set(leads.slice(0, n).map((l) => l.id))); }} className="px-2 py-1 border rounded-lg text-foreground hover:bg-muted/50">Select</button>
+                <span className="text-xs">of the list below (set "Show" to All or 500 to reach more)</span>
+              </label>
+              {picked.size > 0 && (
+                <>
+                  <span className="font-semibold text-blue-700">{picked.size} selected</span>
+                  <select value={bulkTo} onChange={(e) => setBulkTo(e.target.value)} className="px-2 py-1.5 border rounded-lg bg-background">
+                    <option value="">Assign to…</option>
+                    {employees.map((e) => <option key={e.id} value={e.id}>{e.firstName} {e.lastName}</option>)}
+                  </select>
+                  <label className="flex items-center gap-1 text-xs text-muted-foreground"><input type="checkbox" checked={hideHistory} onChange={(e) => setHideHistory(e.target.checked)} /> hide past history from them</label>
+                  <button onClick={bulkAssign} disabled={bulkBusy} className="px-3 py-1.5 rounded-lg bg-blue-600 text-white disabled:opacity-50">{bulkBusy ? 'Assigning…' : 'Assign'}</button>
+                  <button onClick={() => setPicked(new Set())} className="text-xs text-muted-foreground hover:underline">Clear</button>
+                </>
+              )}
+            </div>
+          )}
+          {bulkMsg && <div className="bg-green-50 border border-green-200 text-green-800 text-sm rounded-lg px-4 py-2">{bulkMsg}</div>}
+
           {/* Leads table */}
           <div className="bg-card border rounded-xl overflow-x-auto">
             <table className="w-full text-sm">
               <thead className="bg-muted/50 text-left text-xs uppercase text-muted-foreground">
                 <tr>
+                  {isAdmin && (
+                    <th className="px-3 py-3 w-8">
+                      <input type="checkbox" title="Select all on this page" checked={leads.length > 0 && leads.every((l) => picked.has(l.id))}
+                        onChange={(e) => setPicked((p) => { const n = new Set(p); leads.forEach((l) => (e.target.checked ? n.add(l.id) : n.delete(l.id))); return n; })} />
+                    </th>
+                  )}
                   <th className="px-3 py-3">#</th>
                   <ColumnHeader label="Name" sortKey="name" sortBy={sortBy} sortDir={sortDir} onSort={onSort} text={nameLike} onText={setNameLike} />
                   <ColumnHeader label="Phone" sortKey="phone" sortBy={sortBy} sortDir={sortDir} onSort={onSort} text={phoneLike} onText={setPhoneLike} />
@@ -913,13 +973,14 @@ export default function SalesPage() {
               </thead>
               <tbody className="divide-y">
                 {loading ? (
-                  <tr><td colSpan={11} className="px-4 py-8 text-center text-muted-foreground">Loading...</td></tr>
+                  <tr><td colSpan={12} className="px-4 py-8 text-center text-muted-foreground">Loading...</td></tr>
                 ) : leads.length === 0 ? (
-                  <tr><td colSpan={11} className="px-4 py-8 text-center text-muted-foreground">No leads found</td></tr>
+                  <tr><td colSpan={12} className="px-4 py-8 text-center text-muted-foreground">No leads found</td></tr>
                 ) : leads.map((lead, i) => {
                   const latestDemo = lead.demos?.[0];
                   return (
                     <tr key={lead.id} className="hover:bg-muted/30">
+                      {isAdmin && <td className="px-3 py-3"><input type="checkbox" checked={picked.has(lead.id)} onChange={() => setPicked((p) => { const n = new Set(p); if (n.has(lead.id)) n.delete(lead.id); else n.add(lead.id); return n; })} /></td>}
                       <td className="px-3 py-3 text-muted-foreground">{(page - 1) * (pageSize === 'all' ? 0 : Number(pageSize)) + i + 1}</td>
                       <td className="px-3 py-3 font-medium whitespace-nowrap">
                         <button onClick={() => openLeadDetail(lead.id)} className="text-blue-600 hover:underline text-left">
@@ -3595,7 +3656,7 @@ function SummariesPanel({ employees }: { employees: EmployeeLite[] }) {
                   <td className="px-3 py-3 text-xs">{r.newToday}</td>
                 </tr>
               ))}
-              {assignment.length === 0 && !loading && <tr><td colSpan={11} className="px-4 py-6 text-center text-muted-foreground">No leads</td></tr>}
+              {assignment.length === 0 && !loading && <tr><td colSpan={12} className="px-4 py-6 text-center text-muted-foreground">No leads</td></tr>}
             </tbody>
           </table>
         </div>
@@ -4658,9 +4719,9 @@ function CallLogPanel({ onOpenLead, employees }: { onOpenLead: (id: string) => v
           </thead>
           <tbody className="divide-y">
             {loading ? (
-              <tr><td colSpan={11} className="px-4 py-8 text-center text-muted-foreground">Loading...</td></tr>
+              <tr><td colSpan={12} className="px-4 py-8 text-center text-muted-foreground">Loading...</td></tr>
             ) : logs.length === 0 ? (
-              <tr><td colSpan={11} className="px-4 py-8 text-center text-muted-foreground">No calls found</td></tr>
+              <tr><td colSpan={12} className="px-4 py-8 text-center text-muted-foreground">No calls found</td></tr>
             ) : logs.map((c) => {
               const number = c.rawPhoneNumber || c.lead?.phone;
               return (
