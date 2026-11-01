@@ -653,7 +653,10 @@ export default function SalesPage() {
       if (tlFilter) {
         // Team Lead filter = the TL plus everyone mapped to them (Sales → Teams); combined with "Assigned to" it narrows further.
         const tls = tlFilter.split(',');
-        let ids = Object.keys(teamMap).filter((e) => teamMap[e].some((t) => tls.includes(t))).concat(tls);
+        // Everyone below the chosen leader at any depth (Senior Manager → TL → members).
+        const below = new Set<string>(); const queue = [...tls];
+        while (queue.length) { const cur = queue.pop()!; for (const e of Object.keys(teamMap)) if (teamMap[e].includes(cur) && !below.has(e)) { below.add(e); queue.push(e); } }
+        let ids = Array.from(below).concat(tls);
         if (assignedFilter) { const a = assignedFilter.split(','); ids = ids.filter((i) => a.includes(i)); }
         params.assignedToId = ids.length ? Array.from(new Set(ids)).join(',') : '__none__';
       }
@@ -5076,9 +5079,10 @@ function TeamsPanel({ employees }: { employees: EmployeeLite[] }) {
       const p: Record<string, { x: number; y: number }> = {};
       (l.data.data as { employeeId: string; x: number; y: number }[]).forEach((n) => { p[n.employeeId] = { x: n.x, y: n.y }; });
       // People who already have arrows but no saved spot get a tidy default: TLs on the left, members on the right.
-      const tls = Array.from(new Set(ls.map((x) => x.tlId))); const members = Array.from(new Set(ls.map((x) => x.employeeId)));
-      tls.forEach((id, i) => { if (!p[id]) p[id] = { x: 520, y: 30 + i * 90 }; });
-      members.forEach((id, i) => { if (!p[id]) p[id] = { x: 40, y: 30 + i * 70 }; });
+      const ids = Array.from(new Set(ls.flatMap((x) => [x.employeeId, x.tlId])));
+      const lvl = (id: string, d = 0): number => (d > 8 ? 0 : Math.max(0, ...ls.filter((x) => x.tlId === id).map((x) => lvl(x.employeeId, d + 1) + 1)));
+      const rows: Record<number, number> = {};
+      ids.forEach((id) => { if (p[id]) return; const L = lvl(id); rows[L] = (rows[L] || 0); p[id] = { x: 40 + L * 280, y: 30 + rows[L] * 70 }; rows[L]++; });
       setLinks(ls); setPos(p);
     } catch (e) { setError(errOf(e, 'Could not load the team mapping')); }
   }, []);
@@ -5133,7 +5137,7 @@ function TeamsPanel({ employees }: { employees: EmployeeLite[] }) {
 
   return (
     <div className="space-y-3">
-      <p className="text-sm text-muted-foreground">Drag people from the list onto the board. Pull from the <b>blue dot on the right</b> of a person to the person they report to (their Team Lead). A person can have several Team Leads — each Team Lead gets their own arrow colour. Click an arrow to remove it. Report Sheets, call reports and the Leads TL filter follow these arrows.</p>
+      <p className="text-sm text-muted-foreground">Drag people from the list onto the board. Pull from the <b>blue dot on the right</b> of a person to the person they report to (their Team Lead). A person can have several Team Leads (two TLs sharing the same team = draw both arrows), and Team Leads can connect up to a Senior Manager. Each leader gets their own arrow colour. Click an arrow to remove it. Report Sheets, call reports and the Leads TL filter follow these arrows.</p>
       {error && <div className="bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg px-4 py-3">{error}</div>}
       <div className="flex gap-3">
         <aside className="w-56 shrink-0 border rounded-xl bg-card p-2 space-y-2 max-h-[640px] flex flex-col">
@@ -5164,13 +5168,13 @@ function TeamsPanel({ employees }: { employees: EmployeeLite[] }) {
               {conn && pos[conn.from] && <path d={curve(pos[conn.from].x + NODE_W, pos[conn.from].y + NODE_H / 2, conn.x, conn.y)} stroke="#64748b" strokeWidth={2} strokeDasharray="6 4" fill="none" />}
             </svg>
             {placed.map((id) => {
-              const isTl = tlIds.includes(id); const memberOfCount = links.filter((l) => l.employeeId === id).length;
+              const isTl = tlIds.includes(id); const isMgr = isTl && links.some((l) => l.tlId === id && tlIds.includes(l.employeeId)); const memberOfCount = links.filter((l) => l.employeeId === id).length;
               return (
                 <div key={id} data-node={id} onPointerDown={(e) => startMove(e, id)}
                   className={`absolute rounded-xl border-2 bg-white shadow-sm flex items-center px-3 text-sm select-none cursor-move group ${hover === id ? 'border-green-500 ring-2 ring-green-200' : sel === id ? 'border-blue-500' : isTl ? 'border-slate-700' : 'border-slate-300'}`}
                   style={{ left: pos[id].x, top: pos[id].y, width: NODE_W, height: NODE_H }}>
                   <span className="truncate flex-1 font-medium">{empName(id)}</span>
-                  {isTl && <span className="text-[10px] bg-slate-800 text-white rounded-full px-1.5 py-0.5 ml-1">TL</span>}
+                  {isTl && <span className={`text-[10px] text-white rounded-full px-1.5 py-0.5 ml-1 ${isMgr ? 'bg-purple-700' : 'bg-slate-800'}`}>{isMgr ? 'MGR' : 'TL'}</span>}
                   {!isTl && memberOfCount > 1 && <span className="text-[10px] bg-amber-100 text-amber-800 rounded-full px-1.5 py-0.5 ml-1">×{memberOfCount}</span>}
                   <button data-handle="1" onPointerDown={(e) => e.stopPropagation()} onClick={() => removeNode(id)} title="Remove from board" className="absolute -top-2 -left-2 w-5 h-5 rounded-full bg-white border text-[11px] leading-none text-slate-500 hover:text-red-600 hidden group-hover:block">×</button>
                   <span data-handle="1" onPointerDown={(e) => startConnect(e, id)} title="Drag to the Team Lead" className="absolute top-1/2 -right-[7px] -translate-y-1/2 w-3.5 h-3.5 rounded-full bg-blue-600 border-2 border-white cursor-crosshair" />
