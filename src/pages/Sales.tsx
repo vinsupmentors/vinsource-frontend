@@ -2206,7 +2206,7 @@ function LeadDetailModal({ lead, employees, canEdit, isAdmin, isPresales, presal
                         <>
                           <div className="px-2 py-1.5 border rounded-lg text-sm bg-slate-50 text-muted-foreground">Booked by: you (Presales)</div>
                           <select className="px-2 py-1.5 border rounded-lg text-sm" value={handoverTo} onChange={(e) => setHandoverTo(e.target.value)}>
-                            <option value="">Hand over to (sales person)…</option>
+                            <option value="">Hand over to — optional, can do later…</option>
                             {employees.filter((e) => !presalesIds.includes(e.id)).map((e) => <option key={e.id} value={e.id}>{e.firstName} {e.lastName}</option>)}
                           </select>
                           {demoMode === 'ONLINE' && (
