@@ -534,8 +534,8 @@ function MultiSelect({ label, options, value, onChange }: {
 }
 
 // ── Main page ────────────────────────────────────────────────────────────
-type Tab = 'collections' | 'dashboard' | 'leads' | 'reminders' | 'tasks' | 'summaries' | 'activityMonitor' | 'pulse' | 'leadQuality' | 'liveDemos' | 'demoBooked' | 'demoRescheduled' | 'demoConducted' | 'devices' | 'unmatchedCalls' | 'callLog' | 'leaderboard' | 'targets' | 'myBase' | 'batches' | 'leadControl' | 'today' | 'callAnalytics' | 'config' | 'transcripts' | 'teams';
-const VALID_TABS: Tab[] = ['collections', 'dashboard', 'transcripts', 'config', 'leads', 'reminders', 'tasks', 'summaries', 'activityMonitor', 'pulse', 'leadQuality', 'liveDemos', 'demoBooked', 'demoRescheduled', 'demoConducted', 'devices', 'unmatchedCalls', 'callLog', 'leaderboard', 'targets', 'myBase', 'batches', 'leadControl', 'today', 'callAnalytics', 'teams'];
+type Tab = 'collections' | 'dashboard' | 'leads' | 'reminders' | 'tasks' | 'summaries' | 'activityMonitor' | 'pulse' | 'leadQuality' | 'liveDemos' | 'demoBooked' | 'demoRescheduled' | 'demoConducted' | 'devices' | 'unmatchedCalls' | 'callLog' | 'leaderboard' | 'targets' | 'myBase' | 'batches' | 'leadControl' | 'today' | 'callAnalytics' | 'config' | 'transcripts' | 'teams' | 'presales';
+const VALID_TABS: Tab[] = ['collections', 'dashboard', 'transcripts', 'config', 'leads', 'reminders', 'tasks', 'summaries', 'activityMonitor', 'pulse', 'leadQuality', 'liveDemos', 'demoBooked', 'demoRescheduled', 'demoConducted', 'devices', 'unmatchedCalls', 'callLog', 'leaderboard', 'targets', 'myBase', 'batches', 'leadControl', 'today', 'callAnalytics', 'teams', 'presales'];
 // Sales Pulse / Lead Quality are aggregate, cross-rep views — admin only.
 // BDAs get Demo Booked/Rescheduled/Conducted instead, scoped to their own leads.
 // Devices (issuing call-tracking tokens) is admin-only too. Unmatched Calls
@@ -543,7 +543,7 @@ const VALID_TABS: Tab[] = ['collections', 'dashboard', 'transcripts', 'config', 
 // and BDAs can see and work it. Leaderboard/Targets are management-level KPI
 // views, same access tier as Pulse/Lead Quality. "My Students" lives on its
 // own top-level page (see MyStudents.tsx), not as a Sales tab.
-const ADMIN_ONLY_TABS: Tab[] = ['config', 'myBase', 'batches', 'leadControl', 'summaries', 'activityMonitor', 'pulse', 'leadQuality', 'liveDemos', 'devices', 'leaderboard', 'targets', 'teams'];
+const ADMIN_ONLY_TABS: Tab[] = ['config', 'myBase', 'batches', 'leadControl', 'summaries', 'activityMonitor', 'pulse', 'leadQuality', 'liveDemos', 'devices', 'leaderboard', 'targets', 'teams', 'presales'];
 const BDA_ONLY_TABS: Tab[] = ['demoBooked', 'demoRescheduled', 'demoConducted'];
 const EDIT_REQUIRED_TABS: Tab[] = ['unmatchedCalls'];
 
@@ -552,6 +552,10 @@ export default function SalesPage() {
   const level = modules.SALES;
   const canEdit = hasModule('SALES', 'EDIT');
   const isAdmin = hasModule('SALES', 'ADMIN');
+  const [presalesIds, setPresalesIds] = useState<string[]>([]);
+  const [isPresales, setIsPresales] = useState(false);
+  const loadPresales = useCallback(() => { api.get('/api/sales/presales').then((r) => { setPresalesIds(r.data.data.ids); setIsPresales(!!r.data.data.mine); }).catch(() => {}); }, []);
+  useEffect(() => { loadPresales(); }, [loadPresales]);
 
   const [searchParams, setSearchParams] = useSearchParams();
   const tabFromUrl = searchParams.get('tab') as Tab | null;
@@ -848,6 +852,7 @@ export default function SalesPage() {
               { id: 'leaderboard' as Tab, label: 'Leaderboard', icon: Trophy },
               { id: 'targets' as Tab, label: 'Targets', icon: TargetIcon },
               { id: 'teams' as Tab, label: 'Teams', icon: Users },
+              { id: 'presales' as Tab, label: 'Presales', icon: Users },
               { id: 'leadQuality' as Tab, label: 'Lead Quality', icon: Percent },
               { id: 'liveDemos' as Tab, label: 'Live Demos', icon: Video },
               { id: 'unmatchedCalls' as Tab, label: 'Unmatched Calls', icon: PhoneIncoming },
@@ -1126,6 +1131,7 @@ export default function SalesPage() {
 
       {tab === 'targets' && isAdmin && <TargetsPanel employees={employees} />}
       {tab === 'teams' && isAdmin && <TeamsPanel employees={employees} />}
+      {tab === 'presales' && isAdmin && <PresalesPanel employees={employees} onChanged={loadPresales} />}
 
       {tab === 'demoBooked' && !isAdmin && <DemoListPanel status="SCHEDULED" emptyLabel="No demos booked" onOpenLead={openLeadDetail} />}
 
@@ -1182,6 +1188,8 @@ export default function SalesPage() {
           employees={employees}
           canEdit={canEdit}
           isAdmin={isAdmin}
+          isPresales={isPresales}
+          presalesIds={presalesIds}
           onClose={closeLeadDetail}
           onChanged={refreshDetailLead}
           setGlobalError={setError}
@@ -1588,8 +1596,8 @@ function LostReasonModal({ lead, saving, setSaving, onClose, onConfirm }: {
 }
 
 // ── Lead detail modal: call log timeline + demo actions + reassignment ────
-function LeadDetailModal({ lead, employees, canEdit, isAdmin, onClose, onChanged, setGlobalError }: {
-  lead: Lead; employees: EmployeeLite[]; canEdit: boolean; isAdmin: boolean; onClose: () => void; onChanged: () => void; setGlobalError: (s: string) => void;
+function LeadDetailModal({ lead, employees, canEdit, isAdmin, isPresales, presalesIds, onClose, onChanged, setGlobalError }: {
+  lead: Lead; employees: EmployeeLite[]; canEdit: boolean; isAdmin: boolean; isPresales: boolean; presalesIds: string[]; onClose: () => void; onChanged: () => void; setGlobalError: (s: string) => void;
 }) {
   const [callLogs, setCallLogs] = useState<CallLog[]>([]);
   const [demos, setDemos] = useState<DemoLite[]>([]);
@@ -1632,6 +1640,7 @@ function LeadDetailModal({ lead, employees, canEdit, isAdmin, onClose, onChanged
   const [demoMode, setDemoMode] = useState<DemoMode>('ONLINE');
   const [demoConductedBy, setDemoConductedBy] = useState(lead.assignedTo?.id || '');
   const [demoEmail, setDemoEmail] = useState(lead.email || '');
+  const [handoverTo, setHandoverTo] = useState('');
 
   const [actingDemo, setActingDemo] = useState<{ id: string; type: 'complete' | 'reschedule' | 'noshow' | 'cancel' | 'outcome' } | null>(null);
   const [actionFeedback, setActionFeedback] = useState('');
@@ -1698,7 +1707,7 @@ function LeadDetailModal({ lead, employees, canEdit, isAdmin, onClose, onChanged
     if (notesNeeded(callActivityStatus) && !callNotes.trim()) { setLocalError('Notes are required for this status'); return; }
     if (needsFollowUp(callActivityStatus) && !callFollowUp) { setLocalError('Pick the follow-up date and time'); return; }
     if (statusBase(callActivityStatus) === 'DEMO_BOOKED' && !callCourse.trim()) { setLocalError('Select the course for the demo'); return; }
-    if (statusBase(callActivityStatus) === 'DEMO_BOOKED' && demoMode === 'ONLINE' && !/^\S+@\S+\.\S+$/.test(demoEmail.trim())) { setLocalError('Enter the student\'s email — the online demo link is sent there'); return; }
+    if (statusBase(callActivityStatus) === 'DEMO_BOOKED' && demoMode === 'ONLINE' && !isPresales && !/^\S+@\S+\.\S+$/.test(demoEmail.trim())) { setLocalError('Enter the student\'s email — the online demo link is sent there'); return; }
     setSavingCall(true);
     setLocalError('');
     try {
@@ -1710,8 +1719,8 @@ function LeadDetailModal({ lead, employees, canEdit, isAdmin, onClose, onChanged
           scheduledAt: new Date(callFollowUp).toISOString(),
           mode: demoMode,
           courseEnquired: callCourse.trim(),
-          conductedById: demoConductedBy || undefined,
-          attendeeEmail: demoMode === 'ONLINE' ? demoEmail.trim() : undefined,
+          conductedById: isPresales ? undefined : (demoConductedBy || undefined),
+          attendeeEmail: demoMode === 'ONLINE' && demoEmail.trim() ? demoEmail.trim() : undefined,
         });
       }
       await api.post(`/api/sales/leads/${lead.id}/calls`, {
@@ -1724,6 +1733,11 @@ function LeadDetailModal({ lead, employees, canEdit, isAdmin, onClose, onChanged
         lostReason: statusNeedsLostReason(callActivityStatus) ? (callLostReason || undefined) : undefined,
         callLogId: callActivityType === 'CALL' ? (effectiveCallPick || undefined) : undefined,
       });
+      if (isPresales && handoverTo) {
+        // Presales book the slot, then hand the lead to the sales person who will conduct the demo.
+        await api.put(`/api/sales/leads/${lead.id}`, { assignedToId: handoverTo });
+        onChanged(); onClose(); return;
+      }
       setCallPick('__auto__');
       setCallNotes(''); setCallFollowUp(''); setCallActivityStatus(''); setCallStage(''); setCallLostReason('');
       await load();
@@ -1968,6 +1982,14 @@ function LeadDetailModal({ lead, employees, canEdit, isAdmin, onClose, onChanged
             <a href={`tel:${lead.phone.replace(/\s+/g, '')}`} className="flex items-center gap-1.5 px-3 py-1.5 border rounded-lg text-sm hover:bg-muted/50"><Phone className="w-3.5 h-3.5" /> Call</a>
             {canEdit && <button onClick={() => setMsgChannel('WHATSAPP')} className="flex items-center gap-1.5 px-3 py-1.5 border rounded-lg text-sm text-green-700 border-green-300 hover:bg-green-50"><MessageCircle className="w-3.5 h-3.5" /> WhatsApp</button>}
             {canEdit && <button onClick={() => setMsgChannel('EMAIL')} disabled={!lead.email} title={lead.email ? '' : 'No email on this lead'} className="flex items-center gap-1.5 px-3 py-1.5 border rounded-lg text-sm hover:bg-muted/50 disabled:opacity-40"><Mail className="w-3.5 h-3.5" /> Email</button>}
+            {isPresales && !isAdmin && (
+              <label className="ml-auto flex items-center gap-2 text-xs text-muted-foreground">Hand over to
+                <select value="" disabled={reassignSaving} onChange={async (e) => { if (!e.target.value) return; await reassign(e.target.value); onClose(); }} className="text-sm px-2 py-1 border rounded-lg text-foreground">
+                  <option value="">Choose sales person…</option>
+                  {employees.filter((e) => !presalesIds.includes(e.id) && e.id !== lead.assignedTo?.id).map((e) => <option key={e.id} value={e.id}>{e.firstName} {e.lastName}</option>)}
+                </select>
+              </label>
+            )}
             {isAdmin && (
               <label className="ml-auto flex items-center gap-2 text-xs text-muted-foreground">Owner
                 <select value={lead.assignedTo?.id || ''} disabled={reassignSaving} onChange={(e) => reassign(e.target.value)} className="text-sm px-2 py-1 border rounded-lg text-foreground">
@@ -2180,18 +2202,33 @@ function LeadDetailModal({ lead, employees, canEdit, isAdmin, onClose, onChanged
                       <select className="px-2 py-1.5 border rounded-lg text-sm" value={demoMode} onChange={(e) => setDemoMode(e.target.value as DemoMode)}>
                         {DEMO_MODES.map((m) => <option key={m} value={m}>{DEMO_MODE_LABEL[m]} demo</option>)}
                       </select>
-                      <select className="px-2 py-1.5 border rounded-lg text-sm" value={demoConductedBy} onChange={(e) => setDemoConductedBy(e.target.value)}>
-                        <option value="">Conducted by…</option>
-                        {employees.map((e) => <option key={e.id} value={e.id}>{e.firstName} {e.lastName}</option>)}
-                      </select>
-                      {demoMode === 'ONLINE' && (
-                        <input type="email" className="px-2 py-1.5 border rounded-lg text-sm sm:col-span-2" placeholder="Student email * (the online demo link is sent here)" value={demoEmail} onChange={(e) => setDemoEmail(e.target.value)} />
+                      {isPresales ? (
+                        <>
+                          <div className="px-2 py-1.5 border rounded-lg text-sm bg-slate-50 text-muted-foreground">Booked by: you (Presales)</div>
+                          <select className="px-2 py-1.5 border rounded-lg text-sm" value={handoverTo} onChange={(e) => setHandoverTo(e.target.value)}>
+                            <option value="">Hand over to (sales person)…</option>
+                            {employees.filter((e) => !presalesIds.includes(e.id)).map((e) => <option key={e.id} value={e.id}>{e.firstName} {e.lastName}</option>)}
+                          </select>
+                          {demoMode === 'ONLINE' && (
+                            <input type="email" className="px-2 py-1.5 border rounded-lg text-sm sm:col-span-2" placeholder="Student email (optional — nothing is mailed to the student)" value={demoEmail} onChange={(e) => setDemoEmail(e.target.value)} />
+                          )}
+                        </>
+                      ) : (
+                        <>
+                          <select className="px-2 py-1.5 border rounded-lg text-sm" value={demoConductedBy} onChange={(e) => setDemoConductedBy(e.target.value)}>
+                            <option value="">Conducted by…</option>
+                            {employees.map((e) => <option key={e.id} value={e.id}>{e.firstName} {e.lastName}</option>)}
+                          </select>
+                          {demoMode === 'ONLINE' && (
+                            <input type="email" className="px-2 py-1.5 border rounded-lg text-sm sm:col-span-2" placeholder="Student email * (the online demo link is sent here)" value={demoEmail} onChange={(e) => setDemoEmail(e.target.value)} />
+                          )}
+                        </>
                       )}
                     </div>
-                    <p className="text-xs text-muted-foreground">
+                    {isPresales ? <p className="text-xs text-muted-foreground">You are booking the slot only. The lead moves to Demo Booked; pick the sales person above to hand it over to — they conduct the demo and can send the link themselves.</p> : <p className="text-xs text-muted-foreground">
                       {demoMode === 'ONLINE' ? 'Online demos run inside the portal for up to 2 hours; Sales Admin is emailed and can watch live. ' : ''}
                       The student and you both get a reminder 10 minutes before. {!lead.city && !lead.collegeName && <>Student details live in the <button type="button" onClick={() => setLeadTab('profile')} className="text-blue-600 underline">Profile</button> tab.</>}
-                    </p>
+                    </p>}
                   </div>
                 )}
 
@@ -4177,7 +4214,7 @@ function LeadQualityPanel() {
 function DemoShare({ code, leadName, phone, when, course }: { code: string; leadName: string; phone: string; when: string; course: string }) {
   const [copied, setCopied] = useState(false);
   const link = `${window.location.origin}/demo-join?code=${code}`;
-  const text = `Hi ${leadName}, your Demo Session${course ? ` for ${course}` : ''} at Vinsup Skill Academy is on ${formatDateTime(when)}.\n\nJoin link: ${link}\nAccess code: ${code}\n\nOpen the link at the scheduled time and enter your email address and the code. Please keep your camera and microphone ready.`;
+  const text = `Hi ${leadName}, your Demo Session${course ? ` for ${course}` : ''} at Vinsup Skill Academy is on ${formatDateTime(when)}.\n\nJoin link: ${link}\nAccess code: ${code}\n\nJust tap the link at the scheduled time — you join directly, no email or sign-up needed. Please keep your camera and microphone ready.`;
   const digits = phone.replace(/\D/g, '');
   const wa = `https://wa.me/${digits.length === 10 ? `91${digits}` : digits}?text=${encodeURIComponent(text)}`;
   return (
@@ -5190,6 +5227,51 @@ function TeamsPanel({ employees }: { employees: EmployeeLite[] }) {
           {tlIds.map((id) => <span key={id} className="inline-flex items-center gap-1.5 bg-card border rounded-full px-3 py-1"><span className="w-3 h-1.5 rounded" style={{ background: color(id) }} />{empName(id)}'s team ({links.filter((l) => l.tlId === id).length})</span>)}
         </div>
       )}
+    </div>
+  );
+}
+
+// ── Presales: switch each person between the Presales and Sales team.
+function PresalesPanel({ employees, onChanged }: { employees: EmployeeLite[]; onChanged: () => void }) {
+  const [ids, setIds] = useState<string[]>([]);
+  const [error, setError] = useState('');
+  const [saving, setSaving] = useState('');
+  const [q, setQ] = useState('');
+  const load = useCallback(() => { api.get('/api/sales/presales').then((r) => setIds(r.data.data.ids)).catch(() => setError('Could not load the presales team')); }, []);
+  useEffect(() => { load(); }, [load]);
+  const toggle = async (id: string, presales: boolean) => {
+    setSaving(id); setError('');
+    try { await api.put('/api/sales/presales', { employeeId: id, presales }); load(); onChanged(); }
+    catch (err) { setError((err as { response?: { data?: { message?: string } } }).response?.data?.message || 'Could not save'); }
+    finally { setSaving(''); }
+  };
+  const list = employees.filter((e) => `${e.firstName} ${e.lastName}`.toLowerCase().includes(q.toLowerCase()));
+  return (
+    <div className="space-y-4">
+      <p className="text-sm text-muted-foreground">Presales people book the demo slot (no student email needed, nothing mailed to the student), then hand the lead to a Sales person who conducts the demo. Everyone else is Sales.</p>
+      {error && <div className="bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg px-4 py-3">{error}</div>}
+      <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search people..." className="border rounded-lg px-3 py-2 text-sm bg-background w-64" />
+      <div className="bg-card border rounded-xl overflow-hidden max-w-xl">
+        <table className="w-full text-sm">
+          <thead className="bg-muted/50 text-left text-xs uppercase text-muted-foreground"><tr><th className="px-3 py-2">Person</th><th className="px-3 py-2">Team</th></tr></thead>
+          <tbody className="divide-y">
+            {list.map((e) => {
+              const pre = ids.includes(e.id);
+              return (
+                <tr key={e.id}>
+                  <td className="px-3 py-2">{e.firstName} {e.lastName}</td>
+                  <td className="px-3 py-2">
+                    <div className="inline-flex border rounded-lg overflow-hidden text-xs">
+                      <button disabled={saving === e.id} onClick={() => pre && toggle(e.id, false)} className={`px-3 py-1.5 ${!pre ? 'bg-blue-600 text-white' : 'bg-background'}`}>Sales</button>
+                      <button disabled={saving === e.id} onClick={() => !pre && toggle(e.id, true)} className={`px-3 py-1.5 ${pre ? 'bg-purple-600 text-white' : 'bg-background'}`}>Presales</button>
+                    </div>
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
     </div>
   );
 }

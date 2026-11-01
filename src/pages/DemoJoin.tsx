@@ -16,6 +16,7 @@ export default function DemoJoinPage() {
   const [params] = useSearchParams();
   const [code, setCode] = useState((params.get('code') || '').toUpperCase());
   const [email, setEmail] = useState('');
+  const [needEmail, setNeedEmail] = useState(false); // only class sit-in invitations ask for an email
   const [error, setError] = useState('');
   const [waiting, setWaiting] = useState(false);
   const [joined, setJoined] = useState<Joined | null>(null);
@@ -33,7 +34,7 @@ export default function DemoJoinPage() {
         finished.current = true; stopPoll(); setWaiting(false);
         if (r.data.data.ready) setReady(r.data.data); else setJoined(r.data.data);
       })
-      .catch((e) => { finished.current = true; stopPoll(); setWaiting(false); setError(errMsg(e, 'Could not join.')); });
+      .catch((e) => { finished.current = true; stopPoll(); setWaiting(false); const m = errMsg(e, 'Could not join.'); if (/email address/i.test(m)) { setNeedEmail(true); setError(''); } else setError(m); });
   }, [code, email]);
 
   const submit = async () => {
@@ -43,6 +44,9 @@ export default function DemoJoinPage() {
   };
   // The interval stops itself once joined/failed (stopPoll in attempt).
   useEffect(() => stopPoll, []);
+  // A shared link carries the code, so open the demo straight away — no typing needed.
+  const auto = useRef(false);
+  useEffect(() => { if (!auto.current && code.length >= 6) { auto.current = true; submit(); } }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Lobby submit → now actually enter (this is what starts the 20-minute clock).
   const enter = (c: LocalUserChoices) => {
@@ -76,7 +80,7 @@ export default function DemoJoinPage() {
     <Shell>
       <div className="w-full max-w-sm bg-white rounded-2xl p-6 space-y-4 text-left">
         <div className="text-center space-y-1"><Video className="w-8 h-8 text-blue-600 mx-auto" /><h1 className="font-semibold text-lg">Join your demo class</h1>
-          <p className="text-xs text-gray-500">Enter the code from your approval email and the email address it was sent to.</p></div>
+          <p className="text-xs text-gray-500">Open the link you were sent, or enter your access code.</p></div>
         {error && <p className="text-sm text-red-600 bg-red-50 rounded-lg px-3 py-2">{error}</p>}
         {waiting ? (
           <div className="text-center space-y-2 py-2"><Loader2 className="w-5 h-5 animate-spin text-blue-600 mx-auto" />
@@ -84,8 +88,8 @@ export default function DemoJoinPage() {
         ) : (
           <>
             <input className="w-full border rounded-lg px-3 py-2 text-sm tracking-widest uppercase" placeholder="Access code" value={code} onChange={(e) => setCode(e.target.value.toUpperCase())} />
-            <input type="email" className="w-full border rounded-lg px-3 py-2 text-sm" placeholder="Your email" value={email} onChange={(e) => setEmail(e.target.value)} />
-            <button onClick={submit} disabled={code.length < 6 || !/^\S+@\S+\.\S+$/.test(email)} className="w-full py-2.5 rounded-lg bg-blue-600 text-white text-sm font-medium disabled:opacity-50">Join Class</button>
+            {needEmail && <input type="email" className="w-full border rounded-lg px-3 py-2 text-sm" placeholder="Email this invitation was sent to" value={email} onChange={(e) => setEmail(e.target.value)} />}
+            <button onClick={submit} disabled={code.length < 6 || (needEmail && !/^\S+@\S+\.\S+$/.test(email))} className="w-full py-2.5 rounded-lg bg-blue-600 text-white text-sm font-medium disabled:opacity-50">Join Class</button>
             <p className="text-xs text-gray-500 text-center">You can see, speak and share your screen. Sessions are time-limited and close automatically.</p>
           </>
         )}
