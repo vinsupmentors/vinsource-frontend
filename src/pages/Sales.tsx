@@ -617,7 +617,7 @@ export default function SalesPage() {
   const [cfg, setCfgState] = useState<CfgData>(CFG);
   const [scoutFilter, setScoutFilter] = useState('');
   const [tlFilter, setTlFilter] = useState('');
-  const [teamMap, setTeamMap] = useState<Record<string, string>>({});
+  const [teamMap, setTeamMap] = useState<Record<string, string[]>>({});
   const [pageSize, setPageSize] = useState<string>(() => { try { const v = localStorage.getItem('sales.pageSize'); return v && PAGE_SIZES.includes(v) ? v : '50'; } catch { return '50'; } });
   const [sortBy, setSortBy] = useState('');
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc');
@@ -653,7 +653,7 @@ export default function SalesPage() {
       if (tlFilter) {
         // Team Lead filter = the TL plus everyone mapped to them (Sales → Teams); combined with "Assigned to" it narrows further.
         const tls = tlFilter.split(',');
-        let ids = Object.keys(teamMap).filter((e) => tls.includes(teamMap[e])).concat(tls);
+        let ids = Object.keys(teamMap).filter((e) => teamMap[e].some((t) => tls.includes(t))).concat(tls);
         if (assignedFilter) { const a = assignedFilter.split(','); ids = ids.filter((i) => a.includes(i)); }
         params.assignedToId = ids.length ? Array.from(new Set(ids)).join(',') : '__none__';
       }
@@ -695,7 +695,7 @@ export default function SalesPage() {
   useEffect(() => {
     if (!level) return;
     api.get('/api/sales/team').then((res) => setEmployees(res.data.data)).catch(() => setEmployees([]));
-    if (level === 'ADMIN') api.get('/api/sales/team-map').then((r) => setTeamMap(Object.fromEntries((r.data.data as { employeeId: string; tlId: string }[]).map((m) => [m.employeeId, m.tlId])))).catch(() => setTeamMap({}));
+    if (level === 'ADMIN') api.get('/api/sales/team-map').then((r) => { const m: Record<string, string[]> = {}; (r.data.data as { employeeId: string; tlId: string }[]).forEach((x) => { (m[x.employeeId] = m[x.employeeId] || []).push(x.tlId); }); setTeamMap(m); }).catch(() => setTeamMap({}));
   }, [level]);
 
   const openLeadDetail = async (id: string) => {
@@ -916,7 +916,7 @@ export default function SalesPage() {
             )}
             {isAdmin && Object.keys(teamMap).length > 0 && (
               <MultiSelect label="Team Lead" value={tlFilter} onChange={setTlFilter}
-                options={Array.from(new Set(Object.values(teamMap))).map((id) => { const e = employees.find((x) => x.id === id); return { value: id, label: e ? `${e.firstName} ${e.lastName}` : id }; })} />
+                options={Array.from(new Set(Object.values(teamMap).flat())).map((id) => { const e = employees.find((x) => x.id === id); return { value: id, label: e ? `${e.firstName} ${e.lastName}` : id }; })} />
             )}
             <MultiSelect label="Source" value={sourceFilter} onChange={setSourceFilter}
               options={[...Array.from(new Set([...cfg.sources.map((s) => s.label), ...sourceOptions])).map((s) => ({ value: s, label: s })), { value: 'Unknown', label: 'Unknown' }]} />
@@ -5055,54 +5055,137 @@ function LeaderboardPanel() {
   );
 }
 
-// ── Targets tab: monthly enrollment + revenue goals per salesperson.
+// ── Teams: drag people onto a canvas and draw "reports to" arrows (a person can have several TLs).
+const NODE_W = 160, NODE_H = 44;
+const ARROW_COLORS = ['#2563eb', '#16a34a', '#dc2626', '#9333ea', '#ea580c', '#0891b2', '#ca8a04', '#db2777'];
 function TeamsPanel({ employees }: { employees: EmployeeLite[] }) {
-  const [map, setMap] = useState<Record<string, string>>({});
+  const [links, setLinks] = useState<{ employeeId: string; tlId: string }[]>([]);
+  const [pos, setPos] = useState<Record<string, { x: number; y: number }>>({});
   const [error, setError] = useState('');
-  const [saving, setSaving] = useState('');
-  const load = useCallback(() => { api.get('/api/sales/team-map').then((r) => setMap(Object.fromEntries((r.data.data as { employeeId: string; tlId: string }[]).map((m) => [m.employeeId, m.tlId])))).catch(() => setError('Could not load the team mapping')); }, []);
+  const [q, setQ] = useState('');
+  const [conn, setConn] = useState<{ from: string; x: number; y: number } | null>(null);
+  const [hover, setHover] = useState('');
+  const [sel, setSel] = useState('');
+  const canvasRef = useRef<HTMLDivElement>(null);
+  const posRef = useRef(pos); posRef.current = pos;
+  const errOf = (err: unknown, fb: string) => (err as { response?: { data?: { message?: string } } }).response?.data?.message || fb;
+  const load = useCallback(async () => {
+    try {
+      const [m, l] = await Promise.all([api.get('/api/sales/team-map'), api.get('/api/sales/team-layout')]);
+      const ls = m.data.data as { employeeId: string; tlId: string }[];
+      const p: Record<string, { x: number; y: number }> = {};
+      (l.data.data as { employeeId: string; x: number; y: number }[]).forEach((n) => { p[n.employeeId] = { x: n.x, y: n.y }; });
+      // People who already have arrows but no saved spot get a tidy default: TLs on the left, members on the right.
+      const tls = Array.from(new Set(ls.map((x) => x.tlId))); const members = Array.from(new Set(ls.map((x) => x.employeeId)));
+      tls.forEach((id, i) => { if (!p[id]) p[id] = { x: 520, y: 30 + i * 90 }; });
+      members.forEach((id, i) => { if (!p[id]) p[id] = { x: 40, y: 30 + i * 70 }; });
+      setLinks(ls); setPos(p);
+    } catch (e) { setError(errOf(e, 'Could not load the team mapping')); }
+  }, []);
   useEffect(() => { load(); }, [load]);
-  const name = (id: string) => { const e = employees.find((x) => x.id === id); return e ? `${e.firstName} ${e.lastName}` : '—'; };
-  const set = async (employeeId: string, tlId: string) => {
-    setSaving(employeeId); setError('');
-    try { await api.put('/api/sales/team-map', { employeeId, tlId }); load(); }
-    catch (err) { setError((err as { response?: { data?: { message?: string } } }).response?.data?.message || 'Could not save'); }
-    finally { setSaving(''); }
+  const empName = (id: string) => { const e = employees.find((x) => x.id === id); return e ? `${e.firstName} ${e.lastName}` : '—'; };
+  const tlIds = Array.from(new Set(links.map((l) => l.tlId)));
+  const color = (tlId: string) => ARROW_COLORS[Math.max(0, tlIds.indexOf(tlId)) % ARROW_COLORS.length];
+  const saveNode = (employeeId: string, x: number, y: number) => api.put('/api/sales/team-layout', { employeeId, x, y }).catch((e) => setError(errOf(e, 'Could not save position')));
+
+  const rel = (ev: { clientX: number; clientY: number }) => { const r = canvasRef.current!.getBoundingClientRect(); return { x: ev.clientX - r.left + canvasRef.current!.scrollLeft, y: ev.clientY - r.top + canvasRef.current!.scrollTop }; };
+  const onDropPalette = (ev: React.DragEvent) => {
+    ev.preventDefault();
+    const id = ev.dataTransfer.getData('text/plain'); if (!id) return;
+    const p = rel(ev); const x = Math.max(0, Math.round(p.x - NODE_W / 2)), y = Math.max(0, Math.round(p.y - NODE_H / 2));
+    setPos((c) => ({ ...c, [id]: { x, y } })); saveNode(id, x, y);
   };
-  const tlIds = new Set(Object.values(map));
-  const teams = [...tlIds].map((id) => ({ id, members: Object.keys(map).filter((k) => map[k] === id) }));
+  const startMove = (ev: React.PointerEvent, id: string) => {
+    if ((ev.target as HTMLElement).dataset.handle) return;
+    ev.preventDefault(); setSel(id);
+    const start = rel(ev); const orig = posRef.current[id]; let moved = orig;
+    const move = (e: PointerEvent) => { const p = rel(e); moved = { x: Math.max(0, Math.round(orig.x + p.x - start.x)), y: Math.max(0, Math.round(orig.y + p.y - start.y)) }; setPos((c) => ({ ...c, [id]: moved })); };
+    const up = () => { window.removeEventListener('pointermove', move); window.removeEventListener('pointerup', up); if (moved.x !== orig.x || moved.y !== orig.y) saveNode(id, moved.x, moved.y); };
+    window.addEventListener('pointermove', move); window.addEventListener('pointerup', up);
+  };
+  const startConnect = (ev: React.PointerEvent, from: string) => {
+    ev.preventDefault(); ev.stopPropagation(); setError('');
+    const p0 = rel(ev); setConn({ from, x: p0.x, y: p0.y });
+    const move = (e: PointerEvent) => { const p = rel(e); setConn({ from, x: p.x, y: p.y }); const el = document.elementFromPoint(e.clientX, e.clientY)?.closest('[data-node]') as HTMLElement | null; setHover(el?.dataset.node || ''); };
+    const up = async (e: PointerEvent) => {
+      window.removeEventListener('pointermove', move); window.removeEventListener('pointerup', up);
+      const el = document.elementFromPoint(e.clientX, e.clientY)?.closest('[data-node]') as HTMLElement | null;
+      setConn(null); setHover('');
+      const to = el?.dataset.node;
+      if (!to || to === from) return;
+      if (links.some((l) => l.employeeId === from && l.tlId === to)) return;
+      try { await api.put('/api/sales/team-map', { employeeId: from, tlId: to, action: 'add' }); await load(); }
+      catch (err) { setError(errOf(err, 'Could not connect')); }
+    };
+    window.addEventListener('pointermove', move); window.addEventListener('pointerup', up);
+  };
+  const removeLink = async (l: { employeeId: string; tlId: string }) => {
+    try { await api.put('/api/sales/team-map', { employeeId: l.employeeId, tlId: l.tlId, action: 'remove' }); await load(); } catch (e) { setError(errOf(e, 'Could not remove')); }
+  };
+  const removeNode = async (id: string) => {
+    if (links.some((l) => l.employeeId === id || l.tlId === id) && !window.confirm(`Remove ${empName(id)} and all their arrows?`)) return;
+    try { await api.put('/api/sales/team-layout', { employeeId: id, remove: true }); setPos((c) => { const n = { ...c }; delete n[id]; return n; }); await load(); } catch (e) { setError(errOf(e, 'Could not remove')); }
+  };
+  const placed = Object.keys(pos);
+  const palette = employees.filter((e) => !pos[e.id] && `${e.firstName} ${e.lastName}`.toLowerCase().includes(q.toLowerCase()));
+  const curve = (x1: number, y1: number, x2: number, y2: number) => { const d = Math.max(60, Math.abs(x2 - x1) / 2); return `M${x1},${y1} C${x1 + d},${y1} ${x2 - d},${y2} ${x2},${y2}`; };
+  const size = { w: Math.max(1100, ...placed.map((id) => pos[id].x + NODE_W + 80)), h: Math.max(560, ...placed.map((id) => pos[id].y + NODE_H + 80)) };
+
   return (
-    <div className="space-y-4">
-      <p className="text-sm text-muted-foreground">Pick the Team Lead for each sales person. The TL columns in Report Sheets (BRD Tracker, Revenue Consideration) follow this mapping.</p>
+    <div className="space-y-3">
+      <p className="text-sm text-muted-foreground">Drag people from the list onto the board. Pull from the <b>blue dot on the right</b> of a person to the person they report to (their Team Lead). A person can have several Team Leads — each Team Lead gets their own arrow colour. Click an arrow to remove it. Report Sheets, call reports and the Leads TL filter follow these arrows.</p>
       {error && <div className="bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg px-4 py-3">{error}</div>}
-      <div className="grid lg:grid-cols-2 gap-4">
-        <div className="bg-card border rounded-xl overflow-hidden">
-          <table className="w-full text-sm">
-            <thead className="bg-muted/50 text-left text-xs uppercase text-muted-foreground"><tr><th className="px-3 py-2">Sales person</th><th className="px-3 py-2">Team Lead</th></tr></thead>
-            <tbody className="divide-y">
-              {employees.map((e) => (
-                <tr key={e.id}>
-                  <td className="px-3 py-2">{e.firstName} {e.lastName}{tlIds.has(e.id) && <span className="ml-2 text-[10px] bg-blue-100 text-blue-700 rounded-full px-2 py-0.5">TL</span>}</td>
-                  <td className="px-3 py-2">
-                    <select disabled={saving === e.id} value={map[e.id] || ''} onChange={(ev) => set(e.id, ev.target.value)} className="px-2 py-1.5 border rounded-lg text-sm bg-background">
-                      <option value="">{tlIds.has(e.id) ? '— (is a Team Lead)' : 'No team (Direct Reporting)'}</option>
-                      {employees.filter((t) => t.id !== e.id && !map[t.id]).map((t) => <option key={t.id} value={t.id}>{t.firstName} {t.lastName}</option>)}
-                    </select>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-        <div className="space-y-3">
-          {teams.length === 0 ? <p className="text-sm text-muted-foreground">No teams yet — choose a Team Lead against a sales person.</p> : teams.map((t) => (
-            <div key={t.id} className="bg-card border rounded-xl p-3">
-              <p className="font-semibold text-sm">{name(t.id)}'s team <span className="text-xs font-normal text-muted-foreground">({t.members.length})</span></p>
-              <p className="text-xs text-muted-foreground mt-1">{t.members.map(name).join(', ')}</p>
-            </div>
-          ))}
+      <div className="flex gap-3">
+        <aside className="w-56 shrink-0 border rounded-xl bg-card p-2 space-y-2 max-h-[640px] flex flex-col">
+          <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search people..." className="w-full border rounded-lg px-2 py-1.5 text-sm bg-background" />
+          <div className="overflow-y-auto space-y-1.5 flex-1">
+            {palette.map((e) => (
+              <div key={e.id} draggable onDragStart={(ev) => ev.dataTransfer.setData('text/plain', e.id)} className="px-3 py-2 rounded-lg border bg-background text-sm cursor-grab active:cursor-grabbing hover:border-blue-400 select-none">{e.firstName} {e.lastName}</div>
+            ))}
+            {palette.length === 0 && <p className="text-xs text-muted-foreground px-1">{q ? 'No match' : 'Everyone is on the board'}</p>}
+          </div>
+        </aside>
+        <div ref={canvasRef} onDragOver={(e) => e.preventDefault()} onDrop={onDropPalette} onPointerDown={(e) => { if (e.target === e.currentTarget) setSel(''); }}
+          className="relative flex-1 border rounded-xl bg-slate-50 overflow-auto h-[640px]" style={{ backgroundImage: 'radial-gradient(#cbd5e1 1px, transparent 1px)', backgroundSize: '20px 20px' }}>
+          <div className="relative" style={{ width: size.w, height: size.h }}>
+            <svg className="absolute inset-0 pointer-events-none" width={size.w} height={size.h}>
+              <defs>{ARROW_COLORS.map((c, i) => <marker key={i} id={`arr${i}`} viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill={c} /></marker>)}</defs>
+              {links.filter((l) => pos[l.employeeId] && pos[l.tlId]).map((l) => {
+                const a = pos[l.employeeId], b = pos[l.tlId]; const ci = Math.max(0, tlIds.indexOf(l.tlId)) % ARROW_COLORS.length;
+                const x1 = a.x + NODE_W, y1 = a.y + NODE_H / 2, x2 = b.x, y2 = b.y + NODE_H / 2; const d = curve(x1, y1, x2, y2);
+                const hot = sel && (l.employeeId === sel || l.tlId === sel);
+                return (
+                  <g key={`${l.employeeId}-${l.tlId}`} className="pointer-events-auto cursor-pointer" onClick={() => { if (window.confirm(`Remove: ${empName(l.employeeId)} → ${empName(l.tlId)}?`)) removeLink(l); }}>
+                    <path d={d} stroke="transparent" strokeWidth={14} fill="none" />
+                    <path d={d} stroke={ARROW_COLORS[ci]} strokeWidth={hot ? 3.5 : 2.2} fill="none" markerEnd={`url(#arr${ci})`} opacity={sel && !hot ? 0.25 : 1} />
+                  </g>
+                );
+              })}
+              {conn && pos[conn.from] && <path d={curve(pos[conn.from].x + NODE_W, pos[conn.from].y + NODE_H / 2, conn.x, conn.y)} stroke="#64748b" strokeWidth={2} strokeDasharray="6 4" fill="none" />}
+            </svg>
+            {placed.map((id) => {
+              const isTl = tlIds.includes(id); const memberOfCount = links.filter((l) => l.employeeId === id).length;
+              return (
+                <div key={id} data-node={id} onPointerDown={(e) => startMove(e, id)}
+                  className={`absolute rounded-xl border-2 bg-white shadow-sm flex items-center px-3 text-sm select-none cursor-move group ${hover === id ? 'border-green-500 ring-2 ring-green-200' : sel === id ? 'border-blue-500' : isTl ? 'border-slate-700' : 'border-slate-300'}`}
+                  style={{ left: pos[id].x, top: pos[id].y, width: NODE_W, height: NODE_H }}>
+                  <span className="truncate flex-1 font-medium">{empName(id)}</span>
+                  {isTl && <span className="text-[10px] bg-slate-800 text-white rounded-full px-1.5 py-0.5 ml-1">TL</span>}
+                  {!isTl && memberOfCount > 1 && <span className="text-[10px] bg-amber-100 text-amber-800 rounded-full px-1.5 py-0.5 ml-1">×{memberOfCount}</span>}
+                  <button data-handle="1" onPointerDown={(e) => e.stopPropagation()} onClick={() => removeNode(id)} title="Remove from board" className="absolute -top-2 -left-2 w-5 h-5 rounded-full bg-white border text-[11px] leading-none text-slate-500 hover:text-red-600 hidden group-hover:block">×</button>
+                  <span data-handle="1" onPointerDown={(e) => startConnect(e, id)} title="Drag to the Team Lead" className="absolute top-1/2 -right-[7px] -translate-y-1/2 w-3.5 h-3.5 rounded-full bg-blue-600 border-2 border-white cursor-crosshair" />
+                </div>
+              );
+            })}
+            {placed.length === 0 && <p className="absolute inset-0 flex items-center justify-center text-sm text-muted-foreground pointer-events-none">Drag people here from the list on the left</p>}
+          </div>
         </div>
       </div>
+      {tlIds.length > 0 && (
+        <div className="flex flex-wrap gap-2 text-xs">
+          {tlIds.map((id) => <span key={id} className="inline-flex items-center gap-1.5 bg-card border rounded-full px-3 py-1"><span className="w-3 h-1.5 rounded" style={{ background: color(id) }} />{empName(id)}'s team ({links.filter((l) => l.tlId === id).length})</span>)}
+        </div>
+      )}
     </div>
   );
 }
