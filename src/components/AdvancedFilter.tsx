@@ -230,7 +230,33 @@ export default function AdvancedFilter({ scope, fields, value, onChange }: {
   const [saveName, setSaveName] = useState('');
   const [share, setShare] = useState(false);
   const [error, setError] = useState('');
+  const dateFields = fields.filter((f) => f.type === 'date');
+  const [rField, setRField] = useState('');
+  const [rFrom, setRFrom] = useState('');
+  const [rTo, setRTo] = useState('');
   const n = countConditions(value);
+  const iso = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  const quick = (k: 'today' | 'yesterday' | '7' | '30' | 'month' | 'lastmonth') => {
+    const now = new Date(); const day = (o: number) => new Date(now.getFullYear(), now.getMonth(), now.getDate() + o);
+    if (k === 'today') { setRFrom(iso(day(0))); setRTo(iso(day(0))); }
+    else if (k === 'yesterday') { setRFrom(iso(day(-1))); setRTo(iso(day(-1))); }
+    else if (k === '7') { setRFrom(iso(day(-6))); setRTo(iso(day(0))); }
+    else if (k === '30') { setRFrom(iso(day(-29))); setRTo(iso(day(0))); }
+    else if (k === 'month') { setRFrom(iso(new Date(now.getFullYear(), now.getMonth(), 1))); setRTo(iso(day(0))); }
+    else { setRFrom(iso(new Date(now.getFullYear(), now.getMonth() - 1, 1))); setRTo(iso(new Date(now.getFullYear(), now.getMonth(), 0))); }
+  };
+  // Adds "<date field> is between <from> and <to>" to the filter (always combined with ALL of the rest).
+  const addRange = () => {
+    const key = rField || dateFields[0]?.key;
+    if (!key || !rFrom || !rTo) { setError('Pick the date field and both dates'); return; }
+    if (rFrom > rTo) { setError('The "from" date is after the "to" date'); return; }
+    setError('');
+    const cond: FilterCondition = { field: key, op: 'between', value: [rFrom, rTo] };
+    const rest = cleanTree(draft, fields);
+    const withoutSame = (g: FilterGroup): FilterGroup => ({ ...g, children: g.children.filter((c) => isGroup(c) || !(c.field === key && c.op === 'between')) });
+    setDraft(rest.logic === 'AND' ? { ...withoutSame(rest), children: [...withoutSame(rest).children, cond] } : { logic: 'AND', children: [rest, cond] });
+    setRFrom(''); setRTo('');
+  };
 
   const loadSaved = useCallback(() => {
     api.get('/api/saved-filters', { params: { scope } }).then((r) => { setSaved(r.data.data); setCanShare(!!r.data.canShare); }).catch(() => setSaved([]));
@@ -281,6 +307,26 @@ export default function AdvancedFilter({ scope, fields, value, onChange }: {
                     {(s.mine || canShare) && <button onClick={() => del(s.id)} title="Delete saved filter" className="text-muted-foreground hover:text-red-600"><X className="w-3 h-3" /></button>}
                   </span>
                 ))}
+              </div>
+            )}
+
+            {dateFields.length > 0 && (
+              <div className="rounded-xl border p-3 space-y-2 bg-blue-50/40">
+                <p className="text-sm font-medium">Date range</p>
+                <div className="flex flex-wrap items-center gap-2">
+                  <select className="px-2 py-1.5 border rounded-lg text-sm bg-white" value={rField || dateFields[0].key} onChange={(e) => setRField(e.target.value)}>
+                    {dateFields.map((f) => <option key={f.key} value={f.key}>{f.label}</option>)}
+                  </select>
+                  <input type="date" className="px-2 py-1.5 border rounded-lg text-sm bg-white" value={rFrom} onChange={(e) => setRFrom(e.target.value)} />
+                  <span className="text-xs text-muted-foreground">to</span>
+                  <input type="date" className="px-2 py-1.5 border rounded-lg text-sm bg-white" value={rTo} onChange={(e) => setRTo(e.target.value)} />
+                  <button onClick={addRange} className="px-3 py-1.5 rounded-lg bg-blue-600 text-white text-sm">Add range</button>
+                </div>
+                <div className="flex flex-wrap gap-1.5 text-xs">
+                  {([['today', 'Today'], ['yesterday', 'Yesterday'], ['7', 'Last 7 days'], ['30', 'Last 30 days'], ['month', 'This month'], ['lastmonth', 'Last month']] as const).map(([k, l]) => (
+                    <button key={k} onClick={() => quick(k)} className="px-2.5 py-1 rounded-full border bg-white hover:bg-muted/50">{l}</button>
+                  ))}
+                </div>
               </div>
             )}
 
