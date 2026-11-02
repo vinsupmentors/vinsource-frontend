@@ -554,7 +554,10 @@ export default function SalesPage() {
   const isAdmin = hasModule('SALES', 'ADMIN');
   const [presalesIds, setPresalesIds] = useState<string[]>([]);
   const [isPresales, setIsPresales] = useState(false);
-  const loadPresales = useCallback(() => { api.get('/api/sales/presales').then((r) => { setPresalesIds(r.data.data.ids); setIsPresales(!!r.data.data.mine); }).catch(() => {}); }, []);
+  const [isTl, setIsTl] = useState(false);
+  const [myEmpId, setMyEmpId] = useState('');
+  const [myLeadsOnly, setMyLeadsOnly] = useState(false);
+  const loadPresales = useCallback(() => { api.get('/api/sales/presales').then((r) => { setPresalesIds(r.data.data.ids); setIsPresales(!!r.data.data.mine); setIsTl(!!r.data.data.isTl); setMyEmpId(r.data.data.employeeId || ''); }).catch(() => {}); }, []);
   useEffect(() => { loadPresales(); }, [loadPresales]);
 
   const [searchParams, setSearchParams] = useSearchParams();
@@ -652,6 +655,7 @@ export default function SalesPage() {
       if (statusFilter) params.status = statusFilter;
       if (activityFilter) params.activityStatus = activityFilter;
       if (assignedFilter) params.assignedToId = assignedFilter;
+      if (myLeadsOnly && myEmpId) params.assignedToId = myEmpId;
       if (sourceFilter) params.source = sourceFilter;
       if (scoutFilter) params.scoutKey = scoutFilter;
       if (tlFilter) {
@@ -683,7 +687,7 @@ export default function SalesPage() {
     } finally {
       setLoading(false);
     }
-  }, [page, search, statusFilter, activityFilter, followUpFilter, assignedFilter, sourceFilter, scoutFilter, tlFilter, teamMap, createdFrom, createdTo, followFrom, followTo, advFilter, pageSize, sortBy, sortDir, nameLike, phoneLike, emailLike]);
+  }, [page, search, statusFilter, activityFilter, followUpFilter, assignedFilter, sourceFilter, scoutFilter, tlFilter, teamMap, myLeadsOnly, myEmpId, createdFrom, createdTo, followFrom, followTo, advFilter, pageSize, sortBy, sortDir, nameLike, phoneLike, emailLike]);
 
   useEffect(() => { if (level && tab === 'leads') fetchAll(); }, [level, tab, fetchAll]);
 
@@ -921,6 +925,12 @@ export default function SalesPage() {
             {isAdmin && (
               <MultiSelect label="Assigned to" value={assignedFilter} onChange={setAssignedFilter}
                 options={[{ value: 'NONE', label: 'Unassigned' }, ...employees.map((e) => ({ value: e.id, label: `${e.firstName} ${e.lastName}` }))]} />
+            )}
+            {isTl && !isAdmin && (
+              <button type="button" onClick={() => { setMyLeadsOnly((v) => !v); setPage(1); }}
+                className={`px-3 py-2 border rounded-lg text-sm font-medium ${myLeadsOnly ? 'bg-blue-600 text-white border-blue-600' : 'hover:bg-muted/50'}`}>
+                My Leads
+              </button>
             )}
             {isAdmin && Object.keys(teamMap).length > 0 && (
               <MultiSelect label="Team Lead" value={tlFilter} onChange={setTlFilter}
