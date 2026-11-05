@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback } from 'react';
-import { ProofThumb, CourseFeesModal } from './SalesOnboarding';
+import { ProofThumb, ProofOpenLink, CourseFeesModal } from './SalesOnboarding';
 import api from '@/lib/api';
 import { useModuleAccess } from '@/hooks/useModuleAccess';
 import { Lock, Plus, X, Wallet, TrendingUp, Receipt, Search, Trash2, CheckCircle2, Ban, Users, AlertTriangle, Percent } from 'lucide-react';
@@ -500,6 +500,7 @@ export default function FinanceSalesPage() {
                   <th className="px-3 py-3">Vinsup Amount</th>
                   <th className="px-3 py-3">Next Due</th>
                   <th className="px-3 py-3">Mode of payment</th>
+                  <th className="px-3 py-3">Transaction ID</th>
                   <th className="px-3 py-3">Status</th>
                   <th className="px-3 py-3">Actions</th>
                   <th className="px-3 py-3">Advisor</th>
@@ -507,9 +508,9 @@ export default function FinanceSalesPage() {
               </thead>
               <tbody className="divide-y">
                 {plansLoading ? (
-                  <tr><td colSpan={13} className="px-4 py-8 text-center text-muted-foreground">Loading...</td></tr>
+                  <tr><td colSpan={14} className="px-4 py-8 text-center text-muted-foreground">Loading...</td></tr>
                 ) : payRows.length === 0 ? (
-                  <tr><td colSpan={13} className="px-4 py-8 text-center text-muted-foreground">No students registered yet</td></tr>
+                  <tr><td colSpan={14} className="px-4 py-8 text-center text-muted-foreground">No students registered yet</td></tr>
                 ) : payRows.map(({ key, plan: p, inst, date, last }) => {
                   const next = last ? nextDueOf(p) : null;
                   const declare = last && needsDeclaration(p);
@@ -544,12 +545,12 @@ export default function FinanceSalesPage() {
                         {inst ? (
                           <>
                             <span className="text-xs font-medium px-2 py-1 rounded-full bg-purple-100 text-purple-700">{(inst.mode || 'UPI').replace('_', ' ')}</span>
-                            {inst.reference && <p className="text-[11px] text-muted-foreground mt-1">Ref {inst.reference}</p>}
-                            {inst.amountMatched === false && <p className="text-[11px] text-red-600">⚠ Screenshot shows {fmt(inst.ocrAmount || 0)}</p>}
-                            {inst.proofFile && <ProofThumb url={`/api/finance-sales/installments/${inst.id}/proof`} />}
+                            {inst.proofFile && <div><ProofOpenLink url={`/api/finance-sales/installments/${inst.id}/proof`} /></div>}
+                            {inst.amountMatched === false && <p className="text-[11px] text-red-600 mt-1">⚠ Screenshot shows {fmt(inst.ocrAmount || 0)}</p>}
                           </>
                         ) : <span className="text-muted-foreground">—</span>}
                       </td>
+                      <td className="px-3 py-3 text-xs whitespace-nowrap font-mono">{inst?.reference || <span className="text-muted-foreground">—</span>}</td>
                       <td className="px-3 py-3">
                         {inst ? (
                           <span className={`text-[11px] font-medium rounded-full px-2 py-1 whitespace-nowrap ${INSTALLMENT_STATUS_COLOR[inst.status]}`}>{inst.status === 'PAID' ? 'Approved' : inst.status === 'PENDING_APPROVAL' ? 'With Finance' : inst.status}</span>

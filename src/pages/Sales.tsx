@@ -542,8 +542,8 @@ function MultiSelect({ label, options, value, onChange }: {
 }
 
 // ── Main page ────────────────────────────────────────────────────────────
-type Tab = 'collections' | 'dashboard' | 'leads' | 'reminders' | 'tasks' | 'summaries' | 'activityMonitor' | 'pulse' | 'leadQuality' | 'liveDemos' | 'demoBooked' | 'demoRescheduled' | 'demoConducted' | 'devices' | 'unmatchedCalls' | 'callLog' | 'leaderboard' | 'targets' | 'myBase' | 'batches' | 'leadControl' | 'today' | 'callAnalytics' | 'config' | 'transcripts' | 'teams' | 'presales' | 'demoReports';
-const VALID_TABS: Tab[] = ['collections', 'dashboard', 'transcripts', 'config', 'leads', 'reminders', 'tasks', 'summaries', 'activityMonitor', 'pulse', 'leadQuality', 'liveDemos', 'demoBooked', 'demoRescheduled', 'demoConducted', 'devices', 'unmatchedCalls', 'callLog', 'leaderboard', 'targets', 'myBase', 'batches', 'leadControl', 'today', 'callAnalytics', 'teams', 'presales', 'demoReports'];
+type Tab = 'collections' | 'dashboard' | 'leads' | 'reminders' | 'tasks' | 'summaries' | 'activityMonitor' | 'pulse' | 'leadQuality' | 'liveDemos' | 'demoBooked' | 'demoRescheduled' | 'demoConducted' | 'devices' | 'unmatchedCalls' | 'callLog' | 'leaderboard' | 'targets' | 'myBase' | 'batches' | 'leadControl' | 'today' | 'callAnalytics' | 'config' | 'transcripts' | 'teams' | 'presales' | 'demoReports' | 'metaLeads';
+const VALID_TABS: Tab[] = ['collections', 'dashboard', 'transcripts', 'config', 'leads', 'reminders', 'tasks', 'summaries', 'activityMonitor', 'pulse', 'leadQuality', 'liveDemos', 'demoBooked', 'demoRescheduled', 'demoConducted', 'devices', 'unmatchedCalls', 'callLog', 'leaderboard', 'targets', 'myBase', 'batches', 'leadControl', 'today', 'callAnalytics', 'teams', 'presales', 'demoReports', 'metaLeads'];
 // Sales Pulse / Lead Quality are aggregate, cross-rep views — admin only.
 // BDAs get Demo Booked/Rescheduled/Conducted instead, scoped to their own leads.
 // Devices (issuing call-tracking tokens) is admin-only too. Unmatched Calls
@@ -551,7 +551,7 @@ const VALID_TABS: Tab[] = ['collections', 'dashboard', 'transcripts', 'config', 
 // and BDAs can see and work it. Leaderboard/Targets are management-level KPI
 // views, same access tier as Pulse/Lead Quality. "My Students" lives on its
 // own top-level page (see MyStudents.tsx), not as a Sales tab.
-const ADMIN_ONLY_TABS: Tab[] = ['config', 'myBase', 'batches', 'leadControl', 'summaries', 'activityMonitor', 'pulse', 'leadQuality', 'liveDemos', 'devices', 'leaderboard', 'targets', 'teams', 'presales', 'demoReports'];
+const ADMIN_ONLY_TABS: Tab[] = ['config', 'myBase', 'batches', 'leadControl', 'summaries', 'activityMonitor', 'pulse', 'leadQuality', 'liveDemos', 'devices', 'leaderboard', 'targets', 'teams', 'presales', 'demoReports', 'metaLeads'];
 const BDA_ONLY_TABS: Tab[] = ['demoBooked', 'demoRescheduled', 'demoConducted'];
 const EDIT_REQUIRED_TABS: Tab[] = ['unmatchedCalls'];
 
@@ -866,6 +866,7 @@ export default function SalesPage() {
               { id: 'teams' as Tab, label: 'Teams', icon: Users },
               { id: 'presales' as Tab, label: 'Presales', icon: Users },
               { id: 'demoReports' as Tab, label: 'Demo Reports', icon: Calendar },
+              { id: 'metaLeads' as Tab, label: 'Meta Leads', icon: Link2 },
               { id: 'leadQuality' as Tab, label: 'Lead Quality', icon: Percent },
               { id: 'liveDemos' as Tab, label: 'Live Demos', icon: Video },
               { id: 'unmatchedCalls' as Tab, label: 'Unmatched Calls', icon: PhoneIncoming },
@@ -1150,6 +1151,7 @@ export default function SalesPage() {
 
       {tab === 'targets' && isAdmin && <TargetsPanel employees={employees} />}
       {tab === 'teams' && isAdmin && <TeamsPanel employees={employees} />}
+      {tab === 'metaLeads' && isAdmin && <MetaLeadsPanel employees={employees} />}
       {tab === 'demoReports' && isAdmin && <DemoReportsPanel onOpenLead={openLeadDetail} />}
       {tab === 'presales' && isAdmin && <PresalesPanel employees={employees} onChanged={loadPresales} />}
 
@@ -5247,6 +5249,120 @@ function TeamsPanel({ employees }: { employees: EmployeeLite[] }) {
           {tlIds.map((id) => <span key={id} className="inline-flex items-center gap-1.5 bg-card border rounded-full px-3 py-1"><span className="w-3 h-1.5 rounded" style={{ background: color(id) }} />{empName(id)}'s team ({links.filter((l) => l.tlId === id).length})</span>)}
         </div>
       )}
+    </div>
+  );
+}
+
+// ── Meta Leads: Facebook / Instagram Lead Ads → portal (webhook + Graph API).
+interface MetaCfg { enabled: boolean; assignMode: 'MY_BASE' | 'ROUND_ROBIN' | 'FIXED'; fixedOwnerId: string | null; roundRobinIds: string | null; defaultCourse: string | null; formCourseMap: string | null; lastLeadAt: string | null; lastError: string | null }
+interface MetaEvent { id: string; leadgenId: string; status: string; attempts: number; leadId: string | null; name: string | null; phone: string | null; campaign: string | null; error: string | null; createdAt: string }
+interface MetaData { config: MetaCfg; ready: { appSecret: boolean; verifyToken: boolean; pageToken: boolean; graphVersion: string }; maxAttempts: number; counts: Record<string, number>; events: MetaEvent[] }
+function MetaLeadsPanel({ employees }: { employees: EmployeeLite[] }) {
+  const [d, setD] = useState<MetaData | null>(null);
+  const [form, setForm] = useState<MetaCfg | null>(null);
+  const [rr, setRr] = useState<string[]>([]);
+  const [error, setError] = useState('');
+  const [msg, setMsg] = useState('');
+  const [busy, setBusy] = useState('');
+  const [tokenCheck, setTokenCheck] = useState<{ ok: boolean; name?: string; error?: string } | null>(null);
+  const errOf = (e: unknown, fb: string) => (e as { response?: { data?: { message?: string } } }).response?.data?.message || fb;
+  const load = useCallback(() => {
+    api.get('/api/sales/meta-leads').then((r) => { const x = r.data.data as MetaData; setD(x); setForm(x.config); setRr((x.config.roundRobinIds || '').split(',').filter(Boolean)); }).catch((e) => setError(errOf(e, 'Could not load Meta Leads')));
+  }, []);
+  useEffect(() => { load(); }, [load]);
+  if (!d || !form) return <p className="text-sm text-muted-foreground">{error || 'Loading...'}</p>;
+  const webhook = `${window.location.origin}/api/public/meta-webhook`;
+  const save = async () => {
+    setBusy('save'); setError(''); setMsg('');
+    try { await api.put('/api/sales/meta-leads', { ...form, roundRobinIds: rr }); setMsg('Saved.'); load(); } catch (e) { setError(errOf(e, 'Could not save')); } finally { setBusy(''); }
+  };
+  const test = async () => {
+    setBusy('test'); setError('');
+    try { const r = await api.post('/api/sales/meta-leads/test'); setTokenCheck(r.data.data.token); } catch (e) { setError(errOf(e, 'Test failed')); } finally { setBusy(''); }
+  };
+  const retry = async (id: string) => {
+    setBusy(id); setError('');
+    try { await api.post(`/api/sales/meta-leads/events/${id}/retry`); load(); } catch (e) { setError(errOf(e, 'Retry failed')); } finally { setBusy(''); }
+  };
+  const inp = 'border rounded-lg px-3 py-2 text-sm bg-background w-full';
+  const tick = (ok: boolean, label: string) => <li className="flex items-center gap-2 text-sm">{ok ? <Check className="w-4 h-4 text-green-600" /> : <X className="w-4 h-4 text-red-500" />}<span className={ok ? '' : 'text-red-700'}>{label}</span></li>;
+  const stCls: Record<string, string> = { PROCESSED: 'bg-green-100 text-green-700', DUPLICATE: 'bg-blue-100 text-blue-700', FAILED: 'bg-red-100 text-red-700', RECEIVED: 'bg-amber-100 text-amber-800' };
+  const copy = (t: string) => { navigator.clipboard?.writeText(t); setMsg('Copied.'); };
+  return (
+    <div className="space-y-5 max-w-5xl">
+      <p className="text-sm text-muted-foreground">New Facebook / Instagram Lead Ad enquiries arrive here automatically within seconds and are created as leads with source <b>Meta</b>. Repeat enquiries from the same phone number are added as a note on the existing lead.</p>
+      {error && <div className="bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg px-4 py-3">{error}</div>}
+      {msg && <div className="bg-green-50 border border-green-200 text-green-700 text-sm rounded-lg px-4 py-2">{msg}</div>}
+
+      <div className="grid md:grid-cols-2 gap-4">
+        <section className="border rounded-xl p-4 bg-card space-y-3">
+          <h3 className="font-semibold text-sm">Connection</h3>
+          <ul className="space-y-1.5">
+            {tick(d.ready.appSecret, 'App secret set on the server (META_APP_SECRET)')}
+            {tick(d.ready.verifyToken, 'Verify token set on the server (META_VERIFY_TOKEN)')}
+            {tick(d.ready.pageToken, 'Page access token set on the server (META_PAGE_TOKEN)')}
+          </ul>
+          <p className="text-xs text-muted-foreground">Graph API version: {d.ready.graphVersion}</p>
+          <div className="space-y-1">
+            <p className="text-xs text-muted-foreground">Callback URL (paste into the Meta app → Webhooks → Page → leadgen)</p>
+            <div className="flex gap-2"><input readOnly value={webhook} className={`${inp} font-mono text-xs`} /><button onClick={() => copy(webhook)} className="px-3 border rounded-lg text-sm"><Copy className="w-4 h-4" /></button></div>
+          </div>
+          <div className="flex items-center gap-3">
+            <button onClick={test} disabled={busy === 'test'} className="px-3 py-2 border rounded-lg text-sm">{busy === 'test' ? 'Checking...' : 'Test Page token'}</button>
+            {tokenCheck && (tokenCheck.ok ? <span className="text-sm text-green-700">Connected to Page: <b>{tokenCheck.name}</b></span> : <span className="text-sm text-red-600">{tokenCheck.error}</span>)}
+          </div>
+          <p className="text-xs text-muted-foreground">Last lead received: {d.config.lastLeadAt ? formatDateTime(d.config.lastLeadAt) : 'none yet'}{d.config.lastError && <span className="block text-red-600 mt-1">Last error: {d.config.lastError}</span>}</p>
+        </section>
+
+        <section className="border rounded-xl p-4 bg-card space-y-3">
+          <h3 className="font-semibold text-sm">Settings</h3>
+          <label className="flex items-center gap-2 text-sm font-medium"><input type="checkbox" checked={form.enabled} onChange={(e) => setForm({ ...form, enabled: e.target.checked })} /> Create leads from Meta (switch on once Meta is connected)</label>
+          <label className="text-xs text-muted-foreground block">Who gets new Meta leads
+            <select className={`${inp} mt-1`} value={form.assignMode} onChange={(e) => setForm({ ...form, assignMode: e.target.value as MetaCfg['assignMode'] })}>
+              <option value="MY_BASE">Nobody — put in My Base, assign later</option>
+              <option value="ROUND_ROBIN">Round-robin across selected salespeople</option>
+              <option value="FIXED">One fixed owner</option>
+            </select>
+          </label>
+          {form.assignMode === 'FIXED' && (
+            <select className={inp} value={form.fixedOwnerId || ''} onChange={(e) => setForm({ ...form, fixedOwnerId: e.target.value })}><option value="">Choose owner…</option>{employees.map((e) => <option key={e.id} value={e.id}>{e.firstName} {e.lastName}</option>)}</select>
+          )}
+          {form.assignMode === 'ROUND_ROBIN' && (
+            <div className="border rounded-lg p-2 max-h-40 overflow-y-auto space-y-1">
+              {employees.map((e) => <label key={e.id} className="flex items-center gap-2 text-sm"><input type="checkbox" checked={rr.includes(e.id)} onChange={() => setRr((c) => (c.includes(e.id) ? c.filter((x) => x !== e.id) : [...c, e.id]))} /> {e.firstName} {e.lastName}</label>)}
+            </div>
+          )}
+          <label className="text-xs text-muted-foreground block">Default course (when the form doesn't ask)<input className={`${inp} mt-1`} value={form.defaultCourse || ''} onChange={(e) => setForm({ ...form, defaultCourse: e.target.value })} /></label>
+          <label className="text-xs text-muted-foreground block">Course per form — one per line: <code>form name or form id = Course</code>
+            <textarea rows={3} className={`${inp} mt-1 font-mono text-xs`} value={form.formCourseMap || ''} onChange={(e) => setForm({ ...form, formCourseMap: e.target.value })} placeholder={'Digital Marketing Nov = Digital Marketing\n123456789012345 = Data Analytics'} />
+          </label>
+          <button onClick={save} disabled={busy === 'save'} className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium disabled:opacity-50">{busy === 'save' ? 'Saving...' : 'Save settings'}</button>
+        </section>
+      </div>
+
+      <section className="space-y-2">
+        <div className="flex items-center gap-4">
+          <h3 className="font-semibold text-sm">Recent Meta leads</h3>
+          <span className="text-xs text-muted-foreground">Created {d.counts.PROCESSED || 0} · Repeat {d.counts.DUPLICATE || 0} · <span className={d.counts.FAILED ? 'text-red-600 font-semibold' : ''}>Needs attention {d.counts.FAILED || 0}</span></span>
+          <button onClick={load} className="ml-auto text-xs text-blue-600 hover:underline">Refresh</button>
+        </div>
+        <div className="bg-card border rounded-xl overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead className="bg-muted/50 text-left text-xs uppercase text-muted-foreground"><tr><th className="px-3 py-2">Received</th><th className="px-3 py-2">Name</th><th className="px-3 py-2">Phone</th><th className="px-3 py-2">Campaign</th><th className="px-3 py-2">Result</th><th className="px-3 py-2"></th></tr></thead>
+            <tbody className="divide-y">
+              {d.events.length === 0 && <tr><td colSpan={6} className="px-4 py-6 text-center text-muted-foreground">Nothing received yet</td></tr>}
+              {d.events.map((e) => (
+                <tr key={e.id} className="align-top hover:bg-muted/30">
+                  <td className="px-3 py-2 whitespace-nowrap text-xs">{formatDateTime(e.createdAt)}</td>
+                  <td className="px-3 py-2">{e.name || '—'}</td><td className="px-3 py-2 whitespace-nowrap">{e.phone || '—'}</td><td className="px-3 py-2 text-xs">{e.campaign || '—'}</td>
+                  <td className="px-3 py-2"><span className={`text-[11px] font-medium rounded-full px-2 py-1 ${stCls[e.status] || ''}`}>{e.status === 'PROCESSED' ? 'Lead created' : e.status === 'DUPLICATE' ? 'Repeat enquiry' : e.status === 'FAILED' ? 'Needs attention' : 'Received'}</span>{e.error && <p className="text-[11px] text-red-600 mt-1 max-w-xs">{e.error} {e.attempts > 0 && `(tried ${e.attempts}/${d.maxAttempts})`}</p>}</td>
+                  <td className="px-3 py-2">{e.status === 'FAILED' && <button onClick={() => retry(e.id)} disabled={busy === e.id} className="text-xs text-blue-600 hover:underline">{busy === e.id ? 'Retrying…' : 'Retry'}</button>}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </section>
     </div>
   );
 }

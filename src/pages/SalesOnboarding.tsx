@@ -289,6 +289,22 @@ export function ProofThumb({ url }: { url: string }) {
   return <a href={src} target="_blank" rel="noreferrer"><img src={src} alt="Payment proof" className="mt-1 h-24 rounded border object-cover" /></a>;
 }
 
+/** Small "Screenshot" link — the image is only fetched and opened (new tab) when clicked. */
+export function ProofOpenLink({ url }: { url: string }) {
+  const [busy, setBusy] = useState(false);
+  const open = async () => {
+    const w = window.open('', '_blank'); // opened first so the browser doesn't block it
+    setBusy(true);
+    try {
+      const r = await api.get(url, { responseType: 'blob' });
+      const obj = URL.createObjectURL(r.data);
+      if (w) w.location.href = obj; else window.open(obj, '_blank');
+    } catch { if (w) w.close(); window.alert('Screenshot unavailable'); }
+    finally { setBusy(false); }
+  };
+  return <button type="button" onClick={open} disabled={busy} className="text-xs text-blue-600 hover:underline mt-1 inline-flex items-center gap-1">{busy ? 'Opening…' : 'View screenshot'}</button>;
+}
+
 /** Fee master: what each course costs. Sales Admin / Finance (Sales) Admin only. */
 export function CourseFeesModal({ base, onClose }: { base: '/api/sales' | '/api/finance-sales'; onClose: () => void }) {
   const [rows, setRows] = useState<{ id: string; courseName: string; fee: number }[]>([]);
