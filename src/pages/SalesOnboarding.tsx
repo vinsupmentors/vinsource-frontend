@@ -150,6 +150,7 @@ export function OnboardingModal({ leadId, leadName, defaultCourse, onClose, onDo
     if (method === 'EMI' && !emiMonths) return setError('Choose the number of EMI months');
     if (quote && regPaid && Number(pay.amount) > quote.downPayment + 0.5) return setError(`The amount collected can't be more than the down payment (${formatCurrency(quote.downPayment)})`);
     if (regPaid && (!Number(pay.amount) || !pay.file)) return setError('Enter the amount collected and attach the screenshot');
+    if (regPaid && Number(totalFee) > 0 && Number(pay.amount) > Number(totalFee) + 0.5) return setError(`The amount collected (${formatCurrency(Number(pay.amount))}) is more than the course fee (${formatCurrency(Number(totalFee))})`);
     setSaving(true);
     try {
       const fd = new FormData();
@@ -414,7 +415,8 @@ export function LeadFeesPanel({ leadId, onboarding, canEdit, isAdmin, onChanged 
 // ── EMI menu ──
 interface EmiRow {
   planId: string; courseName: string; months?: number | null; ratePct?: number | null; fee: number; total: number; paid: number; awaiting: number; balance: number;
-  paidCount: number; overdueCount: number; overdueAmount: number; nextDue: { dueDate: string; amount: number } | null;
+  interest: number; vinsup: number; paidInterest: number; paidVinsup: number;
+  paidCount: number; overdueCount: number; overdueAmount: number; nextDue: { dueDate: string; amount: number; interest: number; vinsup: number } | null;
   lead: { id: string; name: string; phone: string; assignedTo?: { firstName: string; lastName: string } | null };
 }
 export function EmiPanel() {
@@ -430,25 +432,28 @@ export function EmiPanel() {
   const sum = (f: (r: EmiRow) => number) => list.reduce((n, r) => n + f(r), 0);
   return (
     <div className="space-y-4">
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-        {([['EMI students', String(list.length), ''], ['Collected', formatCurrency(sum((r) => r.paid)), 'text-green-700'], ['Balance to collect', formatCurrency(sum((r) => r.balance)), ''], ['Overdue', formatCurrency(sum((r) => r.overdueAmount)), 'text-red-600']] as [string, string, string][]).map(([l, v, c]) => (
+      <div className="grid grid-cols-2 md:grid-cols-6 gap-3">
+        {([['EMI students', String(list.length), ''], ['Collected', formatCurrency(sum((r) => r.paid)), 'text-green-700'], ['Vinsup amount collected', formatCurrency(sum((r) => r.paidVinsup)), ''], ['Interest collected', formatCurrency(sum((r) => r.paidInterest)), 'text-amber-700'], ['Balance to collect', formatCurrency(sum((r) => r.balance)), ''], ['Overdue', formatCurrency(sum((r) => r.overdueAmount)), 'text-red-600']] as [string, string, string][]).map(([l, v, c]) => (
           <div key={l} className="border rounded-xl p-3"><p className="text-xs text-muted-foreground">{l}</p><p className={`text-lg font-bold ${c}`}>{v}</p></div>
         ))}
       </div>
       <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={onlyOverdue} onChange={(e) => setOnlyOverdue(e.target.checked)} /> Only students with overdue EMIs</label>
       <div className="border rounded-xl overflow-x-auto bg-card">
         <table className="w-full text-sm">
-          <thead className="text-left text-xs text-muted-foreground bg-muted/40"><tr><th className="px-4 py-2">Student</th><th>Course</th><th>Owner</th><th>Plan</th><th>Paid</th><th>Balance</th><th>Next due</th><th>Overdue</th></tr></thead>
+          <thead className="text-left text-xs text-muted-foreground bg-muted/40"><tr><th className="px-4 py-2">Student</th><th>Course</th><th>Owner</th><th>Plan</th><th>Total EMI</th><th>Vinsup amount</th><th>Interest</th><th>Paid</th><th>Balance</th><th>Next due</th><th>Overdue</th></tr></thead>
           <tbody className="divide-y">
-            {list.length === 0 ? <tr><td colSpan={8} className="px-4 py-8 text-center text-muted-foreground">No EMI students</td></tr> : list.map((r) => (
+            {list.length === 0 ? <tr><td colSpan={11} className="px-4 py-8 text-center text-muted-foreground">No EMI students</td></tr> : list.map((r) => (
               <tr key={r.planId} className="hover:bg-muted/30">
                 <td className="px-4 py-2 font-medium">{r.lead.name}<p className="text-xs text-muted-foreground font-normal">{r.lead.phone}</p></td>
                 <td>{r.courseName}</td>
                 <td className="text-xs">{r.lead.assignedTo ? `${r.lead.assignedTo.firstName} ${r.lead.assignedTo.lastName}` : '—'}</td>
                 <td className="text-xs">{r.months ?? '—'} months{r.ratePct != null ? ` · ${r.ratePct}%` : ''}<p className="text-muted-foreground">{r.paidCount}/{r.months ?? '?'} EMIs paid</p></td>
+                <td className="font-medium">{formatCurrency(r.total)}<p className="text-[11px] text-muted-foreground font-normal">fee + interest</p></td>
+                <td>{formatCurrency(r.vinsup)}<p className="text-[11px] text-muted-foreground">paid {formatCurrency(r.paidVinsup)}</p></td>
+                <td>{formatCurrency(r.interest)}<p className="text-[11px] text-muted-foreground">paid {formatCurrency(r.paidInterest)}</p></td>
                 <td className="text-green-700">{formatCurrency(r.paid)}{r.awaiting > 0 && <p className="text-[11px] text-amber-700">+{formatCurrency(r.awaiting)} with Finance</p>}</td>
                 <td>{formatCurrency(r.balance)}</td>
-                <td className="text-xs">{r.nextDue ? `${formatDate(r.nextDue.dueDate)} · ${formatCurrency(r.nextDue.amount)}` : '—'}</td>
+                <td className="text-xs">{r.nextDue ? <>{formatDate(r.nextDue.dueDate)} · {formatCurrency(r.nextDue.amount)}{r.nextDue.interest > 0 && <p className="text-[11px] text-muted-foreground">{formatCurrency(r.nextDue.vinsup)} Vinsup + {formatCurrency(r.nextDue.interest)} interest</p>}</> : '—'}</td>
                 <td className={r.overdueCount ? 'text-red-600 font-medium' : 'text-muted-foreground'}>{r.overdueCount ? `${r.overdueCount} · ${formatCurrency(r.overdueAmount)}` : '—'}</td>
               </tr>
             ))}

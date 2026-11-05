@@ -1,6 +1,6 @@
 import { useEffect, useState, useCallback } from 'react';
 import api from '@/lib/api';
-import { Filter, Plus, X, Trash2, Save } from 'lucide-react';
+import { Filter, Plus, X, Trash2, Save, Zap, ChevronDown } from 'lucide-react';
 
 /**
  * LeadSquared-style advanced filter: groups of conditions joined by AND / OR.
@@ -230,46 +230,50 @@ export default function AdvancedFilter({ scope, fields, value, onChange }: {
   const [saveName, setSaveName] = useState('');
   const [share, setShare] = useState(false);
   const [error, setError] = useState('');
+  const [qOpen, setQOpen] = useState(false);
   const dateFields = fields.filter((f) => f.type === 'date');
   const [rField, setRField] = useState('');
   const [rFrom, setRFrom] = useState('');
   const [rTo, setRTo] = useState('');
   const n = countConditions(value);
   const iso = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-  const quick = (k: 'today' | 'yesterday' | '7' | '30' | 'month' | 'lastmonth') => {
+  const rangeOf = (k: 'today' | 'yesterday' | '7' | '30' | 'month' | 'lastmonth'): [string, string] => {
     const now = new Date(); const day = (o: number) => new Date(now.getFullYear(), now.getMonth(), now.getDate() + o);
-    if (k === 'today') { setRFrom(iso(day(0))); setRTo(iso(day(0))); }
-    else if (k === 'yesterday') { setRFrom(iso(day(-1))); setRTo(iso(day(-1))); }
-    else if (k === '7') { setRFrom(iso(day(-6))); setRTo(iso(day(0))); }
-    else if (k === '30') { setRFrom(iso(day(-29))); setRTo(iso(day(0))); }
-    else if (k === 'month') { setRFrom(iso(new Date(now.getFullYear(), now.getMonth(), 1))); setRTo(iso(day(0))); }
-    else { setRFrom(iso(new Date(now.getFullYear(), now.getMonth() - 1, 1))); setRTo(iso(new Date(now.getFullYear(), now.getMonth(), 0))); }
+    if (k === 'today') return [iso(day(0)), iso(day(0))];
+    if (k === 'yesterday') return [iso(day(-1)), iso(day(-1))];
+    if (k === '7') return [iso(day(-6)), iso(day(0))];
+    if (k === '30') return [iso(day(-29)), iso(day(0))];
+    if (k === 'month') return [iso(new Date(now.getFullYear(), now.getMonth(), 1)), iso(day(0))];
+    return [iso(new Date(now.getFullYear(), now.getMonth() - 1, 1)), iso(new Date(now.getFullYear(), now.getMonth(), 0))];
   };
-  // Adds "<date field> is between <from> and <to>" to the filter (always combined with ALL of the rest).
-  const addRange = () => {
+  // "<date field> is between <from> and <to>", combined (AND) with whatever else is in the filter; replaces an earlier range on the same field.
+  const withRange = (tree: FilterGroup, from: string, to: string): FilterGroup => {
     const key = rField || dateFields[0]?.key;
-    if (!key || !rFrom || !rTo) { setError('Pick the date field and both dates'); return; }
-    if (rFrom > rTo) { setError('The "from" date is after the "to" date'); return; }
-    setError('');
-    const cond: FilterCondition = { field: key, op: 'between', value: [rFrom, rTo] };
-    const rest = cleanTree(draft, fields);
-    const withoutSame = (g: FilterGroup): FilterGroup => ({ ...g, children: g.children.filter((c) => isGroup(c) || !(c.field === key && c.op === 'between')) });
-    setDraft(rest.logic === 'AND' ? { ...withoutSame(rest), children: [...withoutSame(rest).children, cond] } : { logic: 'AND', children: [rest, cond] });
-    setRFrom(''); setRTo('');
+    const cond: FilterCondition = { field: key, op: 'between', value: [from, to] };
+    const rest = cleanTree(tree, fields);
+    const kept = rest.children.filter((c) => isGroup(c) || !(c.field === key && c.op === 'between'));
+    return rest.logic === 'AND' ? { logic: 'AND', children: [...kept, cond] } : { logic: 'AND', children: [rest, cond] };
   };
-
+  const addRange = (from = rFrom, to = rTo) => {
+    if (!dateFields.length || !from || !to) { setError('Pick the date field and both dates'); return; }
+    if (from > to) { setError('The "from" date is after the "to" date'); return; }
+    setError(''); setDraft(withRange(draft, from, to)); setRFrom(''); setRTo('');
+  };
+  const quick = (k: 'today' | 'yesterday' | '7' | '30' | 'month' | 'lastmonth') => { const [f, t] = rangeOf(k); addRange(f, t); };
   const loadSaved = useCallback(() => {
     api.get('/api/saved-filters', { params: { scope } }).then((r) => { setSaved(r.data.data); setCanShare(!!r.data.canShare); }).catch(() => setSaved([]));
   }, [scope]);
+  useEffect(() => { loadSaved(); }, [loadSaved]);
   useEffect(() => { if (open) { setDraft(value && value.children.length ? value : { logic: 'AND', children: [{ field: fields[0].key, op: OPS[fields[0].type][0].value }] }); setError(''); loadSaved(); } /* eslint-disable-next-line */ }, [open]);
 
+  const pending = (): FilterGroup => (dateFields.length && rFrom && rTo && rFrom <= rTo ? withRange(draft, rFrom, rTo) : draft);
   const apply = () => {
-    const cleaned = cleanTree(draft, fields);
+    const cleaned = cleanTree(pending(), fields);
     onChange(cleaned.children.length ? cleaned : null);
     setOpen(false);
   };
   const save = async () => {
-    const cleaned = cleanTree(draft, fields);
+    const cleaned = cleanTree(pending(), fields);
     if (!cleaned.children.length) { setError('Add at least one complete condition first'); return; }
     if (!saveName.trim()) { setError('Give the filter a name to save it'); return; }
     try {
@@ -284,6 +288,28 @@ export default function AdvancedFilter({ scope, fields, value, onChange }: {
       <button onClick={() => setOpen(true)} className={`px-3 py-2 border rounded-lg text-sm flex items-center gap-2 ${n ? 'border-blue-400 bg-blue-50 text-blue-700' : ''}`}>
         <Filter className="w-4 h-4" /> Advanced filter{n ? ` (${n})` : ''}
       </button>
+      <div className="relative">
+        <button onClick={() => { setQOpen((o) => !o); if (!qOpen) loadSaved(); }} className={`px-3 py-2 border rounded-lg text-sm flex items-center gap-2 ${qOpen ? 'bg-muted/50' : ''}`}>
+          <Zap className="w-4 h-4" /> Quick filters{saved.length > 0 && <span className="text-xs text-muted-foreground">({saved.length})</span>} <ChevronDown className="w-3 h-3" />
+        </button>
+        {qOpen && (
+          <>
+            <div className="fixed inset-0 z-20" onClick={() => setQOpen(false)} />
+            <div className="absolute z-30 mt-1 w-72 max-h-80 overflow-y-auto bg-white border rounded-lg shadow-lg p-1">
+              {saved.length === 0 && <p className="text-xs text-muted-foreground px-3 py-3">No saved filters yet. Build one in Advanced filter, name it and press Save — it will appear here.</p>}
+              {saved.map((sf) => (
+                <div key={sf.id} className="flex items-center gap-1 rounded hover:bg-muted/50 pr-1">
+                  <button onClick={() => { onChange(cleanTree(sf.tree, fields)); setQOpen(false); }} className="flex-1 text-left px-3 py-2 text-sm truncate" title={describeFilter(sf.tree, fields)}>
+                    {sf.name}{sf.shared && <span className="ml-2 text-[10px] text-muted-foreground">(shared)</span>}
+                  </button>
+                  {(sf.mine || canShare) && <button onClick={() => del(sf.id)} title="Delete" className="text-muted-foreground hover:text-red-600 p-1"><X className="w-3 h-3" /></button>}
+                </div>
+              ))}
+              {value && <button onClick={() => { onChange(null); setQOpen(false); }} className="w-full text-left text-xs text-blue-600 px-3 py-2 hover:underline border-t">Clear current filter</button>}
+            </div>
+          </>
+        )}
+      </div>
       {n > 0 && value && (
         <span className="text-xs bg-blue-50 text-blue-800 rounded-lg px-2 py-1 max-w-xl truncate" title={describeFilter(value, fields)}>
           {describeFilter(value, fields)} <button className="ml-1 font-semibold" onClick={() => onChange(null)} title="Clear"><X className="w-3 h-3 inline" /></button>
@@ -320,7 +346,7 @@ export default function AdvancedFilter({ scope, fields, value, onChange }: {
                   <input type="date" className="px-2 py-1.5 border rounded-lg text-sm bg-white" value={rFrom} onChange={(e) => setRFrom(e.target.value)} />
                   <span className="text-xs text-muted-foreground">to</span>
                   <input type="date" className="px-2 py-1.5 border rounded-lg text-sm bg-white" value={rTo} onChange={(e) => setRTo(e.target.value)} />
-                  <button onClick={addRange} className="px-3 py-1.5 rounded-lg bg-blue-600 text-white text-sm">Add range</button>
+                  <button onClick={() => addRange()} className="px-3 py-1.5 rounded-lg bg-blue-600 text-white text-sm">Add range</button>
                 </div>
                 <div className="flex flex-wrap gap-1.5 text-xs">
                   {([['today', 'Today'], ['yesterday', 'Yesterday'], ['7', 'Last 7 days'], ['30', 'Last 30 days'], ['month', 'This month'], ['lastmonth', 'Last month']] as const).map(([k, l]) => (

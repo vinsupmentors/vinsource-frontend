@@ -42,10 +42,12 @@ interface LeadLite {
 interface Installment {
   id: string; dueDate: string; amount: number; status: FeeInstallmentStatus;
   paidAt?: string | null; mode?: PaymentMode | null; receivedBy?: EmployeeLite | null;
+  reference?: string | null; proofFile?: string | null; ocrAmount?: number | null; amountMatched?: boolean | null;
+  kind?: string | null; emiMonthNumber?: number | null; rejectedAt?: string | null;
 }
 interface FeePlan {
   id: string; courseName: string; totalFee: number; planType: FeePlanType;
-  interestAmount?: number | null; status: FeePlanStatus; createdAt: string;
+  interestAmount?: number | null; downPayment?: number | null; emiMonths?: number | null; status: FeePlanStatus; createdAt: string;
   lead: LeadLite; createdBy?: EmployeeLite | null; installments: Installment[];
   refundRequestedAt?: string | null; refundAmount?: number | null; refundReason?: string | null; refundCompletedAt?: string | null;
   deletionRequestedAt?: string | null; deletionReason?: string | null;
@@ -140,6 +142,32 @@ function needsDeclaration(plan: FeePlan): boolean {
     totalCollectedOf(plan) < plan.totalFee
   );
 }
+/** An EMI plan's money has two parts: what Vinsup keeps (the course fee) and the interest. EMI instalments carry both
+ * (e.g. ₹5,600 = ₹5,000 Vinsup + ₹600 interest); the down payment and non-EMI payments are all Vinsup. */
+function splitOf(plan: FeePlan, inst: Installment): { interest: number; vinsup: number } {
+  const interestTotal = plan.interestAmount || 0;
+  if (plan.planType !== 'EMI' || interestTotal <= 0 || inst.kind !== 'EMI') return { interest: 0, vinsup: inst.amount };
+  const emiPool = Math.max(0, plan.totalFee - (plan.downPayment || 0)) + interestTotal;
+  const interest = emiPool > 0 ? Math.round(inst.amount * (interestTotal / emiPool)) : 0;
+  return { interest, vinsup: inst.amount - interest };
+}
+/** What the student pays in all: the fee, plus the interest for EMI students. */
+const totalPayableOf = (plan: FeePlan) => plan.totalFee + (plan.planType === 'EMI' ? plan.interestAmount || 0 : 0);
+
+interface PayRow { key: string; plan: FeePlan; inst: Installment | null; date: string; last: boolean }
+/** One row per payment (approved or with Finance); a plan with no payment yet still shows once. */
+function payRowsOf(plans: FeePlan[]): PayRow[] {
+  const rows: PayRow[] = [];
+  for (const plan of plans) {
+    const pays = plan.installments
+      .filter((i) => i.status === 'PAID' || i.status === 'PENDING_APPROVAL')
+      .sort((a, b) => new Date(a.paidAt || a.dueDate).getTime() - new Date(b.paidAt || b.dueDate).getTime());
+    if (!pays.length) rows.push({ key: plan.id, plan, inst: null, date: plan.createdAt, last: true });
+    else pays.forEach((inst, i) => rows.push({ key: inst.id, plan, inst, date: inst.paidAt || inst.dueDate, last: i === pays.length - 1 }));
+  }
+  return rows.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+}
+
 function isRefundPending(plan: FeePlan): boolean {
   return !!plan.refundRequestedAt && !plan.refundCompletedAt;
 }
@@ -176,6 +204,22 @@ export default function FinanceSalesPage() {
   const [planToFilter, setPlanToFilter] = useState('');
   const [showNewPlan, setShowNewPlan] = useState(false);
   const [openPlanId, setOpenPlanId] = useState<string | null>(null);
+  const [busyRow, setBusyRow] = useState<string | null>(null);
+  const payRows = payRowsOf(plans);
+  const approveRow = async (id: string) => {
+    setBusyRow(id);
+    try { await api.post(`/api/finance-sales/installments/${id}/approve`); await fetchPlans(); }
+    catch (err: unknown) { setError((err as { response?: { data?: { message?: string } } }).response?.data?.message || 'Failed to approve the payment'); }
+    finally { setBusyRow(null); }
+  };
+  const rejectRow = async (id: string) => {
+    const reason = window.prompt('Why is this payment being rejected? The salesperson will see this.');
+    if (!reason || !reason.trim()) return;
+    setBusyRow(id);
+    try { await api.post(`/api/finance-sales/installments/${id}/reject`, { reason: reason.trim() }); await fetchPlans(); }
+    catch (err: unknown) { setError((err as { response?: { data?: { message?: string } } }).response?.data?.message || 'Failed to reject the payment'); }
+    finally { setBusyRow(null); }
+  };
 
   const hasPlanFilters = !!(planSearch || planStatusFilter || planSalesPersonFilter || planCourseFilter || planTypeFilter || planFromFilter || planToFilter);
   const clearPlanFilters = () => {
@@ -439,86 +483,95 @@ export default function FinanceSalesPage() {
             {hasPlanFilters && (
               <button onClick={clearPlanFilters} className="text-xs text-blue-600 hover:underline whitespace-nowrap">Clear filters</button>
             )}
-            <p className="text-sm text-muted-foreground ml-auto">{plans.length} plan{plans.length === 1 ? '' : 's'}</p>
+            <p className="text-sm text-muted-foreground ml-auto">{plans.length} student{plans.length === 1 ? '' : 's'} · {payRows.length} row{payRows.length === 1 ? '' : 's'}</p>
           </div>
 
           <div className="bg-card border rounded-xl overflow-hidden">
             <table className="w-full text-sm">
               <thead className="bg-muted/50 text-left text-xs uppercase text-muted-foreground">
                 <tr>
-                  <th className="px-4 py-3">Student</th>
-                  <th className="px-4 py-3">Course</th>
-                  <th className="px-4 py-3">Plan</th>
-                  <th className="px-4 py-3">Paid / Total</th>
-                  <th className="px-4 py-3">Next Due</th>
-                  <th className="px-4 py-3">Status</th>
-                  <th className="px-4 py-3">Actions</th>
+                  <th className="px-3 py-3">Date</th>
+                  <th className="px-3 py-3">Phone</th>
+                  <th className="px-3 py-3">Name</th>
+                  <th className="px-3 py-3">Course</th>
+                  <th className="px-3 py-3">Paid</th>
+                  <th className="px-3 py-3">Total</th>
+                  <th className="px-3 py-3">Interest</th>
+                  <th className="px-3 py-3">Vinsup Amount</th>
+                  <th className="px-3 py-3">Next Due</th>
+                  <th className="px-3 py-3">Mode of payment</th>
+                  <th className="px-3 py-3">Status</th>
+                  <th className="px-3 py-3">Actions</th>
+                  <th className="px-3 py-3">Advisor</th>
                 </tr>
               </thead>
               <tbody className="divide-y">
                 {plansLoading ? (
-                  <tr><td colSpan={7} className="px-4 py-8 text-center text-muted-foreground">Loading...</td></tr>
-                ) : plans.length === 0 ? (
-                  <tr><td colSpan={7} className="px-4 py-8 text-center text-muted-foreground">No students registered yet</td></tr>
-                ) : plans.map((p) => {
-                  const paid = totalPaidOf(p);
-                  const next = nextDueOf(p);
-                  const declare = needsDeclaration(p);
+                  <tr><td colSpan={13} className="px-4 py-8 text-center text-muted-foreground">Loading...</td></tr>
+                ) : payRows.length === 0 ? (
+                  <tr><td colSpan={13} className="px-4 py-8 text-center text-muted-foreground">No students registered yet</td></tr>
+                ) : payRows.map(({ key, plan: p, inst, date, last }) => {
+                  const next = last ? nextDueOf(p) : null;
+                  const declare = last && needsDeclaration(p);
+                  const split = inst ? splitOf(p, inst) : null;
+                  const isEmi = p.planType === 'EMI';
                   return (
-                    <tr key={p.id} className="hover:bg-muted/30 cursor-pointer" onClick={() => setOpenPlanId(p.id)}>
-                      <td className="px-4 py-3 font-medium">
-                        <span className="text-blue-600 hover:underline">{p.lead.name}</span>
-                        <p className="text-xs text-muted-foreground font-normal">{p.lead.phone}</p>
+                    <tr key={key} className="hover:bg-muted/30 cursor-pointer align-top" onClick={() => setOpenPlanId(p.id)}>
+                      <td className="px-3 py-3 whitespace-nowrap text-muted-foreground">{new Date(date).toLocaleDateString()}</td>
+                      <td className="px-3 py-3 whitespace-nowrap">{p.lead.phone}</td>
+                      <td className="px-3 py-3 font-medium"><span className="text-blue-600 hover:underline">{p.lead.name}</span></td>
+                      <td className="px-3 py-3 text-muted-foreground">
+                        {p.courseName}
+                        <p className="text-[11px]">{declare ? <span className="text-amber-600 font-medium">Not declared</span> : PLAN_TYPE_LABEL[p.planType]}{isEmi && p.emiMonths ? ` · ${p.emiMonths} mo` : ''}</p>
                       </td>
-                      <td className="px-4 py-3 text-muted-foreground">{p.courseName}</td>
-                      <td className="px-4 py-3 text-xs">
-                        {declare ? <span className="text-amber-600 font-medium">Not declared</span> : PLAN_TYPE_LABEL[p.planType]}
+                      <td className="px-3 py-3 font-semibold whitespace-nowrap">
+                        {inst ? fmt(inst.amount) : <span className="text-muted-foreground font-normal">—</span>}
+                        {inst?.kind === 'EMI' && inst.emiMonthNumber ? <p className="text-[11px] font-normal text-muted-foreground">EMI {inst.emiMonthNumber}</p> : inst?.kind === 'DOWN_PAYMENT' ? <p className="text-[11px] font-normal text-muted-foreground">Down payment</p> : null}
                       </td>
-                      <td className="px-4 py-3">
-                        <span className="font-semibold">{fmt(paid)}</span>
-                        <span className="text-muted-foreground"> / {fmt(p.totalFee)}</span>
-                        {totalAwaitingApprovalOf(p) > 0 && (
-                          <p className="text-[11px] text-purple-700">+{fmt(totalAwaitingApprovalOf(p))} awaiting approval</p>
-                        )}
+                      <td className="px-3 py-3 whitespace-nowrap">
+                        {fmt(totalPayableOf(p))}
+                        {isEmi && (p.interestAmount || 0) > 0 && <p className="text-[11px] text-muted-foreground">Fee {fmt(p.totalFee)} + interest {fmt(p.interestAmount || 0)}</p>}
+                        {last && <p className="text-[11px] text-muted-foreground">Collected {fmt(totalCollectedOf(p))}</p>}
                       </td>
-                      <td className="px-4 py-3 text-xs">
+                      <td className="px-3 py-3 whitespace-nowrap">{split ? (split.interest ? fmt(split.interest) : '—') : '—'}</td>
+                      <td className="px-3 py-3 whitespace-nowrap font-medium">{split ? fmt(split.vinsup) : '—'}</td>
+                      <td className="px-3 py-3 text-xs whitespace-nowrap">
                         {next ? (
-                          <span className={next.status === 'OVERDUE' ? 'text-red-600 font-medium' : 'text-muted-foreground'}>
-                            {fmt(next.amount)} · {new Date(next.dueDate).toLocaleDateString()}
-                          </span>
+                          <span className={next.status === 'OVERDUE' ? 'text-red-600 font-medium' : 'text-muted-foreground'}>{fmt(next.amount)} · {new Date(next.dueDate).toLocaleDateString()}</span>
                         ) : <span className="text-muted-foreground">—</span>}
                       </td>
-                      <td className="px-4 py-3">
-                        <span className={`text-[11px] font-medium rounded-full px-2 py-1 ${PLAN_STATUS_COLOR[p.status]}`}>{p.status}</span>
+                      <td className="px-3 py-3" onClick={(e) => e.stopPropagation()}>
+                        {inst ? (
+                          <>
+                            <span className="text-xs font-medium px-2 py-1 rounded-full bg-purple-100 text-purple-700">{(inst.mode || 'UPI').replace('_', ' ')}</span>
+                            {inst.reference && <p className="text-[11px] text-muted-foreground mt-1">Ref {inst.reference}</p>}
+                            {inst.amountMatched === false && <p className="text-[11px] text-red-600">⚠ Screenshot shows {fmt(inst.ocrAmount || 0)}</p>}
+                            {inst.proofFile && <ProofThumb url={`/api/finance-sales/installments/${inst.id}/proof`} />}
+                          </>
+                        ) : <span className="text-muted-foreground">—</span>}
                       </td>
-                      <td className="px-4 py-3" onClick={(e) => e.stopPropagation()}>
-                        <div className="flex items-center gap-3">
-                          {declare && canEdit && (
-                            <button
-                              onClick={() => setOpenPlanId(p.id)}
-                              className="text-xs font-medium text-blue-600 hover:underline whitespace-nowrap"
-                            >
-                              Declare Payment
-                            </button>
+                      <td className="px-3 py-3">
+                        {inst ? (
+                          <span className={`text-[11px] font-medium rounded-full px-2 py-1 whitespace-nowrap ${INSTALLMENT_STATUS_COLOR[inst.status]}`}>{inst.status === 'PAID' ? 'Approved' : inst.status === 'PENDING_APPROVAL' ? 'With Finance' : inst.status}</span>
+                        ) : <span className={`text-[11px] font-medium rounded-full px-2 py-1 ${PLAN_STATUS_COLOR[p.status]}`}>{p.status}</span>}
+                        {inst && p.status !== 'ACTIVE' && p.status !== 'COMPLETED' && <p className="mt-1"><span className={`text-[11px] font-medium rounded-full px-2 py-0.5 ${PLAN_STATUS_COLOR[p.status]}`}>{p.status}</span></p>}
+                      </td>
+                      <td className="px-3 py-3" onClick={(e) => e.stopPropagation()}>
+                        <div className="flex flex-col gap-1 items-start">
+                          {inst?.status === 'PENDING_APPROVAL' && canApprove && (
+                            <>
+                              <button onClick={() => approveRow(inst.id)} disabled={busyRow === inst.id} className="text-xs font-medium text-purple-700 hover:underline disabled:opacity-50">{busyRow === inst.id ? 'Working…' : 'Approve'}</button>
+                              <button onClick={() => rejectRow(inst.id)} disabled={busyRow === inst.id} className="text-xs font-medium text-red-600 hover:underline disabled:opacity-50">Reject</button>
+                            </>
                           )}
-                          {isRefundPending(p) && (
-                            <span className="text-[11px] text-orange-700 whitespace-nowrap">Refund pending</span>
-                          )}
-                          {canEdit && (
-                            isDeletionPending(p) ? (
-                              <span className="text-[11px] text-muted-foreground whitespace-nowrap">Deletion pending</span>
-                            ) : (
-                              <button
-                                onClick={() => requestDelete(p.id)}
-                                title="Request deletion"
-                                className="text-muted-foreground hover:text-red-600 flex-shrink-0"
-                              >
-                                <Trash2 className="w-4 h-4" />
-                              </button>
-                            )
-                          )}
+                          {declare && canEdit && <button onClick={() => setOpenPlanId(p.id)} className="text-xs font-medium text-blue-600 hover:underline whitespace-nowrap">Declare Payment</button>}
+                          {isRefundPending(p) && <span className="text-[11px] text-orange-700 whitespace-nowrap">Refund pending</span>}
+                          {last && canEdit && (isDeletionPending(p)
+                            ? <span className="text-[11px] text-muted-foreground whitespace-nowrap">Deletion pending</span>
+                            : <button onClick={() => requestDelete(p.id)} title="Request deletion" className="text-muted-foreground hover:text-red-600"><Trash2 className="w-4 h-4" /></button>)}
                         </div>
                       </td>
+                      <td className="px-3 py-3 whitespace-nowrap text-muted-foreground">{p.lead.assignedTo ? `${p.lead.assignedTo.firstName} ${p.lead.assignedTo.lastName}` : '—'}</td>
                     </tr>
                   );
                 })}

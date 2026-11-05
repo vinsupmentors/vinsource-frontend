@@ -475,6 +475,7 @@ const leadFilterFields = (emps: EmployeeLite[]): FilterField[] => [
   { key: 'passedOutYear', label: 'Passed out year', type: 'number', nullable: true },
   { key: 'status', label: 'Lead stage', type: 'select', options: stageOptions },
   { key: 'activityStatus', label: 'Status', type: 'select', options: activityOptions, nullable: true },
+  { key: 'statusKey', label: 'Custom status (May Buy Later, Positive…)', type: 'select', options: CFG.statuses.filter((c) => c.key.startsWith('CUSTOM_')).map((c) => ({ value: c.key, label: c.label })), nullable: true },
   { key: 'assignedToId', label: 'Assigned to', type: 'select', options: empOptions(emps), nullable: true },
   { key: 'scoutKey', label: 'Lead Scout', type: 'select', options: CFG.scouts.map((s) => ({ value: s.key, label: s.label })), nullable: true },
   { key: 'createdAt', label: 'Created', type: 'date' }, { key: 'lastContactAt', label: 'Last contact', type: 'date', nullable: true },
@@ -482,6 +483,13 @@ const leadFilterFields = (emps: EmployeeLite[]): FilterField[] => [
   { key: 'demoMode', label: 'Demo mode', type: 'select', options: [{ value: 'ONLINE', label: 'Online' }, { value: 'OFFLINE', label: 'Offline' }] },
   { key: 'demoStatus', label: 'Demo status', type: 'select', options: ['SCHEDULED', 'COMPLETED', 'RESCHEDULED', 'NO_SHOW', 'CANCELLED'].map((s) => ({ value: s, label: s.replace(/_/g, ' ') })) },
   { key: 'demoDate', label: 'Demo date', type: 'date' },
+  // Activities logged on the lead (any one matching is enough)
+  { key: 'actType', label: 'Activity: type', type: 'select', options: [{ value: 'CALL', label: 'Call update' }, { value: 'MEETING', label: 'Meeting / visit' }] },
+  { key: 'actStatus', label: 'Activity: status', type: 'select', options: activityOptions },
+  { key: 'actCustomStatus', label: 'Activity: custom status', type: 'select', options: CFG.statuses.filter((c) => c.key.startsWith('CUSTOM_')).map((c) => ({ value: c.key, label: c.label })) },
+  { key: 'actBy', label: 'Activity: done by', type: 'select', options: empOptions(emps) },
+  { key: 'actDate', label: 'Activity: date', type: 'date' },
+  { key: 'actNotes', label: 'Activity: notes', type: 'text' },
 ];
 const callFilterFields = (emps: EmployeeLite[]): FilterField[] => [
   { key: 'calledAt', label: 'Date', type: 'date' },
@@ -534,8 +542,8 @@ function MultiSelect({ label, options, value, onChange }: {
 }
 
 // ── Main page ────────────────────────────────────────────────────────────
-type Tab = 'collections' | 'dashboard' | 'leads' | 'reminders' | 'tasks' | 'summaries' | 'activityMonitor' | 'pulse' | 'leadQuality' | 'liveDemos' | 'demoBooked' | 'demoRescheduled' | 'demoConducted' | 'devices' | 'unmatchedCalls' | 'callLog' | 'leaderboard' | 'targets' | 'myBase' | 'batches' | 'leadControl' | 'today' | 'callAnalytics' | 'config' | 'transcripts' | 'teams' | 'presales';
-const VALID_TABS: Tab[] = ['collections', 'dashboard', 'transcripts', 'config', 'leads', 'reminders', 'tasks', 'summaries', 'activityMonitor', 'pulse', 'leadQuality', 'liveDemos', 'demoBooked', 'demoRescheduled', 'demoConducted', 'devices', 'unmatchedCalls', 'callLog', 'leaderboard', 'targets', 'myBase', 'batches', 'leadControl', 'today', 'callAnalytics', 'teams', 'presales'];
+type Tab = 'collections' | 'dashboard' | 'leads' | 'reminders' | 'tasks' | 'summaries' | 'activityMonitor' | 'pulse' | 'leadQuality' | 'liveDemos' | 'demoBooked' | 'demoRescheduled' | 'demoConducted' | 'devices' | 'unmatchedCalls' | 'callLog' | 'leaderboard' | 'targets' | 'myBase' | 'batches' | 'leadControl' | 'today' | 'callAnalytics' | 'config' | 'transcripts' | 'teams' | 'presales' | 'demoReports';
+const VALID_TABS: Tab[] = ['collections', 'dashboard', 'transcripts', 'config', 'leads', 'reminders', 'tasks', 'summaries', 'activityMonitor', 'pulse', 'leadQuality', 'liveDemos', 'demoBooked', 'demoRescheduled', 'demoConducted', 'devices', 'unmatchedCalls', 'callLog', 'leaderboard', 'targets', 'myBase', 'batches', 'leadControl', 'today', 'callAnalytics', 'teams', 'presales', 'demoReports'];
 // Sales Pulse / Lead Quality are aggregate, cross-rep views — admin only.
 // BDAs get Demo Booked/Rescheduled/Conducted instead, scoped to their own leads.
 // Devices (issuing call-tracking tokens) is admin-only too. Unmatched Calls
@@ -543,7 +551,7 @@ const VALID_TABS: Tab[] = ['collections', 'dashboard', 'transcripts', 'config', 
 // and BDAs can see and work it. Leaderboard/Targets are management-level KPI
 // views, same access tier as Pulse/Lead Quality. "My Students" lives on its
 // own top-level page (see MyStudents.tsx), not as a Sales tab.
-const ADMIN_ONLY_TABS: Tab[] = ['config', 'myBase', 'batches', 'leadControl', 'summaries', 'activityMonitor', 'pulse', 'leadQuality', 'liveDemos', 'devices', 'leaderboard', 'targets', 'teams', 'presales'];
+const ADMIN_ONLY_TABS: Tab[] = ['config', 'myBase', 'batches', 'leadControl', 'summaries', 'activityMonitor', 'pulse', 'leadQuality', 'liveDemos', 'devices', 'leaderboard', 'targets', 'teams', 'presales', 'demoReports'];
 const BDA_ONLY_TABS: Tab[] = ['demoBooked', 'demoRescheduled', 'demoConducted'];
 const EDIT_REQUIRED_TABS: Tab[] = ['unmatchedCalls'];
 
@@ -857,6 +865,7 @@ export default function SalesPage() {
               { id: 'targets' as Tab, label: 'Targets', icon: TargetIcon },
               { id: 'teams' as Tab, label: 'Teams', icon: Users },
               { id: 'presales' as Tab, label: 'Presales', icon: Users },
+              { id: 'demoReports' as Tab, label: 'Demo Reports', icon: Calendar },
               { id: 'leadQuality' as Tab, label: 'Lead Quality', icon: Percent },
               { id: 'liveDemos' as Tab, label: 'Live Demos', icon: Video },
               { id: 'unmatchedCalls' as Tab, label: 'Unmatched Calls', icon: PhoneIncoming },
@@ -1141,6 +1150,7 @@ export default function SalesPage() {
 
       {tab === 'targets' && isAdmin && <TargetsPanel employees={employees} />}
       {tab === 'teams' && isAdmin && <TeamsPanel employees={employees} />}
+      {tab === 'demoReports' && isAdmin && <DemoReportsPanel onOpenLead={openLeadDetail} />}
       {tab === 'presales' && isAdmin && <PresalesPanel employees={employees} onChanged={loadPresales} />}
 
       {tab === 'demoBooked' && !isAdmin && <DemoListPanel status="SCHEDULED" emptyLabel="No demos booked" onOpenLead={openLeadDetail} />}
@@ -5237,6 +5247,146 @@ function TeamsPanel({ employees }: { employees: EmployeeLite[] }) {
           {tlIds.map((id) => <span key={id} className="inline-flex items-center gap-1.5 bg-card border rounded-full px-3 py-1"><span className="w-3 h-1.5 rounded" style={{ background: color(id) }} />{empName(id)}'s team ({links.filter((l) => l.tlId === id).length})</span>)}
         </div>
       )}
+    </div>
+  );
+}
+
+// ── Demo Reports: who booked demos on a day + a month calendar of every demo slot and whether it was taken.
+interface DemoRepRow { id: string; leadId: string; bookingNumber: string; date: string; time: string; scheduledAt: string; bookedAt: string; leadName: string; phone: string; course: string; mode: string; status: string; state: string; outcome: string; bookedBy: string; advisor: string }
+interface DemoRep {
+  day: string; month: string;
+  summary: { bookedOnDay: number; slotsOnDay: number; taken: number; notTaken: number; pending: number; upcoming: number; rescheduled: number; cancelled: number };
+  perPerson: { employeeId: string; name: string; bookedOnDay: number; slotsOnDay: number; taken: number; notTaken: number; pending: number; upcoming: number; rescheduled: number; cancelled: number; monthSlots: number; monthTaken: number }[];
+  calendar: DemoRepRow[]; bookedOnDay: DemoRepRow[];
+}
+const DEMO_STATE: Record<string, { label: string; cls: string; dot: string }> = {
+  TAKEN: { label: 'Taken', cls: 'bg-green-100 text-green-700', dot: 'bg-green-500' },
+  NOT_TAKEN: { label: 'Not taken (no-show)', cls: 'bg-red-100 text-red-700', dot: 'bg-red-500' },
+  PENDING: { label: 'Slot passed — not updated', cls: 'bg-amber-100 text-amber-800', dot: 'bg-amber-500' },
+  UPCOMING: { label: 'Upcoming', cls: 'bg-blue-100 text-blue-700', dot: 'bg-blue-500' },
+  RESCHEDULED: { label: 'Rescheduled', cls: 'bg-purple-100 text-purple-700', dot: 'bg-purple-500' },
+  CANCELLED: { label: 'Cancelled', cls: 'bg-slate-100 text-slate-600', dot: 'bg-slate-400' },
+};
+function DemoReportsPanel({ onOpenLead }: { onOpenLead: (id: string) => void }) {
+  const todayIso = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; };
+  const [day, setDay] = useState(todayIso());
+  const [data, setData] = useState<DemoRep | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+  const [who, setWho] = useState('');
+  useEffect(() => {
+    setLoading(true); setError('');
+    api.get('/api/sales/demo-report', { params: { day } }).then((r) => setData(r.data.data))
+      .catch((e: unknown) => setError((e as { response?: { data?: { message?: string } } }).response?.data?.message || 'Failed to load Demo Reports'))
+      .finally(() => setLoading(false));
+  }, [day]);
+  const shiftMonth = (n: number) => { const [y, m] = day.split('-').map(Number); const d = new Date(y, m - 1 + n, 1); setDay(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-01`); };
+  const [y, m] = day.split('-').map(Number);
+  const first = new Date(y, m - 1, 1);
+  const daysInMonth = new Date(y, m, 0).getDate();
+  const cells: (string | null)[] = [...Array(first.getDay()).fill(null), ...Array.from({ length: daysInMonth }, (_, i) => `${y}-${String(m).padStart(2, '0')}-${String(i + 1).padStart(2, '0')}`)];
+  const cal = (data?.calendar || []).filter((r) => !who || r.advisor === who);
+  const byDate = new Map<string, DemoRepRow[]>();
+  cal.forEach((r) => { byDate.set(r.date, [...(byDate.get(r.date) || []), r]); });
+  const dayRows = byDate.get(day) || [];
+  const people = Array.from(new Set((data?.calendar || []).map((r) => r.advisor).filter(Boolean))).sort();
+  const th = 'px-3 py-2';
+  const card = (label: string, v: number, cls = '') => <div className="border rounded-xl p-3 bg-card"><p className="text-xs text-muted-foreground">{label}</p><p className={`text-xl font-semibold ${cls}`}>{v}</p></div>;
+  const dayLabel = new Date(`${day}T00:00:00`).toLocaleDateString('en-IN', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
+  return (
+    <div className="space-y-5">
+      <div className="flex flex-wrap items-end gap-3">
+        <label className="text-xs text-muted-foreground">Day<input type="date" value={day} onChange={(e) => e.target.value && setDay(e.target.value)} className="border rounded-lg px-2 py-1.5 text-sm bg-background block mt-1" /></label>
+        <button onClick={() => setDay(todayIso())} className="px-3 py-2 border rounded-lg text-sm">Today</button>
+        <label className="text-xs text-muted-foreground">Advisor (calendar)
+          <select value={who} onChange={(e) => setWho(e.target.value)} className="border rounded-lg px-2 py-1.5 text-sm bg-background block mt-1"><option value="">Everyone</option>{people.map((n) => <option key={n} value={n}>{n}</option>)}</select>
+        </label>
+      </div>
+      {error && <div className="bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg px-4 py-3">{error}</div>}
+      {loading && !data && <p className="text-sm text-muted-foreground">Loading...</p>}
+      {data && (<>
+        <p className="text-sm font-medium">{dayLabel}</p>
+        <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-8 gap-3">
+          {card('Demos booked on this day', data.summary.bookedOnDay, 'text-blue-700')}
+          {card('Demo slots on this day', data.summary.slotsOnDay)}
+          {card('Taken', data.summary.taken, 'text-green-700')}
+          {card('Not taken', data.summary.notTaken, 'text-red-600')}
+          {card('Passed, not updated', data.summary.pending, 'text-amber-700')}
+          {card('Upcoming', data.summary.upcoming, 'text-blue-700')}
+          {card('Rescheduled', data.summary.rescheduled, 'text-purple-700')}
+          {card('Cancelled', data.summary.cancelled)}
+        </div>
+
+        <section className="space-y-2">
+          <h3 className="font-semibold text-sm">By salesperson — {day}</h3>
+          <div className="bg-card border rounded-xl overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead className="bg-muted/50 text-left text-xs uppercase text-muted-foreground"><tr><th className={th}>Salesperson</th><th className={th}>Booked today</th><th className={th}>Slots</th><th className={th}>Taken</th><th className={th}>Not taken</th><th className={th}>Not updated</th><th className={th}>Upcoming</th><th className={th}>Rescheduled</th><th className={th}>Cancelled</th><th className={th}>Month: slots / taken</th></tr></thead>
+              <tbody className="divide-y">
+                {data.perPerson.length === 0 && <tr><td colSpan={10} className="px-4 py-6 text-center text-muted-foreground">No demo activity</td></tr>}
+                {data.perPerson.map((p) => (
+                  <tr key={p.employeeId} className="hover:bg-muted/30">
+                    <td className="px-3 py-2 font-medium whitespace-nowrap">{p.name}</td>
+                    <td className="px-3 py-2 font-semibold text-blue-700">{p.bookedOnDay}</td><td className="px-3 py-2">{p.slotsOnDay}</td>
+                    <td className="px-3 py-2 text-green-700">{p.taken}</td><td className="px-3 py-2 text-red-600">{p.notTaken}</td><td className="px-3 py-2 text-amber-700">{p.pending}</td>
+                    <td className="px-3 py-2">{p.upcoming}</td><td className="px-3 py-2">{p.rescheduled}</td><td className="px-3 py-2 text-muted-foreground">{p.cancelled}</td>
+                    <td className="px-3 py-2 text-xs">{p.monthSlots} / {p.monthTaken}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <p className="text-[11px] text-muted-foreground">"Booked today" is credited to whoever booked the slot (a Presales person, or the salesperson); the other columns are credited to the advisor who conducts the demo.</p>
+        </section>
+
+        <section className="space-y-2">
+          <div className="flex items-center gap-3">
+            <button onClick={() => shiftMonth(-1)} className="p-1.5 border rounded-lg"><ChevronLeft className="w-4 h-4" /></button>
+            <h3 className="font-semibold text-sm w-40 text-center">{first.toLocaleDateString('en-IN', { month: 'long', year: 'numeric' })}</h3>
+            <button onClick={() => shiftMonth(1)} className="p-1.5 border rounded-lg"><ChevronRight className="w-4 h-4" /></button>
+            <div className="flex flex-wrap gap-2 ml-auto text-[11px]">{Object.entries(DEMO_STATE).map(([k, v]) => <span key={k} className="inline-flex items-center gap-1"><span className={`w-2 h-2 rounded-full ${v.dot}`} />{v.label}</span>)}</div>
+          </div>
+          <div className="grid grid-cols-7 gap-px bg-border border rounded-xl overflow-hidden text-xs">
+            {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map((d) => <div key={d} className="bg-muted/50 px-2 py-1.5 font-medium text-muted-foreground">{d}</div>)}
+            {cells.map((c, i) => {
+              if (!c) return <div key={`e${i}`} className="bg-card min-h-[96px]" />;
+              const list = byDate.get(c) || [];
+              return (
+                <button key={c} onClick={() => setDay(c)} className={`bg-card min-h-[96px] p-1.5 text-left align-top hover:bg-blue-50/50 ${c === day ? 'ring-2 ring-blue-500 ring-inset' : ''}`}>
+                  <div className="flex items-center justify-between"><span className={`font-semibold ${c === todayIso() ? 'text-blue-600' : ''}`}>{Number(c.slice(8))}</span>{list.length > 0 && <span className="text-[10px] text-muted-foreground">{list.length}</span>}</div>
+                  <div className="space-y-0.5 mt-1">
+                    {list.slice(0, 3).map((r) => <div key={r.id} className="flex items-center gap-1 truncate" title={`${r.time} · ${r.leadName} · ${r.advisor} · ${DEMO_STATE[r.state].label}`}><span className={`w-1.5 h-1.5 rounded-full shrink-0 ${DEMO_STATE[r.state].dot}`} /><span className="truncate">{r.time.replace(' ', '').toLowerCase()} {r.leadName}</span></div>)}
+                    {list.length > 3 && <div className="text-[10px] text-muted-foreground">+{list.length - 3} more</div>}
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+        </section>
+
+        {[{ title: `Demo slots on ${day}`, rows: dayRows, mode: 'slot' as const }, { title: `Demos booked on ${day}`, rows: who ? data.bookedOnDay.filter((r) => r.bookedBy === who) : data.bookedOnDay, mode: 'booked' as const }].map((t) => (
+          <section key={t.title} className="space-y-2">
+            <h3 className="font-semibold text-sm">{t.title} <span className="text-xs font-normal text-muted-foreground">({t.rows.length})</span></h3>
+            <div className="bg-card border rounded-xl overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead className="bg-muted/50 text-left text-xs uppercase text-muted-foreground"><tr><th className={th}>{t.mode === 'slot' ? 'Time' : 'Demo date'}</th><th className={th}>Student</th><th className={th}>Phone</th><th className={th}>Course</th><th className={th}>Mode</th><th className={th}>Booked by</th><th className={th}>Advisor</th><th className={th}>Status</th></tr></thead>
+                <tbody className="divide-y">
+                  {t.rows.length === 0 && <tr><td colSpan={8} className="px-4 py-5 text-center text-muted-foreground">None</td></tr>}
+                  {t.rows.map((r) => (
+                    <tr key={r.id} className="hover:bg-muted/30">
+                      <td className="px-3 py-2 whitespace-nowrap">{t.mode === 'slot' ? r.time : `${r.date} · ${r.time}`}</td>
+                      <td className="px-3 py-2"><button onClick={() => onOpenLead(r.leadId)} className="font-medium text-left">{r.leadName}</button></td>
+                      <td className="px-3 py-2 whitespace-nowrap">{r.phone}</td><td className="px-3 py-2">{r.course || '—'}</td><td className="px-3 py-2 text-xs">{r.mode === 'ONLINE' ? 'Online' : 'Offline'}</td>
+                      <td className="px-3 py-2 text-xs">{r.bookedBy || '—'}</td><td className="px-3 py-2 text-xs">{r.advisor || '—'}</td>
+                      <td className="px-3 py-2"><span className={`text-[11px] font-medium rounded-full px-2 py-1 whitespace-nowrap ${DEMO_STATE[r.state].cls}`}>{DEMO_STATE[r.state].label}</span></td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </section>
+        ))}
+      </>)}
     </div>
   );
 }
