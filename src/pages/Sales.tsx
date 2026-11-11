@@ -542,8 +542,8 @@ function MultiSelect({ label, options, value, onChange }: {
 }
 
 // ── Main page ────────────────────────────────────────────────────────────
-type Tab = 'collections' | 'dashboard' | 'leads' | 'reminders' | 'tasks' | 'summaries' | 'activityMonitor' | 'pulse' | 'leadQuality' | 'liveDemos' | 'demoBooked' | 'demoRescheduled' | 'demoConducted' | 'devices' | 'unmatchedCalls' | 'callLog' | 'leaderboard' | 'targets' | 'myBase' | 'batches' | 'leadControl' | 'today' | 'callAnalytics' | 'config' | 'transcripts' | 'teams' | 'presales' | 'demoReports' | 'metaLeads';
-const VALID_TABS: Tab[] = ['collections', 'dashboard', 'transcripts', 'config', 'leads', 'reminders', 'tasks', 'summaries', 'activityMonitor', 'pulse', 'leadQuality', 'liveDemos', 'demoBooked', 'demoRescheduled', 'demoConducted', 'devices', 'unmatchedCalls', 'callLog', 'leaderboard', 'targets', 'myBase', 'batches', 'leadControl', 'today', 'callAnalytics', 'teams', 'presales', 'demoReports', 'metaLeads'];
+type Tab = 'collections' | 'dashboard' | 'leads' | 'reminders' | 'tasks' | 'summaries' | 'activityMonitor' | 'pulse' | 'leadQuality' | 'liveDemos' | 'demoBooked' | 'demoRescheduled' | 'demoConducted' | 'devices' | 'unmatchedCalls' | 'callLog' | 'leaderboard' | 'targets' | 'myBase' | 'batches' | 'leadControl' | 'today' | 'callAnalytics' | 'config' | 'transcripts' | 'teams' | 'presales' | 'demoReports' | 'metaLeads' | 'dialledCalls' | 'leadsAssigned';
+const VALID_TABS: Tab[] = ['dialledCalls', 'leadsAssigned','collections', 'dashboard', 'transcripts', 'config', 'leads', 'reminders', 'tasks', 'summaries', 'activityMonitor', 'pulse', 'leadQuality', 'liveDemos', 'demoBooked', 'demoRescheduled', 'demoConducted', 'devices', 'unmatchedCalls', 'callLog', 'leaderboard', 'targets', 'myBase', 'batches', 'leadControl', 'today', 'callAnalytics', 'teams', 'presales', 'demoReports', 'metaLeads'];
 // Sales Pulse / Lead Quality are aggregate, cross-rep views — admin only.
 // BDAs get Demo Booked/Rescheduled/Conducted instead, scoped to their own leads.
 // Devices (issuing call-tracking tokens) is admin-only too. Unmatched Calls
@@ -857,6 +857,8 @@ export default function SalesPage() {
               { id: 'config' as Tab, label: 'Config', icon: Settings },
               { id: 'callLog' as Tab, label: 'Call Log', icon: History },
               { id: 'callAnalytics' as Tab, label: 'Call Analytics', icon: BarChart3 },
+              { id: 'dialledCalls' as Tab, label: 'Dialled Calls', icon: PhoneIncoming },
+              { id: 'leadsAssigned' as Tab, label: 'Leads Assigned', icon: Users },
               { id: 'transcripts' as Tab, label: 'Transcripts', icon: MessageCircle },
               { id: 'summaries' as Tab, label: 'Summaries', icon: BarChart3 },
               { id: 'activityMonitor' as Tab, label: 'Activity Monitor', icon: Eye },
@@ -881,6 +883,8 @@ export default function SalesPage() {
               { id: 'tasks' as Tab, label: 'My Tasks', icon: ListChecks },
               { id: 'callLog' as Tab, label: 'Call Log', icon: History },
               { id: 'callAnalytics' as Tab, label: 'My Call Stats', icon: BarChart3 },
+              { id: 'dialledCalls' as Tab, label: 'Dialled Calls', icon: PhoneIncoming },
+              { id: 'leadsAssigned' as Tab, label: 'Leads Assigned', icon: Users },
               { id: 'transcripts' as Tab, label: 'Transcripts', icon: MessageCircle },
               { id: 'demoBooked' as Tab, label: 'Demo Booked', icon: Calendar },
               { id: 'demoRescheduled' as Tab, label: 'Demo Rescheduled', icon: RefreshCw },
@@ -1138,6 +1142,8 @@ export default function SalesPage() {
 
       {tab === 'today' && <TodayPanel isAdmin={isAdmin} employees={employees} onOpenLead={openLeadDetail} />}
       {tab === 'callAnalytics' && <CallAnalyticsPanel isAdmin={isAdmin} employees={employees} />}
+      {tab === 'dialledCalls' && <DialledCallsPanel isAdmin={isAdmin} employees={employees} />}
+      {tab === 'leadsAssigned' && <LeadsAssignedPanel isAdmin={isAdmin} employees={employees} />}
       {tab === 'batches' && isAdmin && <BatchesPanel />}
       {tab === 'leadControl' && isAdmin && <LeadControlPanel onOpenLead={openLeadDetail} />}
       {tab === 'transcripts' && <TranscriptsPanel onOpenLead={openLeadDetail} />}
@@ -3124,6 +3130,181 @@ interface CallAnalytics {
 }
 const fmtDur = (sec: number) => { const h = Math.floor(sec / 3600), m = Math.floor((sec % 3600) / 60), s = sec % 60; return h ? `${h}h ${m}m` : m ? `${m}m ${s}s` : `${s}s`; };
 const hourText = (h: number) => `${h % 12 === 0 ? 12 : h % 12}${h < 12 ? 'a' : 'p'}`;
+// ── Dialled Calls + Leads Assigned reports ────────────────────────────────────
+interface DialledData {
+  days: string[];
+  totals: { dialled: number; unique: number; people: number };
+  perDay: { date: string; dialled: number; unique: number }[];
+  perPerson: { employeeId: string; name: string; dialled: number; unique: number; connected: number; talkSeconds: number; byDay: { date: string; dialled: number; unique: number }[] }[];
+}
+interface AssignedData {
+  days: string[];
+  totals: { assigned: number; people: number; contacted: number };
+  perDay: { date: string; count: number }[];
+  stages: Record<string, number>;
+  perPerson: { employeeId: string; name: string; total: number; contacted: number; notContacted: number; batches: string; stages: Record<string, number>; byDay: { date: string; count: number }[] }[];
+}
+
+function ReportFilters({ from, to, emp, setFrom, setTo, setEmp, isAdmin, employees, onExport, exportDisabled }: {
+  from: string; to: string; emp: string; setFrom: (s: string) => void; setTo: (s: string) => void; setEmp: (s: string) => void;
+  isAdmin: boolean; employees: EmployeeLite[]; onExport: () => void; exportDisabled: boolean;
+}) {
+  const inp = 'border rounded-lg px-2 py-1.5 text-sm bg-background';
+  return (
+    <div className="flex flex-wrap items-end gap-3">
+      <label className="text-xs text-muted-foreground">From<input type="date" value={from} onChange={(e) => setFrom(e.target.value)} className={`${inp} block mt-1`} /></label>
+      <label className="text-xs text-muted-foreground">To<input type="date" value={to} onChange={(e) => setTo(e.target.value)} className={`${inp} block mt-1`} /></label>
+      {isAdmin && (
+        <label className="text-xs text-muted-foreground">Salesperson
+          <select value={emp} onChange={(e) => setEmp(e.target.value)} className={`${inp} block mt-1`}><option value="">Everyone</option>{employees.map((e) => <option key={e.id} value={e.id}>{e.firstName} {e.lastName}</option>)}</select>
+        </label>
+      )}
+      <button onClick={onExport} disabled={exportDisabled} className="px-4 py-2 bg-green-600 text-white rounded-lg text-sm font-medium disabled:opacity-50">Export to Excel</button>
+    </div>
+  );
+}
+
+function useReport<T>(url: string, from: string, to: string, emp: string) {
+  const [data, setData] = useState<T | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+  useEffect(() => {
+    setLoading(true); setError('');
+    api.get(url, { params: { from, to, ...(emp ? { employeeId: emp } : {}) } })
+      .then((r) => setData(r.data.data))
+      .catch((err: unknown) => setError((err as { response?: { data?: { message?: string } } }).response?.data?.message || 'Failed to load report'))
+      .finally(() => setLoading(false));
+  }, [url, from, to, emp]);
+  return { data, loading, error };
+}
+
+const shortDay = (d: string) => new Date(`${d}T00:00:00`).toLocaleDateString('en-IN', { day: '2-digit', month: 'short' });
+
+function DialledCallsPanel({ isAdmin, employees }: { isAdmin: boolean; employees: EmployeeLite[] }) {
+  const today = new Date().toISOString().slice(0, 10);
+  const [from, setFrom] = useState(new Date(Date.now() - 6 * 86400000).toISOString().slice(0, 10));
+  const [to, setTo] = useState(today);
+  const [emp, setEmp] = useState('');
+  const { data, loading, error } = useReport<DialledData>('/api/sales/dialled-calls', from, to, emp);
+  const exportXlsx = () => {
+    if (!data) return;
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(data.perPerson.map((p) => ({ Salesperson: p.name, 'Dialled calls': p.dialled, 'Unique numbers dialled': p.unique, Connected: p.connected, 'Talk time (sec)': p.talkSeconds }))), 'Summary');
+    const per: Record<string, string | number>[] = [];
+    data.perPerson.forEach((p) => p.byDay.forEach((d) => per.push({ Salesperson: p.name, Date: d.date, 'Dialled calls': d.dialled, 'Unique numbers dialled': d.unique })));
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(per), 'Per day');
+    XLSX.writeFile(wb, `dialled-calls-${from}-to-${to}.xlsx`);
+  };
+  return (
+    <div className="space-y-4">
+      <ReportFilters from={from} to={to} emp={emp} setFrom={setFrom} setTo={setTo} setEmp={setEmp} isAdmin={isAdmin} employees={employees} onExport={exportXlsx} exportDisabled={!data || !data.perPerson.length} />
+      {error && <div className="bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg px-4 py-3">{error}</div>}
+      {loading && <p className="text-sm text-muted-foreground">Loading...</p>}
+      {data && (<>
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+          <div className="border rounded-xl p-3 bg-card"><p className="text-xs text-muted-foreground">Dialled calls</p><p className="text-xl font-semibold">{data.totals.dialled}</p></div>
+          <div className="border rounded-xl p-3 bg-card"><p className="text-xs text-muted-foreground">Unique numbers dialled</p><p className="text-xl font-semibold">{data.totals.unique}</p></div>
+          <div className="border rounded-xl p-3 bg-card"><p className="text-xs text-muted-foreground">Repeat dials</p><p className="text-xl font-semibold">{data.totals.dialled - data.totals.unique}</p></div>
+          <div className="border rounded-xl p-3 bg-card"><p className="text-xs text-muted-foreground">Salespeople</p><p className="text-xl font-semibold">{data.totals.people}</p></div>
+        </div>
+        <p className="text-xs text-muted-foreground">Dialled = outgoing calls (auto-tracked and manually logged). Unique = the same number dialled many times counts once.</p>
+        <div className="border rounded-xl bg-card overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead className="bg-muted/50 text-left text-xs text-muted-foreground">
+              <tr>
+                <th className="px-3 py-3 sticky left-0 bg-muted/50">Salesperson</th>
+                <th className="px-3 py-3">Dialled</th><th className="px-3 py-3">Unique</th><th className="px-3 py-3">Connected</th>
+                {data.days.map((d) => <th key={d} className="px-2 py-3 text-center whitespace-nowrap">{shortDay(d)}<div className="font-normal">dial / uniq</div></th>)}
+              </tr>
+            </thead>
+            <tbody className="divide-y">
+              {data.perPerson.map((p) => (
+                <tr key={p.employeeId}>
+                  <td className="px-3 py-2 font-medium sticky left-0 bg-card whitespace-nowrap">{p.name}</td>
+                  <td className="px-3 py-2 font-semibold">{p.dialled}</td><td className="px-3 py-2 font-semibold">{p.unique}</td><td className="px-3 py-2">{p.connected}</td>
+                  {p.byDay.map((d) => <td key={d.date} className="px-2 py-2 text-center whitespace-nowrap">{d.dialled ? `${d.dialled} / ${d.unique}` : '—'}</td>)}
+                </tr>
+              ))}
+              {data.perPerson.length === 0 && <tr><td colSpan={4 + data.days.length} className="px-3 py-8 text-center text-muted-foreground">No dialled calls in this period.</td></tr>}
+              {data.perPerson.length > 0 && (
+                <tr className="bg-muted/30 font-semibold">
+                  <td className="px-3 py-2 sticky left-0 bg-muted/30">Total</td><td className="px-3 py-2">{data.totals.dialled}</td><td className="px-3 py-2">{data.totals.unique}</td><td className="px-3 py-2" />
+                  {data.perDay.map((d) => <td key={d.date} className="px-2 py-2 text-center whitespace-nowrap">{d.dialled ? `${d.dialled} / ${d.unique}` : '—'}</td>)}
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </>)}
+    </div>
+  );
+}
+
+function LeadsAssignedPanel({ isAdmin, employees }: { isAdmin: boolean; employees: EmployeeLite[] }) {
+  const today = new Date().toISOString().slice(0, 10);
+  const [from, setFrom] = useState(new Date(Date.now() - 6 * 86400000).toISOString().slice(0, 10));
+  const [to, setTo] = useState(today);
+  const [emp, setEmp] = useState('');
+  const { data, loading, error } = useReport<AssignedData>('/api/sales/leads-assigned', from, to, emp);
+  const stageKeys = Array.from(new Set((data?.perPerson || []).flatMap((p) => Object.keys(p.stages)))).sort();
+  const cap = (k: string) => k.toLowerCase().replace(/^\w/, (c) => c.toUpperCase());
+  const exportXlsx = () => {
+    if (!data) return;
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(data.perPerson.map((p) => ({ Salesperson: p.name, 'Leads assigned': p.total, Contacted: p.contacted, 'Not contacted': p.notContacted, Batches: p.batches, ...Object.fromEntries(stageKeys.map((k) => [cap(k), p.stages[k] || 0])) }))), 'Summary');
+    const per: Record<string, string | number>[] = [];
+    data.perPerson.forEach((p) => p.byDay.forEach((d) => per.push({ Salesperson: p.name, Date: d.date, 'Leads assigned': d.count })));
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(per), 'Per day');
+    XLSX.writeFile(wb, `leads-assigned-${from}-to-${to}.xlsx`);
+  };
+  return (
+    <div className="space-y-4">
+      <ReportFilters from={from} to={to} emp={emp} setFrom={setFrom} setTo={setTo} setEmp={setEmp} isAdmin={isAdmin} employees={employees} onExport={exportXlsx} exportDisabled={!data || !data.perPerson.length} />
+      {error && <div className="bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg px-4 py-3">{error}</div>}
+      {loading && <p className="text-sm text-muted-foreground">Loading...</p>}
+      {data && (<>
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+          <div className="border rounded-xl p-3 bg-card"><p className="text-xs text-muted-foreground">Leads assigned</p><p className="text-xl font-semibold">{data.totals.assigned}</p></div>
+          <div className="border rounded-xl p-3 bg-card"><p className="text-xs text-muted-foreground">Contacted so far</p><p className="text-xl font-semibold">{data.totals.contacted}</p></div>
+          <div className="border rounded-xl p-3 bg-card"><p className="text-xs text-muted-foreground">Not contacted yet</p><p className="text-xl font-semibold">{data.totals.assigned - data.totals.contacted}</p></div>
+          <div className="border rounded-xl p-3 bg-card"><p className="text-xs text-muted-foreground">Salespeople</p><p className="text-xl font-semibold">{data.totals.people}</p></div>
+        </div>
+        <p className="text-xs text-muted-foreground">Counted on the day a lead was handed to the salesperson. Stage = where the lead stands now.</p>
+        <div className="border rounded-xl bg-card overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead className="bg-muted/50 text-left text-xs text-muted-foreground">
+              <tr>
+                <th className="px-3 py-3 sticky left-0 bg-muted/50">Salesperson</th>
+                <th className="px-3 py-3">Assigned</th><th className="px-3 py-3">Contacted</th><th className="px-3 py-3">Not contacted</th>
+                {data.days.map((d) => <th key={d} className="px-2 py-3 text-center whitespace-nowrap">{shortDay(d)}</th>)}
+                {stageKeys.map((k) => <th key={k} className="px-2 py-3 text-center whitespace-nowrap">{cap(k)}</th>)}
+              </tr>
+            </thead>
+            <tbody className="divide-y">
+              {data.perPerson.map((p) => (
+                <tr key={p.employeeId}>
+                  <td className="px-3 py-2 font-medium sticky left-0 bg-card whitespace-nowrap">{p.name}</td>
+                  <td className="px-3 py-2 font-semibold">{p.total}</td><td className="px-3 py-2">{p.contacted}</td><td className="px-3 py-2">{p.notContacted}</td>
+                  {p.byDay.map((d) => <td key={d.date} className="px-2 py-2 text-center">{d.count || '—'}</td>)}
+                  {stageKeys.map((k) => <td key={k} className="px-2 py-2 text-center">{p.stages[k] || '—'}</td>)}
+                </tr>
+              ))}
+              {data.perPerson.length === 0 && <tr><td colSpan={4 + data.days.length + stageKeys.length} className="px-3 py-8 text-center text-muted-foreground">No leads were assigned in this period.</td></tr>}
+              {data.perPerson.length > 0 && (
+                <tr className="bg-muted/30 font-semibold">
+                  <td className="px-3 py-2 sticky left-0 bg-muted/30">Total</td><td className="px-3 py-2">{data.totals.assigned}</td><td className="px-3 py-2">{data.totals.contacted}</td><td className="px-3 py-2">{data.totals.assigned - data.totals.contacted}</td>
+                  {data.perDay.map((d) => <td key={d.date} className="px-2 py-2 text-center">{d.count || '—'}</td>)}
+                  {stageKeys.map((k) => <td key={k} className="px-2 py-2 text-center">{data.stages[k] || '—'}</td>)}
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </>)}
+    </div>
+  );
+}
+
 function CallAnalyticsPanel({ isAdmin, employees }: { isAdmin: boolean; employees: EmployeeLite[] }) {
   const today = new Date().toISOString().slice(0, 10);
   const monthAgo = new Date(Date.now() - 29 * 86400000).toISOString().slice(0, 10);

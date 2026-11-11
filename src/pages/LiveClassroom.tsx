@@ -283,6 +283,30 @@ const ROLE_LABEL: Record<'HOST' | 'CO_TRAINER' | 'STUDENT', string> = {
   HOST: 'Host', CO_TRAINER: 'Co-Trainer', STUDENT: 'Student',
 };
 
+/** Trainer-only: shows whether this class is actually being recorded, with the reason + a Retry button when it is not. */
+function RecordingBadge({ classId }: { classId: string }) {
+  const [st, setSt] = useState<{ state: string; reason: string | null } | null>(null);
+  const [retrying, setRetrying] = useState(false);
+  useEffect(() => {
+    let stop = false;
+    const load = () => api.get(`/api/live-classes/${classId}/recording-status`).then((r) => { if (!stop) setSt(r.data.data); }).catch(() => {});
+    load();
+    const t = setInterval(load, 8000);
+    return () => { stop = true; clearInterval(t); };
+  }, [classId]);
+  if (!st) return null;
+  const retry = () => { setRetrying(true); api.post(`/api/live-classes/${classId}/recording/retry`).catch(() => {}).finally(() => setTimeout(() => setRetrying(false), 3000)); };
+  if (st.state === 'RECORDING') return <span title="This class is being recorded" className="inline-flex items-center gap-1 text-[11px] font-bold px-2 py-0.5 rounded bg-red-500/20 text-red-300"><span className="w-2 h-2 rounded-full bg-red-500 animate-pulse" /> REC</span>;
+  if (st.state === 'STARTING') return <span className="inline-flex items-center gap-1 text-[11px] font-bold px-2 py-0.5 rounded bg-amber-500/20 text-amber-300">Starting recording…</span>;
+  if (st.state === 'READY' || st.state === 'NONE') return null;
+  return (
+    <span className="inline-flex items-center gap-2 text-[11px] font-bold px-2 py-0.5 rounded bg-red-600/30 text-red-200" title={st.reason || 'Recording is not running'}>
+      NOT RECORDING{st.reason ? ` — ${st.reason.slice(0, 60)}` : ''}
+      <button onClick={retry} disabled={retrying} className="underline disabled:opacity-50">{retrying ? 'Trying…' : 'Retry'}</button>
+    </span>
+  );
+}
+
 /** Thin overlay bar above LiveKit's own VideoConference UI: class title, participant count, raise-hand, host-only End Class, everyone's Leave. */
 function ClassroomChrome({ liveClass, canHost, onEnd, onLeave }: { liveClass: LiveClass; canHost: boolean; onEnd: () => void; onLeave: () => void; connected: boolean }) {
   const participants = useParticipants();
@@ -296,6 +320,7 @@ function ClassroomChrome({ liveClass, canHost, onEnd, onLeave }: { liveClass: Li
       <div className="flex items-center gap-3 min-w-0">
         <span className="inline-flex items-center gap-1 text-xs font-bold text-red-400"><span className="w-2 h-2 rounded-full bg-red-500 animate-pulse" /> LIVE</span>
         <span className="font-medium truncate">{liveClass.title}</span>
+        {canHost && <RecordingBadge classId={liveClass.id} />}
         <span className="text-white/50 hidden sm:inline truncate">{liveClass.schedule.course.name} · {liveClass.schedule.batch.code}</span>
         {canHost && myRole && (
           <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${myRole === 'HOST' ? 'bg-blue-500/30 text-blue-200' : 'bg-purple-500/30 text-purple-200'}`}>

@@ -43,6 +43,9 @@ export interface LiveClass {
   createdBy: { firstName: string; lastName: string } | null;
   schedule: LiveClassScheduleInfo;
   liveParticipantCount?: number;
+  /** REGULAR, or SOFT_SKILLS = combined Soft Skills & Aptitude session (IOP students only) across several schedules. */
+  kind?: 'REGULAR' | 'SOFT_SKILLS' | string;
+  extraSchedules?: { schedule: { id: string; code: string | null; mode: string; batch: { id: string; code: string }; course: { id: string; name: string } } }[];
 }
 
 export interface LiveClassDashboard {
@@ -63,6 +66,7 @@ export interface ScheduleOption {
   customWeekdays: number | null;
   startDate: string;
   endDate: string | null;
+  mode?: string; // ONLINE / OFFLINE / HYBRID
   batch: { id: string; code: string };
   course: { id: string; name: string };
 }

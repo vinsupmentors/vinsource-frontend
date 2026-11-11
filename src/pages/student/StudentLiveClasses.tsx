@@ -161,9 +161,12 @@ function RecordingsModal({ liveClass, onClose, setError }: { liveClass: LiveClas
   const [recordings, setRecordings] = useState<LiveClassRecordingRecord[] | null>(null);
   const [playingId, setPlayingId] = useState<string | null>(null);
   const [playback, setPlayback] = useState<LiveClassPlaybackUrl | null>(null);
+  const [expiredMsg, setExpiredMsg] = useState('');
 
   useEffect(() => {
-    api.get(`/api/live-classes/${liveClass.id}/recordings`).then((r) => setRecordings(r.data.data)).catch((err) => setError(errMsg(err, 'Could not load the recording.')));
+    api.get(`/api/live-classes/${liveClass.id}/recordings`)
+      .then((r) => { setRecordings(r.data.data); if (r.data.expired) setExpiredMsg(r.data.message || 'Your recording access window for this class has ended.'); })
+      .catch((err) => setError(errMsg(err, 'Could not load the recording.')));
   }, [liveClass.id, setError]);
 
   const play = (recordingId: string) => {
@@ -179,7 +182,7 @@ function RecordingsModal({ liveClass, onClose, setError }: { liveClass: LiveClas
       {!recordings ? (
         <div className="flex justify-center py-8"><Loader2 className="w-5 h-5 animate-spin text-blue-600" /></div>
       ) : recordings.length === 0 ? (
-        <p className="text-sm text-muted-foreground text-center py-6">No recording available for this class.</p>
+        <p className="text-sm text-muted-foreground text-center py-6">{expiredMsg || 'No recording available for this class.'}</p>
       ) : (
         <div className="space-y-3">
           {playingId && playback && (

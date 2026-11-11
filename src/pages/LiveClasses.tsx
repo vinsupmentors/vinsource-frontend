@@ -818,10 +818,13 @@ function CreateClassModal({ onClose, onSaved, setError }: { onClose: () => void;
   const [startTime, setStartTime] = useState('');
   const [endTime, setEndTime] = useState('');
   const [saving, setSaving] = useState(false);
+  // Combined Soft Skills & Aptitude class: club several domain schedules (online + offline) of a batch.
+  const [combined, setCombined] = useState(false);
+  const [picked, setPicked] = useState<string[]>([]);
 
   useEffect(() => {
-    api.get('/api/live-classes/schedules').then((r) => setSchedules(r.data.data)).catch(() => setSchedules([]));
-  }, []);
+    api.get('/api/live-classes/schedules', { params: combined ? { all: 1 } : {} }).then((r) => setSchedules(r.data.data)).catch(() => setSchedules([]));
+  }, [combined]);
 
   // Batch first, then sub-batch — flattening every batch/course into one
   // long list made it hard to find the right sub-batch once a batch had
@@ -829,13 +832,17 @@ function CreateClassModal({ onClose, onSaved, setError }: { onClose: () => void;
   const batches = Array.from(new Map(schedules.map((s) => [s.batch.id, s.batch])).values());
   const batchSchedules = schedules.filter((s) => s.batch.id === batchId);
 
-  const canSubmit = scheduleId && title.trim() && scheduledDate && startTime && endTime;
+  const canSubmit = (combined ? picked.length > 0 : !!scheduleId) && title.trim() && scheduledDate && startTime && endTime;
+
+  const togglePick = (id: string) => setPicked((p) => (p.includes(id) ? p.filter((x) => x !== id) : [...p, id]));
 
   const submit = () => {
     if (!canSubmit) return;
     setSaving(true);
     api.post('/api/live-classes', {
-      scheduleId, title: title.trim(), topic: topic || undefined, description: description || undefined,
+      scheduleId: combined ? picked[0] : scheduleId,
+      ...(combined ? { kind: 'SOFT_SKILLS', extraScheduleIds: picked.slice(1) } : {}),
+      title: title.trim(), topic: topic || undefined, description: description || undefined,
       scheduledDate, startTime, endTime,
     })
       .then(onSaved)
@@ -845,25 +852,43 @@ function CreateClassModal({ onClose, onSaved, setError }: { onClose: () => void;
 
   return (
     <Modal title="Create Live Class" onClose={onClose}>
-      <Field label="Batch *">
+      <label className="flex items-start gap-2 text-sm rounded-lg border bg-blue-50/50 px-3 py-2 cursor-pointer">
+        <input type="checkbox" className="mt-0.5" checked={combined} onChange={(e) => { setCombined(e.target.checked); setPicked([]); setScheduleId(''); if (e.target.checked && !title) setTitle('Soft Skills & Aptitude'); }} />
+        <span><b>Combined Soft Skills &amp; Aptitude class</b><br /><span className="text-xs text-muted-foreground">Club several domain schedules (online + offline) into one session. Only IOP students of the ticked schedules can join — JRP students are excluded.</span></span>
+      </label>
+      <Field label={combined ? 'Batch (filter)' : 'Batch *'}>
         <select className={inputCls} value={batchId} onChange={(e) => { setBatchId(e.target.value); setScheduleId(''); }}>
-          <option value="">Select a batch</option>
+          <option value="">{combined ? 'All batches' : 'Select a batch'}</option>
           {batches.map((b) => (
             <option key={b.id} value={b.id}>{b.code}</option>
           ))}
         </select>
         {schedules.length === 0 && <p className="text-xs text-muted-foreground mt-1">No batches assigned to you yet — a Live Classes admin needs to assign you as a trainer, or grant Admin-level access.</p>}
       </Field>
-      <Field label="Sub-batch / Course *">
-        <select className={inputCls} value={scheduleId} onChange={(e) => setScheduleId(e.target.value)} disabled={!batchId}>
-          <option value="">{batchId ? 'Select a sub-batch & course' : 'Pick a batch first'}</option>
-          {batchSchedules.map((s) => (
-            <option key={s.id} value={s.id}>
-              {s.code ? `${s.code} — ` : ''}{s.course.name}{s.startTime ? ` (${s.startTime}–${s.endTime})` : ''}
-            </option>
-          ))}
-        </select>
-      </Field>
+      {combined ? (
+        <Field label={`Schedules to club * (${picked.length} selected)`}>
+          <div className="max-h-48 overflow-y-auto rounded-lg border divide-y">
+            {(batchId ? batchSchedules : schedules).map((s) => (
+              <label key={s.id} className="flex items-center gap-2 px-3 py-1.5 text-sm cursor-pointer hover:bg-muted/50">
+                <input type="checkbox" checked={picked.includes(s.id)} onChange={() => togglePick(s.id)} />
+                <span>{s.batch.code} · {s.code ? `${s.code} — ` : ''}{s.course.name}{s.mode ? ` · ${s.mode}` : ''}{s.startTime ? ` (${s.startTime}–${s.endTime})` : ''}</span>
+              </label>
+            ))}
+            {(batchId ? batchSchedules : schedules).length === 0 && <p className="px-3 py-2 text-xs text-muted-foreground">No running schedules found.</p>}
+          </div>
+        </Field>
+      ) : (
+        <Field label="Sub-batch / Course *">
+          <select className={inputCls} value={scheduleId} onChange={(e) => setScheduleId(e.target.value)} disabled={!batchId}>
+            <option value="">{batchId ? 'Select a sub-batch & course' : 'Pick a batch first'}</option>
+            {batchSchedules.map((s) => (
+              <option key={s.id} value={s.id}>
+                {s.code ? `${s.code} — ` : ''}{s.course.name}{s.startTime ? ` (${s.startTime}–${s.endTime})` : ''}
+              </option>
+            ))}
+          </select>
+        </Field>
+      )}
       <Field label="Class Title *"><input className={inputCls} value={title} onChange={(e) => setTitle(e.target.value)} placeholder="e.g. Data Cleaning with Pandas" /></Field>
       <Field label="Topic"><input className={inputCls} value={topic} onChange={(e) => setTopic(e.target.value)} placeholder="Optional" /></Field>
       <Field label="Description"><textarea className={inputCls} rows={2} value={description} onChange={(e) => setDescription(e.target.value)} placeholder="Optional" /></Field>
