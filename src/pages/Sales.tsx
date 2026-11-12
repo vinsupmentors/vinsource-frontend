@@ -413,6 +413,15 @@ function leadAgeLabel(createdAt: string): string {
   return `${days} days`;
 }
 
+// Reminder filter — mirrors the colours used in the Reminder column (red = overdue, amber = today).
+const REMINDER_OPTIONS = [
+  { value: 'overdue', label: 'Overdue (red)' },
+  { value: 'today', label: 'Due today (amber)' },
+  { value: 'upcoming', label: 'Upcoming (black)' },
+  { value: 'none', label: 'No reminder' },
+];
+const DNP_OPTIONS = [1, 2, 3, 4].map((n) => ({ value: String(n), label: `DNP ×${n}` }));
+
 function reminderColor(nextFollowUpAt?: string | null): string {
   if (!nextFollowUpAt) return 'text-muted-foreground';
   const today = new Date(); today.setHours(0, 0, 0, 0);
@@ -595,6 +604,7 @@ export default function SalesPage() {
   const [statusFilter, setStatusFilter] = useState<string>('');
   const [activityFilter, setActivityFilter] = useState<string>('');
   const [followUpFilter, setFollowUpFilter] = useState<string>('');
+  const [dnpFilter, setDnpFilter] = useState<string>('');
   const [assignedFilter, setAssignedFilter] = useState<string>('');
   const [sourceFilter, setSourceFilter] = useState<string>('');
   const [createdFrom, setCreatedFrom] = useState('');
@@ -626,7 +636,7 @@ export default function SalesPage() {
 
   // Any filter change resets to page 1 — otherwise you can land on a page
   // number that no longer exists once the result set shrinks.
-  useEffect(() => { setPage(1); }, [search, statusFilter, activityFilter, followUpFilter, assignedFilter, sourceFilter, createdFrom, createdTo, followFrom, followTo, advFilter]);
+  useEffect(() => { setPage(1); }, [search, statusFilter, activityFilter, followUpFilter, dnpFilter, assignedFilter, sourceFilter, createdFrom, createdTo, followFrom, followTo, advFilter]);
   useEffect(() => { api.get('/api/sales/sources').then((r) => setSourceOptions(r.data.data)).catch(() => setSourceOptions([])); }, []);
   // Config lists (stages, statuses, lost reasons, sources, scouts) — kept in a module snapshot so every sub-component can read labels.
   const [cfg, setCfgState] = useState<CfgData>(CFG);
@@ -681,6 +691,7 @@ export default function SalesPage() {
       if (followFrom) params.followUpFrom = followFrom;
       if (followTo) params.followUpTo = followTo;
       if (followUpFilter) params.followUp = followUpFilter;
+      if (dnpFilter) params.dnp = dnpFilter;
       if (advFilter) params.filter = JSON.stringify(advFilter);
       const [leadsRes, statsRes] = await Promise.all([
         api.get('/api/sales/leads', { params }),
@@ -695,7 +706,7 @@ export default function SalesPage() {
     } finally {
       setLoading(false);
     }
-  }, [page, search, statusFilter, activityFilter, followUpFilter, assignedFilter, sourceFilter, scoutFilter, tlFilter, teamMap, myLeadsOnly, myEmpId, createdFrom, createdTo, followFrom, followTo, advFilter, pageSize, sortBy, sortDir, nameLike, phoneLike, emailLike]);
+  }, [page, search, statusFilter, activityFilter, followUpFilter, dnpFilter, assignedFilter, sourceFilter, scoutFilter, tlFilter, teamMap, myLeadsOnly, myEmpId, createdFrom, createdTo, followFrom, followTo, advFilter, pageSize, sortBy, sortDir, nameLike, phoneLike, emailLike]);
 
   useEffect(() => { if (level && tab === 'leads') fetchAll(); }, [level, tab, fetchAll]);
 
@@ -952,12 +963,8 @@ export default function SalesPage() {
             )}
             <MultiSelect label="Source" value={sourceFilter} onChange={setSourceFilter}
               options={[...Array.from(new Set([...cfg.sources.map((s) => s.label), ...sourceOptions])).map((s) => ({ value: s, label: s })), { value: 'Unknown', label: 'Unknown' }]} />
-            <select value={followUpFilter} onChange={(e) => setFollowUpFilter(e.target.value)} className="px-3 py-2 border rounded-lg text-sm">
-              <option value="">All reminders</option>
-              <option value="today">Due today</option>
-              <option value="overdue">Overdue</option>
-              <option value="none">No reminder</option>
-            </select>
+            <MultiSelect label="Reminder" value={followUpFilter} onChange={setFollowUpFilter} options={REMINDER_OPTIONS} />
+            <MultiSelect label="DNP count" value={dnpFilter} onChange={setDnpFilter} options={DNP_OPTIONS} />
             <label className="text-xs text-muted-foreground flex items-center gap-1">Created
               <input type="date" value={createdFrom} onChange={(e) => setCreatedFrom(e.target.value)} className="px-2 py-1.5 border rounded-lg text-sm" />
               –<input type="date" value={createdTo} onChange={(e) => setCreatedTo(e.target.value)} className="px-2 py-1.5 border rounded-lg text-sm" />
@@ -967,8 +974,8 @@ export default function SalesPage() {
               –<input type="date" value={followTo} onChange={(e) => setFollowTo(e.target.value)} className="px-2 py-1.5 border rounded-lg text-sm" />
             </label>
             <AdvancedFilter scope="leads" fields={leadFilterFields(employees)} value={advFilter} onChange={setAdvFilter} />
-            {(statusFilter || activityFilter || assignedFilter || tlFilter || sourceFilter || scoutFilter || createdFrom || createdTo || followFrom || followTo || followUpFilter || nameLike || phoneLike || emailLike || sortBy) && (
-              <button onClick={() => { setStatusFilter(''); setActivityFilter(''); setAssignedFilter(''); setSourceFilter(''); setScoutFilter(''); setCreatedFrom(''); setCreatedTo(''); setFollowFrom(''); setFollowTo(''); setFollowUpFilter(''); setNameLike(''); setPhoneLike(''); setEmailLike(''); setSortBy(''); }} className="text-xs text-blue-600 hover:underline">Clear all filters & sort</button>
+            {(statusFilter || activityFilter || assignedFilter || tlFilter || sourceFilter || scoutFilter || createdFrom || createdTo || followFrom || followTo || followUpFilter || dnpFilter || nameLike || phoneLike || emailLike || sortBy) && (
+              <button onClick={() => { setStatusFilter(''); setActivityFilter(''); setAssignedFilter(''); setSourceFilter(''); setScoutFilter(''); setCreatedFrom(''); setCreatedTo(''); setFollowFrom(''); setFollowTo(''); setFollowUpFilter(''); setDnpFilter(''); setNameLike(''); setPhoneLike(''); setEmailLike(''); setSortBy(''); }} className="text-xs text-blue-600 hover:underline">Clear all filters & sort</button>
             )}
           </div>
 
@@ -1010,13 +1017,12 @@ export default function SalesPage() {
                   <th className="px-3 py-3">#</th>
                   <ColumnHeader label="Name" sortKey="name" sortBy={sortBy} sortDir={sortDir} onSort={onSort} text={nameLike} onText={setNameLike} />
                   <ColumnHeader label="Phone" sortKey="phone" sortBy={sortBy} sortDir={sortDir} onSort={onSort} text={phoneLike} onText={setPhoneLike} />
-                  <ColumnHeader label="Status" options={[...ACTIVITY_STATUSES_LIVE(), { value: 'NONE', label: 'No status yet' }]} value={activityFilter} onChange={setActivityFilter} />
-                  <ColumnHeader label="Lead Stage" sortKey="status" sortBy={sortBy} sortDir={sortDir} onSort={onSort} options={stageOptionsLive().map((o) => ({ value: o.value, label: o.label }))} value={statusFilter} onChange={setStatusFilter} />
+                  <ColumnHeader label="Status" options={[...ACTIVITY_STATUSES_LIVE(), { value: 'NONE', label: 'No status yet' }]} value={activityFilter} onChange={setActivityFilter} />                  <ColumnHeader label="Lead Stage" sortKey="status" sortBy={sortBy} sortDir={sortDir} onSort={onSort} options={stageOptionsLive().map((o) => ({ value: o.value, label: o.label }))} value={statusFilter} onChange={setStatusFilter} />
                   <ColumnHeader label="Assigned" sortKey="assignedTo" sortBy={sortBy} sortDir={sortDir} onSort={onSort}
                     {...(isAdmin ? { options: [{ value: 'NONE', label: 'Unassigned' }, ...employees.map((e) => ({ value: e.id, label: `${e.firstName} ${e.lastName}` }))], value: assignedFilter, onChange: setAssignedFilter } : {})} />
                   <ColumnHeader label="Source" sortKey="source" sortBy={sortBy} sortDir={sortDir} onSort={onSort}
                     options={[...Array.from(new Set([...cfg.sources.map((x) => x.label), ...sourceOptions])).map((x) => ({ value: x, label: x })), { value: 'Unknown', label: 'Unknown' }]} value={sourceFilter} onChange={setSourceFilter} />
-                  <ColumnHeader label="Reminder" sortKey="nextFollowUpAt" sortBy={sortBy} sortDir={sortDir} onSort={onSort} />
+                  <ColumnHeader label="Reminder" sortKey="nextFollowUpAt" sortBy={sortBy} sortDir={sortDir} onSort={onSort} options={REMINDER_OPTIONS} value={followUpFilter} onChange={setFollowUpFilter} />
                   <ColumnHeader label="Last Contact" sortKey="lastContactAt" sortBy={sortBy} sortDir={sortDir} onSort={onSort} />
                   <ColumnHeader label="Created" sortKey="createdAt" sortBy={sortBy} sortDir={sortDir} onSort={onSort} />
                   {isAdmin && <th className="px-3 py-3"></th>}
@@ -1049,34 +1055,15 @@ export default function SalesPage() {
                           : <span className="text-xs text-muted-foreground">—</span>}
                       </td>
                       <td className="px-3 py-3">
-                        {canEdit ? (
-                          <select
-                            value={lead.stageKey || lead.status}
-                            onChange={(e) => onStatusChange(lead, e.target.value)}
-                            className={`text-xs font-medium rounded-full px-2 py-1 border-0 ${stageChipClass(lead.stageKey || lead.status)}`}
-                          >
-                            {stageOptionsLive(lead.stageKey || lead.status).map((s) => <option key={s.value} value={s.value}>{s.label}</option>)}
-                          </select>
-                        ) : (
-                          <span className={`text-xs font-medium rounded-full px-2 py-1 ${stageChipClass(lead.stageKey || lead.status)}`}>{stageLabel(lead.stageKey || lead.status)}</span>
-                        )}
+                        {/* Read-only here — open the lead to change its stage. */}
+                        <span className={`text-xs font-medium rounded-full px-2 py-1 ${stageChipClass(lead.stageKey || lead.status)}`}>{stageLabel(lead.stageKey || lead.status)}</span>
                         {lead.status === 'LOST' && (lead.lostReasonKey || lead.lostReason) && (
                           <p className="text-[10px] text-muted-foreground mt-1">{lostReasonLabel(lead.lostReasonKey, lead.lostReason)}</p>
                         )}
                       </td>
                       <td className="px-3 py-3 whitespace-nowrap">
-                        {canEdit ? (
-                          <select
-                            value={lead.assignedTo?.id || ''}
-                            onChange={(e) => reassignLead(lead.id, e.target.value)}
-                            className="text-xs px-2 py-1 border rounded-lg bg-white"
-                          >
-                            <option value="">Unassigned</option>
-                            {employees.map((e) => <option key={e.id} value={e.id}>{e.firstName} {e.lastName}</option>)}
-                          </select>
-                        ) : (
-                          lead.assignedTo ? `${lead.assignedTo.firstName} ${lead.assignedTo.lastName}` : '—'
-                        )}
+                        {/* Read-only here — open the lead to reassign it. */}
+                        {lead.assignedTo ? `${lead.assignedTo.firstName} ${lead.assignedTo.lastName}` : '—'}
                       </td>
                       <td className="px-3 py-3 text-muted-foreground whitespace-nowrap">
                         {lead.source || '—'}
