@@ -45,6 +45,8 @@ export interface LiveClass {
   liveParticipantCount?: number;
   /** REGULAR, or SOFT_SKILLS = combined Soft Skills & Aptitude session (IOP students only) across several schedules. */
   kind?: 'REGULAR' | 'SOFT_SKILLS' | string;
+  trainer?: { id: string; firstName: string; lastName: string } | null; // trainer picked when the class was created
+  combinedStudents?: number; // SOFT_SKILLS only: distinct IOP students across all clubbed schedules
   extraSchedules?: { schedule: { id: string; code: string | null; mode: string; batch: { id: string; code: string }; course: { id: string; name: string } } }[];
 }
 
@@ -67,6 +69,7 @@ export interface ScheduleOption {
   startDate: string;
   endDate: string | null;
   mode?: string; // ONLINE / OFFLINE / HYBRID
+  // (timing above is MORNING / AFTERNOON / EVENING)
   batch: { id: string; code: string };
   course: { id: string; name: string };
 }
@@ -237,7 +240,8 @@ export function formatClassDate(iso?: string | null): string {
 /** Who taught/will teach this class — the schedule's assigned Production
  * trainer(s), not whoever clicked "Create". Falls back to createdBy only
  * when the sub-batch has no trainer assigned yet. */
-export function trainerNames(c: { schedule?: LiveClassScheduleInfo; createdBy?: { firstName: string; lastName: string } | null }): string {
+export function trainerNames(c: { schedule?: LiveClassScheduleInfo; createdBy?: { firstName: string; lastName: string } | null; trainer?: { firstName: string; lastName: string } | null }): string {
+  if (c.trainer) return `${c.trainer.firstName} ${c.trainer.lastName}`; // trainer picked for this class
   const assigned = c.schedule?.trainers?.map((t) => `${t.trainer.firstName} ${t.trainer.lastName}`) || [];
   if (assigned.length) return assigned.join(', ');
   return c.createdBy ? `${c.createdBy.firstName} ${c.createdBy.lastName}` : '—';
