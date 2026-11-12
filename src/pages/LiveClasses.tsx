@@ -497,7 +497,7 @@ function ClassListTab({ view, canEdit, setError, refreshKey }: { view: 'today' |
           <p className="text-sm">{c.title}{c.topic ? <span className="text-muted-foreground"> — {c.topic}</span> : null}</p>
           <p className="text-xs text-muted-foreground">Trainer: {trainerNames(c)}</p>
           <p className="text-xs text-muted-foreground flex items-center gap-1"><Clock className="w-3 h-3" /> {formatClassDate(c.scheduledDate)} · {formatTimeRange(c.startTime, c.endTime)}</p>
-          <p className="text-xs text-muted-foreground flex items-center gap-1"><GraduationCap className="w-3 h-3" /> {c.kind === 'SOFT_SKILLS' ? `${c.combinedStudents ?? 0} IOP students (all clubbed schedules)` : `${c.schedule._count?.enrollments ?? 0} students enrolled`}</p>
+          <p className="text-xs text-muted-foreground flex items-center gap-1"><GraduationCap className="w-3 h-3" /> {c.kind === 'SOFT_SKILLS' ? `${c.combinedStudents ?? 0} students · ${c.tracks ? c.tracks.split(',').filter(Boolean).join(' + ') : 'all tracks except JRP'} (all clubbed schedules)` : `${c.schedule._count?.enrollments ?? 0} students enrolled`}</p>
           {c.status === 'CANCELLED' && c.cancelReason && <p className="text-xs text-amber-700">Holiday: {c.cancelReason}</p>}
 
           <div className="flex gap-2 pt-1">
@@ -833,7 +833,12 @@ function TrainerSelect({ value, onChange, required }: { value: string; onChange:
 }
 
 /** Club schedules into a combined class: filter by batch / timing (Morning, Afternoon, Evening) / mode (Online, Offline), then tick. */
-function ClubPicker({ schedules, picked, setPicked }: { schedules: ScheduleOption[]; picked: string[]; setPicked: (ids: string[]) => void }) {
+const TRACK_OPTIONS: { value: string; label: string }[] = [
+  { value: 'IOP', label: 'IOP' }, { value: 'ELITE', label: 'Elite' }, { value: 'PAP', label: 'PAP' }, { value: 'PT', label: 'PT' },
+  { value: 'JRP', label: 'JRP' }, { value: 'JRP_RECORDED', label: 'JRP Recorded' },
+];
+
+function ClubPicker({ schedules, picked, setPicked, tracks, setTracks }: { schedules: ScheduleOption[]; picked: string[]; setPicked: (ids: string[]) => void; tracks: string[]; setTracks: (t: string[]) => void }) {
   const [batchId, setBatchId] = useState('');
   const [timing, setTiming] = useState('');
   const [mode, setMode] = useState('');
@@ -877,6 +882,18 @@ function ClubPicker({ schedules, picked, setPicked }: { schedules: ScheduleOptio
         {shown.length === 0 && <p className="px-3 py-2 text-xs text-muted-foreground">No running schedules match these filters.</p>}
       </div>
       <p className="text-xs text-muted-foreground mt-1">Ticks stay selected when you change a filter, so you can mix e.g. Morning + Online, then Evening + Offline.</p>
+      <div className="mt-3">
+        <span className="text-xs font-medium text-muted-foreground">Student track(s) who can attend *</span>
+        <div className="flex flex-wrap gap-2 mt-1">
+          {TRACK_OPTIONS.map((t) => (
+            <label key={t.value} className={`flex items-center gap-1.5 text-xs rounded-full border px-3 py-1 cursor-pointer ${tracks.includes(t.value) ? 'bg-blue-50 border-blue-300 text-blue-700 font-medium' : ''}`}>
+              <input type="checkbox" className="hidden" checked={tracks.includes(t.value)} onChange={() => setTracks(tracks.includes(t.value) ? tracks.filter((x) => x !== t.value) : [...tracks, t.value])} />
+              {t.label}
+            </label>
+          ))}
+        </div>
+        <p className="text-xs text-muted-foreground mt-1">Only active students of the ticked schedules on these tracks can see, join and be marked in the class.</p>
+      </div>
     </Field>
   );
 }
@@ -896,6 +913,7 @@ function CreateClassModal({ onClose, onSaved, setError }: { onClose: () => void;
   // Combined Soft Skills & Aptitude class: club several domain schedules (online + offline) of a batch.
   const [combined, setCombined] = useState(false);
   const [picked, setPicked] = useState<string[]>([]);
+  const [tracks, setTracks] = useState<string[]>(['IOP']);
   const [trainerId, setTrainerId] = useState('');
 
   useEffect(() => {
@@ -908,14 +926,14 @@ function CreateClassModal({ onClose, onSaved, setError }: { onClose: () => void;
   const batches = Array.from(new Map(schedules.map((s) => [s.batch.id, s.batch])).values());
   const batchSchedules = schedules.filter((s) => s.batch.id === batchId);
 
-  const canSubmit = (combined ? picked.length > 0 && !!trainerId : !!scheduleId) && title.trim() && scheduledDate && startTime && endTime;
+  const canSubmit = (combined ? picked.length > 0 && !!trainerId && tracks.length > 0 : !!scheduleId) && title.trim() && scheduledDate && startTime && endTime;
 
   const submit = () => {
     if (!canSubmit) return;
     setSaving(true);
     api.post('/api/live-classes', {
       scheduleId: combined ? picked[0] : scheduleId,
-      ...(combined ? { kind: 'SOFT_SKILLS', extraScheduleIds: picked.slice(1) } : {}),
+      ...(combined ? { kind: 'SOFT_SKILLS', extraScheduleIds: picked.slice(1), tracks } : {}),
       ...(trainerId ? { trainerId } : {}),
       title: title.trim(), topic: topic || undefined, description: description || undefined,
       scheduledDate, startTime, endTime,
@@ -929,10 +947,10 @@ function CreateClassModal({ onClose, onSaved, setError }: { onClose: () => void;
     <Modal title="Create Live Class" onClose={onClose}>
       <label className="flex items-start gap-2 text-sm rounded-lg border bg-blue-50/50 px-3 py-2 cursor-pointer">
         <input type="checkbox" className="mt-0.5" checked={combined} onChange={(e) => { setCombined(e.target.checked); setPicked([]); setScheduleId(''); if (e.target.checked && !title) setTitle('Soft Skills & Aptitude'); }} />
-        <span><b>Combined Soft Skills &amp; Aptitude class</b><br /><span className="text-xs text-muted-foreground">Club several domain schedules (online + offline) into one session. Only IOP students of the ticked schedules can join — JRP students are excluded.</span></span>
+        <span><b>Combined Soft Skills &amp; Aptitude class</b><br /><span className="text-xs text-muted-foreground">Club several domain schedules (online + offline) into one session. Only students on the track(s) you choose below can join.</span></span>
       </label>
       {combined ? (
-        <ClubPicker schedules={schedules} picked={picked} setPicked={setPicked} />
+        <ClubPicker schedules={schedules} picked={picked} setPicked={setPicked} tracks={tracks} setTracks={setTracks} />
       ) : (
         <>
           <Field label="Batch *">
@@ -996,6 +1014,7 @@ function BulkCreateClassModal({ onClose, onSaved, setError }: { onClose: () => v
   const [combined, setCombined] = useState(false);
   const [picked, setPicked] = useState<string[]>([]);
   const [trainerId, setTrainerId] = useState('');
+  const [tracks, setTracks] = useState<string[]>(['IOP']);
   const effectiveScheduleId = combined ? (picked[0] || '') : scheduleId;
 
   useEffect(() => {
@@ -1027,7 +1046,7 @@ function BulkCreateClassModal({ onClose, onSaved, setError }: { onClose: () => v
   }, [effectiveScheduleId]);
 
   const canSubmit = Boolean(
-    effectiveScheduleId && (!combined || trainerId) && title.trim() && startDate && startTime && endTime &&
+    effectiveScheduleId && (!combined || (trainerId && tracks.length > 0)) && title.trim() && startDate && startTime && endTime &&
     (rangeMode === 'endDate' ? endDate && endDate >= startDate : numDays && Number(numDays) >= 1)
   );
 
@@ -1037,7 +1056,7 @@ function BulkCreateClassModal({ onClose, onSaved, setError }: { onClose: () => v
     setResult(null);
     api.post('/api/live-classes/bulk', {
       scheduleId: effectiveScheduleId,
-      ...(combined ? { kind: 'SOFT_SKILLS', extraScheduleIds: picked.slice(1) } : {}),
+      ...(combined ? { kind: 'SOFT_SKILLS', extraScheduleIds: picked.slice(1), tracks } : {}),
       ...(trainerId ? { trainerId } : {}),
       title: title.trim(), topic: topic || undefined, description: description || undefined,
       startDate, startTime, endTime,
@@ -1077,10 +1096,10 @@ function BulkCreateClassModal({ onClose, onSaved, setError }: { onClose: () => v
         <>
           <label className="flex items-start gap-2 text-sm rounded-lg border bg-blue-50/50 px-3 py-2 cursor-pointer">
             <input type="checkbox" className="mt-0.5" checked={combined} onChange={(e) => { setCombined(e.target.checked); setPicked([]); setScheduleId(''); if (e.target.checked && !title) setTitle('Soft Skills & Aptitude'); }} />
-            <span><b>Combined Soft Skills &amp; Aptitude classes</b><br /><span className="text-xs text-muted-foreground">Club several schedules (online + offline); one class per running day, for IOP students only. The first ticked schedule sets the days it runs on.</span></span>
+            <span><b>Combined Soft Skills &amp; Aptitude classes</b><br /><span className="text-xs text-muted-foreground">Club several schedules (online + offline); one class per running day, for the track(s) you choose. The first ticked schedule sets the days it runs on.</span></span>
           </label>
           {combined ? (
-            <ClubPicker schedules={schedules} picked={picked} setPicked={setPicked} />
+            <ClubPicker schedules={schedules} picked={picked} setPicked={setPicked} tracks={tracks} setTracks={setTracks} />
           ) : (
             <>
               <Field label="Batch *">

@@ -46,6 +46,7 @@ export interface LiveClass {
   /** REGULAR, or SOFT_SKILLS = combined Soft Skills & Aptitude session (IOP students only) across several schedules. */
   kind?: 'REGULAR' | 'SOFT_SKILLS' | string;
   trainer?: { id: string; firstName: string; lastName: string } | null; // trainer picked when the class was created
+  tracks?: string | null; // SOFT_SKILLS only, e.g. ",IOP,ELITE," — null on older combined classes (= every track except JRP)
   combinedStudents?: number; // SOFT_SKILLS only: distinct IOP students across all clubbed schedules
   extraSchedules?: { schedule: { id: string; code: string | null; mode: string; batch: { id: string; code: string }; course: { id: string; name: string } } }[];
 }
