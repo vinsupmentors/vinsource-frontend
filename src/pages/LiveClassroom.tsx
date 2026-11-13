@@ -297,6 +297,7 @@ function RecordingBadge({ classId }: { classId: string }) {
   if (!st) return null;
   const retry = () => { setRetrying(true); api.post(`/api/live-classes/${classId}/recording/retry`).catch(() => {}).finally(() => setTimeout(() => setRetrying(false), 3000)); };
   if (st.state === 'RECORDING') return <span title="This class is being recorded" className="inline-flex items-center gap-1 text-[11px] font-bold px-2 py-0.5 rounded bg-red-500/20 text-red-300"><span className="w-2 h-2 rounded-full bg-red-500 animate-pulse" /> REC</span>;
+  if (st.state === 'WAITING') return <span title="Recording starts as soon as a microphone, camera or screen share is on" className="inline-flex items-center gap-1 text-[11px] font-bold px-2 py-0.5 rounded bg-amber-500/20 text-amber-300">Recording starts when mic / camera / screen is on</span>;
   if (st.state === 'STARTING') return <span className="inline-flex items-center gap-1 text-[11px] font-bold px-2 py-0.5 rounded bg-amber-500/20 text-amber-300">Starting recording…</span>;
   if (st.state === 'NOT_KEPT') return <span title={st.reason || ''} className="inline-flex items-center text-[11px] font-bold px-2 py-0.5 rounded bg-slate-500/30 text-slate-200">Not recorded (older batch)</span>;
   if (st.state === 'READY' || st.state === 'NONE') return null;
