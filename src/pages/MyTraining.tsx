@@ -1215,7 +1215,7 @@ function DayMaterialPanel({ schedule }: { schedule: ScheduleAssignment['schedule
     <div className="space-y-3">
       {error && <div className="bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg px-3 py-2">{error}</div>}
       {days.length === 0 ? (
-        <div className="bg-card rounded-xl border p-8 text-center text-sm text-muted-foreground">No day-wise material has been added for this course yet.</div>
+        <div className="bg-card rounded-xl border p-8 text-center text-sm text-muted-foreground">No day-wise material for this batch. It belongs to the Vinsup 2.0 curriculum (Batch 19 and later).</div>
       ) : (
         <>
           <p className="text-xs text-muted-foreground">{releasedCount} of {days.length} days released to this batch. Students only see a day after you release it.</p>

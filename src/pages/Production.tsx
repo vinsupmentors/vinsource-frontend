@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback, useMemo } from 'react';
+import React, { Fragment, useEffect, useState, useCallback, useMemo } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { useSelector } from 'react-redux';
 import { RootState } from '@/store';
@@ -35,7 +35,7 @@ type EmployeeLite = { id: string; firstName: string; lastName: string; employeeC
 
 type AcademyModule = {
   id: string; courseId: string; order: number; title: string;
-  hours?: number | null; dayRange?: string | null; topics?: string | null;
+  hours?: number | null; dayRange?: string | null; topics?: string | null; curriculum?: string;
 };
 type AcademyCourse = {
   id: string; name: string; description?: string | null; totalHours?: number | null;
@@ -497,8 +497,16 @@ function CoursesTab({ courses, canEdit, setError, refresh }: {
                     <tr><th className="py-1 pr-2">#</th><th className="py-1 pr-2">Title</th><th className="py-1 pr-2">Hours</th><th className="py-1 pr-2">Days</th>{canEdit && <th className="py-1" />}</tr>
                   </thead>
                   <tbody className="divide-y">
-                    {c.modules.map((m) => (
-                      <tr key={m.id}>
+                    {[...c.modules].sort((a, b) => (a.curriculum === b.curriculum ? a.order - b.order : a.curriculum === 'V2' ? -1 : 1)).map((m, i, arr) => (
+                      <Fragment key={m.id}>
+                        {(i === 0 || arr[i - 1].curriculum !== m.curriculum) && arr.some((x) => x.curriculum === 'V2') && arr.some((x) => x.curriculum !== 'V2') && (
+                          <tr className="bg-muted/40">
+                            <td colSpan={canEdit ? 5 : 4} className="py-1 px-2 text-xs font-semibold text-muted-foreground">
+                              {m.curriculum === 'V2' ? 'Vinsup 2.0 curriculum — Batch 19 and later' : 'Original curriculum — batches before 19'}
+                            </td>
+                          </tr>
+                        )}
+                      <tr>
                         <td className="py-1.5 pr-2">{m.order}</td>
                         <td className="py-1.5 pr-2">{m.title}</td>
                         <td className="py-1.5 pr-2 text-muted-foreground">{m.hours ?? '—'}</td>
@@ -509,6 +517,7 @@ function CoursesTab({ courses, canEdit, setError, refresh }: {
                           </td>
                         )}
                       </tr>
+                      </Fragment>
                     ))}
                   </tbody>
                 </table>
