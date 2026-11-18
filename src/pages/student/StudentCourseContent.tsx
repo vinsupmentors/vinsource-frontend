@@ -22,10 +22,22 @@ interface ModuleRow {
   lockedMaterialsCount?: number;
 }
 
+interface DayRow {
+  id: string;
+  dayNumber: number;
+  title: string;
+  topics?: string | null;
+  releasedAt?: string;
+  materials: MaterialRow[];
+}
+
 interface CourseBlock {
   scheduleId: string;
   courseId: string;
   courseName: string;
+  days?: DayRow[];
+  totalDays?: number;
+  lockedDaysCount?: number;
   generalMaterials?: MaterialRow[];
   modules: ModuleRow[];
 }
@@ -91,6 +103,34 @@ export default function StudentCourseContent() {
                 <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-2">Course Materials</p>
                 <div className="flex flex-wrap gap-2">
                   {block.generalMaterials.map((m) => <MaterialChip key={m.id} m={m} />)}
+                </div>
+              </div>
+            )}
+
+            {/* Day-wise study material — appears as the trainer releases each day */}
+            {(!!block.days?.length || !!block.totalDays) && (
+              <div className="px-4 py-3 border-b">
+                <div className="flex items-center justify-between mb-2">
+                  <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Day-wise Study Material</p>
+                  {!!block.totalDays && <span className="text-xs text-muted-foreground">{block.days?.length ?? 0} / {block.totalDays} days released</span>}
+                </div>
+                <div className="space-y-2">
+                  {[...(block.days || [])].sort((a, b) => b.dayNumber - a.dayNumber).map((d) => (
+                    <div key={d.id} className="rounded-lg border p-3">
+                      <p className="text-sm font-medium">Day {d.dayNumber} · {d.title}</p>
+                      {d.topics && <p className="text-xs text-muted-foreground mt-1 whitespace-pre-wrap">{d.topics}</p>}
+                      {!!d.materials.length && (
+                        <div className="flex flex-wrap gap-2 mt-2">
+                          {d.materials.map((mat) => <MaterialChip key={mat.id} m={mat} />)}
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                  {!!block.lockedDaysCount && (
+                    <p className="inline-flex items-center gap-1.5 text-[11px] text-muted-foreground bg-muted rounded-full px-2.5 py-1">
+                      <Lock className="w-3 h-3" /> {block.lockedDaysCount} more day{block.lockedDaysCount > 1 ? 's' : ''} — released by your trainer as the course progresses
+                    </p>
+                  )}
                 </div>
               </div>
             )}

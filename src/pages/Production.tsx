@@ -52,7 +52,7 @@ type BatchCourseSchedule = {
   id: string; code?: string | null; batchId: string; courseId: string; timing: BatchTiming; dayPattern: DayPattern;
   mode: DeliveryMode; startDate: string; endDate?: string | null; capacity?: number | null;
   onlineCapacity?: number | null; offlineCapacity?: number | null; status: BatchStatus;
-  startTime?: string | null; endTime?: string | null;
+  startTime?: string | null; endTime?: string | null; openForOnboarding?: boolean;
   course: { id: string; name: string }; trainers: TrainerAssignment[]; _count?: { enrollments: number };
 };
 type Batch = {
@@ -799,6 +799,12 @@ function BatchesTab({ batches, employees, canEdit, setError, refresh }: {
     catch (err) { setError(errMsg(err, 'Failed to update sub-batch status')); }
   };
 
+  // Production ticks this to let Sales pick the sub-batch when onboarding a lead.
+  const setOpenForOnboarding = async (scheduleId: string, open: boolean) => {
+    try { await api.put(`/api/production/schedules/${scheduleId}`, { openForOnboarding: open }); refresh(); }
+    catch (err) { setError(errMsg(err, 'Failed to update onboarding availability')); }
+  };
+
   const removeTrainer = async (scheduleId: string, trainerId: string) => {
     try { await api.delete(`/api/production/schedules/${scheduleId}/trainers/${trainerId}`); refresh(); }
     catch (err) { setError(errMsg(err, 'Failed to remove trainer')); }
@@ -874,6 +880,12 @@ function BatchesTab({ batches, employees, canEdit, setError, refresh }: {
                         <span>{DAY_PATTERNS.find((d) => d.value === s.dayPattern)?.label}</span>
                         <span>{s.mode}</span>
                         <span>{s._count?.enrollments ?? 0}{s.capacity ? ` / ${s.capacity}` : ''} students</span>
+                        {s.status !== 'COMPLETED' && s.status !== 'CANCELLED' && (
+                          <label title="Tick to let Sales onboard leads into this sub-batch" className={`flex items-center gap-1 ${canEdit ? 'cursor-pointer' : ''}`}>
+                            <input type="checkbox" disabled={!canEdit} checked={!!s.openForOnboarding} onChange={(e) => setOpenForOnboarding(s.id, e.target.checked)} />
+                            <span className={s.openForOnboarding ? 'text-green-700 font-medium' : ''}>Open for onboarding</span>
+                          </label>
+                        )}
                         {canEdit ? (
                           <select
                             value={s.status}

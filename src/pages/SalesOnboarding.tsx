@@ -98,20 +98,24 @@ const Pills = ({ value, options, onChange }: { value: string; options: [string, 
   </div>
 );
 
+interface OpenBatch {
+  id: string; code: string | null; timing: string; startTime?: string | null; endTime?: string | null;
+  dayPattern: string; mode: string; startDate: string; batch: { code: string }; course: { id: string; name: string };
+}
+const DAY_PATTERN_LABEL: Record<string, string> = { MON_SAT: 'Mon–Sat', MON_FRI: 'Mon–Fri', SAT_SUN: 'Sat–Sun', SUNDAY_ONLY: 'Sunday only', CUSTOM: 'Custom days' };
+const cap = (s: string) => s.charAt(0) + s.slice(1).toLowerCase();
+const openBatchLabel = (b: OpenBatch) => [DAY_PATTERN_LABEL[b.dayPattern] || b.dayPattern, cap(b.timing) + (b.startTime && b.endTime ? ` (${b.startTime}–${b.endTime})` : ''), cap(b.mode)].join(' · ');
+
 export interface EmiQuote { downPaymentPct: number; downPayment: number; balance: number; ratePct: number; interest: number; totalPayable: number; monthly: number[]; months: number }
 
 // ── Onboarding form ──
 export function OnboardingModal({ leadId, leadName, defaultCourse, onClose, onDone }: { leadId: string; leadName: string; defaultCourse?: string | null; onClose: () => void; onDone: () => void }) {
   const [courses, setCourses] = useState<{ id: string; name: string }[]>([]);
   const [course, setCourse] = useState(defaultCourse || '');
-  const [daysType, setDaysType] = useState('');
-  const [timing, setTiming] = useState('');
-  const [mode, setMode] = useState('');
-  const [method, setMethod] = useState('');
+  const [scheduleId, setScheduleId] = useState('');
+  const [openBatches, setOpenBatches] = useState<OpenBatch[]>([]);
+  const [batchesLoading, setBatchesLoading] = useState(false);
   const [totalFee, setTotalFee] = useState('');
-  const [emiMonths, setEmiMonths] = useState(0);
-  const [allowed, setAllowed] = useState<number[]>([]);
-  const [quote, setQuote] = useState<EmiQuote | null>(null);
   const [feeMaster, setFeeMaster] = useState<{ courseName: string; fee: number }[]>([]);
   const [regPaid, setRegPaid] = useState(false);
   const [pay, setPay] = useState<PayState>(emptyPay());
@@ -126,37 +130,31 @@ export function OnboardingModal({ leadId, leadName, defaultCourse, onClose, onDo
     if (m) setTotalFee(String(m.fee));
   }, [course, feeMaster]);
 
+  // Batches Production has opened for onboarding, for the chosen course.
   useEffect(() => {
-    if (method !== 'EMI' || !Number(totalFee)) { setAllowed([]); setEmiMonths(0); setQuote(null); return; }
-    api.get('/api/sales/emi/quote', { params: { fee: totalFee } }).then((r) => {
-      const a: number[] = r.data.data.allowedMonths || [];
-      setAllowed(a);
-      setEmiMonths((m) => (a.includes(m) ? m : 0));
-    }).catch(() => setAllowed([]));
-  }, [method, totalFee]);
-  useEffect(() => {
-    if (method !== 'EMI' || !emiMonths || !Number(totalFee)) { setQuote(null); return; }
-    api.get('/api/sales/emi/quote', { params: { fee: totalFee, months: emiMonths } }).then((r) => setQuote(r.data.data)).catch(() => setQuote(null));
-  }, [method, emiMonths, totalFee]);
+    setScheduleId('');
+    if (!course.trim()) { setOpenBatches([]); return; }
+    setBatchesLoading(true);
+    const t = setTimeout(() => {
+      api.get('/api/sales/onboarding-batches', { params: { course: course.trim() } })
+        .then((r) => setOpenBatches(r.data.data || []))
+        .catch(() => setOpenBatches([]))
+        .finally(() => setBatchesLoading(false));
+    }, 250);
+    return () => clearTimeout(t);
+  }, [course]);
 
   const submit = async () => {
     setError('');
     if (!course.trim()) return setError('Choose the course');
-    if (!daysType) return setError('Choose Weekday or Weekend');
-    if (!timing) return setError('Choose the timing');
-    if (!mode) return setError('Choose Offline or Online');
-    if (!method) return setError('Choose the payment method');
-    if (method === 'EMI' && !Number(totalFee)) return setError('Enter the course fee to set up the EMI');
-    if (method === 'EMI' && !emiMonths) return setError('Choose the number of EMI months');
-    if (quote && regPaid && Number(pay.amount) > quote.downPayment + 0.5) return setError(`The amount collected can't be more than the down payment (${formatCurrency(quote.downPayment)})`);
+    if (!scheduleId) return setError('Choose the batch');
     if (regPaid && (!Number(pay.amount) || !pay.file)) return setError('Enter the amount collected and attach the screenshot');
     if (regPaid && Number(totalFee) > 0 && Number(pay.amount) > Number(totalFee) + 0.5) return setError(`The amount collected (${formatCurrency(Number(pay.amount))}) is more than the course fee (${formatCurrency(Number(totalFee))})`);
     setSaving(true);
     try {
       const fd = new FormData();
-      fd.append('courseName', course.trim()); fd.append('daysType', daysType); fd.append('timing', timing); fd.append('mode', mode); fd.append('paymentMethod', method);
+      fd.append('courseName', course.trim()); fd.append('scheduleId', scheduleId);
       if (totalFee) fd.append('totalFee', totalFee);
-      if (method === 'EMI') fd.append('emiMonths', String(emiMonths));
       fd.append('registrationPaid', String(regPaid));
       if (regPaid) appendPay(fd, pay);
       await api.post(`/api/sales/leads/${leadId}/onboarding`, fd, { headers: { 'Content-Type': 'multipart/form-data' } });
@@ -169,7 +167,7 @@ export function OnboardingModal({ leadId, leadName, defaultCourse, onClose, onDo
     <div className="fixed inset-0 bg-black/50 z-[60] flex items-center justify-center p-4">
       <div className="bg-card rounded-2xl w-full max-w-lg max-h-[92vh] overflow-y-auto p-6 space-y-4">
         <div className="flex items-start justify-between">
-          <div><h3 className="font-semibold text-lg">Onboard {leadName}</h3><p className="text-xs text-muted-foreground">Fill the batch preference and payment details.</p></div>
+          <div><h3 className="font-semibold text-lg">Onboard {leadName}</h3><p className="text-xs text-muted-foreground">Choose the course and an open batch, then tick Registration paid if the student has paid.</p></div>
           <button onClick={onClose}><X className="w-4 h-4" /></button>
         </div>
         {error && <div className="bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg px-3 py-2">{error}</div>}
@@ -178,27 +176,34 @@ export function OnboardingModal({ leadId, leadName, defaultCourse, onClose, onDo
           <input list="onb-courses" value={course} onChange={(e) => setCourse(e.target.value)} className="mt-1 w-full px-3 py-2 border rounded-lg text-sm text-foreground bg-background" placeholder="Select or type the course" />
           <datalist id="onb-courses">{courses.map((c) => <option key={c.id} value={c.name} />)}</datalist>
         </label>
-        <div><p className="text-xs text-muted-foreground mb-1">Batch days</p><Pills value={daysType} onChange={setDaysType} options={[['WEEKDAY', 'Weekday'], ['WEEKEND', 'Weekend']]} /></div>
-        <div><p className="text-xs text-muted-foreground mb-1">Timing</p><Pills value={timing} onChange={setTiming} options={[['MORNING', 'Morning'], ['AFTERNOON', 'Afternoon'], ['EVENING', 'Evening']]} /></div>
-        <div><p className="text-xs text-muted-foreground mb-1">Mode</p><Pills value={mode} onChange={setMode} options={[['OFFLINE', 'Offline'], ['ONLINE', 'Online']]} /></div>
-        <div><p className="text-xs text-muted-foreground mb-1">Payment method</p><Pills value={method} onChange={setMethod} options={[['FULL', 'Full payment'], ['PART', 'Part payment'], ['EMI', 'EMI']]} /></div>
+        <div>
+          <p className="text-xs text-muted-foreground mb-1">Batch — tick one of the batches Production has opened</p>
+          {!course.trim() ? (
+            <p className="text-xs text-muted-foreground border rounded-lg px-3 py-2">Choose the course to see its open batches.</p>
+          ) : batchesLoading ? (
+            <p className="text-xs text-muted-foreground flex items-center gap-1.5"><Loader2 className="w-3.5 h-3.5 animate-spin" /> Loading batches…</p>
+          ) : openBatches.length === 0 ? (
+            <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">No batch is open for onboarding for this course. Ask Production to open one.</p>
+          ) : (
+            <div className="space-y-1.5">
+              {openBatches.map((b) => (
+                <label key={b.id} className={`flex items-start gap-2 border rounded-lg px-3 py-2 text-sm cursor-pointer ${scheduleId === b.id ? 'border-blue-600 bg-blue-50' : 'hover:bg-muted/50'}`}>
+                  <input type="radio" name="onb-batch" checked={scheduleId === b.id} onChange={() => setScheduleId(b.id)} className="mt-1" />
+                  <span>
+                    <b>{b.batch.code}</b>{b.code ? <span className="text-muted-foreground"> · {b.code}</span> : null}
+                    <span className="block text-xs text-muted-foreground">
+                      {openBatchLabel(b)} · starts {formatDate(b.startDate)}
+                    </span>
+                  </span>
+                </label>
+              ))}
+            </div>
+          )}
+        </div>
         <label className="block text-xs text-muted-foreground">Total course fee (₹ — auto-filled from the course, change if needed)
           <input type="number" min={0} value={totalFee} onChange={(e) => setTotalFee(e.target.value)} className="mt-1 w-full px-3 py-2 border rounded-lg text-sm text-foreground bg-background" />
         </label>
-
-        {method === 'EMI' && (
-          <div className="border rounded-xl p-3 space-y-2 bg-muted/20">
-            <p className="text-xs text-muted-foreground">EMI months{!Number(totalFee) ? ' — enter the course fee first' : ''}</p>
-            <Pills value={String(emiMonths)} onChange={(v) => setEmiMonths(Number(v))} options={allowed.map((m) => [String(m), `${m} months`] as [string, string])} />
-            {quote && (
-              <div className="text-xs space-y-0.5">
-                <p>Down payment ({quote.downPaymentPct}%): <b>{formatCurrency(quote.downPayment)}</b> · Balance: <b>{formatCurrency(quote.balance)}</b></p>
-                <p>Interest {quote.ratePct}% on the balance only: <b>{formatCurrency(quote.interest)}</b> · Total payable: <b>{formatCurrency(quote.totalPayable)}</b></p>
-                <p>Monthly EMI: <b>{formatCurrency(quote.monthly[0])}</b> × {quote.months}</p>
-              </div>
-            )}
-          </div>
-        )}
+        <p className="text-xs text-muted-foreground">Payment method and EMI are set later, in the lead's Fees section.</p>
 
         <label className="flex items-center gap-2 text-sm font-medium cursor-pointer">
           <input type="checkbox" checked={regPaid} onChange={(e) => setRegPaid(e.target.checked)} className="w-4 h-4" /> Registration paid
@@ -273,7 +278,7 @@ const FEE_STATUS: Record<string, { label: string; cls: string }> = {
   OVERDUE: { label: 'Overdue', cls: 'bg-red-100 text-red-700' },
   WAIVED: { label: 'Waived', cls: 'bg-slate-100 text-slate-500' },
 };
-const LABEL: Record<string, string> = { WEEKDAY: 'Weekday', WEEKEND: 'Weekend', MORNING: 'Morning', AFTERNOON: 'Afternoon', EVENING: 'Evening', OFFLINE: 'Offline', ONLINE: 'Online', FULL: 'Full payment', PART: 'Part payment', EMI: 'EMI' };
+const LABEL: Record<string, string> = { WEEKDAY: 'Weekday', WEEKEND: 'Weekend', MORNING: 'Morning', AFTERNOON: 'Afternoon', EVENING: 'Evening', OFFLINE: 'Offline', ONLINE: 'Online', HYBRID: 'Hybrid', FULL: 'Full payment', PART: 'Part payment', EMI: 'EMI', NOT_SET: 'Set in Fees' };
 
 /** Inline payment screenshot (loaded through the authenticated API); click to open full size. */
 export function ProofThumb({ url }: { url: string }) {
@@ -356,10 +361,69 @@ function ProofLink({ id }: { id: string }) {
   return <button onClick={open} disabled={busy} className="text-xs text-blue-600 hover:underline disabled:opacity-50">{busy ? '…' : 'View'}</button>;
 }
 
+// ── Set the payment plan (Full / Part / EMI) — chosen here now, no longer at onboarding ──
+function PlanModal({ leadId, fee, feeKnown, current, onClose, onDone }: { leadId: string; fee: number; feeKnown: boolean; current: string; onClose: () => void; onDone: () => void }) {
+  const [method, setMethod] = useState(['FULL', 'PART', 'EMI'].includes(current) ? current : '');
+  const [months, setMonths] = useState(0);
+  const [allowed, setAllowed] = useState<number[]>([]);
+  const [quote, setQuote] = useState<EmiQuote | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState('');
+  useEffect(() => {
+    if (method !== 'EMI' || !feeKnown) { setAllowed([]); setMonths(0); setQuote(null); return; }
+    api.get('/api/sales/emi/quote', { params: { fee } }).then((r) => setAllowed(r.data.data.allowedMonths || [])).catch(() => setAllowed([]));
+  }, [method, fee, feeKnown]);
+  useEffect(() => {
+    if (method !== 'EMI' || !months || !feeKnown) { setQuote(null); return; }
+    api.get('/api/sales/emi/quote', { params: { fee, months } }).then((r) => setQuote(r.data.data)).catch(() => setQuote(null));
+  }, [method, months, fee, feeKnown]);
+  const save = async () => {
+    setError('');
+    if (!method) return setError('Choose a payment method');
+    if (method === 'EMI' && !months) return setError('Choose the number of EMI months');
+    setSaving(true);
+    try { await api.put(`/api/sales/leads/${leadId}/payment-plan`, { paymentMethod: method, emiMonths: method === 'EMI' ? months : undefined }); onDone(); }
+    catch (e) { setError(errMsg(e, 'Could not set the payment plan')); }
+    finally { setSaving(false); }
+  };
+  return (
+    <div className="fixed inset-0 bg-black/50 z-[60] flex items-center justify-center p-4">
+      <div className="bg-card rounded-2xl w-full max-w-md max-h-[92vh] overflow-y-auto p-6 space-y-4">
+        <div className="flex items-start justify-between"><h3 className="font-semibold text-lg">Payment plan</h3><button onClick={onClose}><X className="w-4 h-4" /></button></div>
+        {error && <div className="bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg px-3 py-2">{error}</div>}
+        <Pills value={method} onChange={setMethod} options={[['FULL', 'Full payment'], ['PART', 'Part payment'], ['EMI', 'EMI']]} />
+        {method === 'EMI' && (
+          <div className="border rounded-xl p-3 space-y-2 bg-muted/20">
+            {!feeKnown ? <p className="text-xs text-amber-700">Set the course fee first (Edit course fee), then set up the EMI.</p> : (
+              <>
+                <p className="text-xs text-muted-foreground">EMI months</p>
+                <Pills value={String(months)} onChange={(v) => setMonths(Number(v))} options={allowed.map((m) => [String(m), `${m} months`] as [string, string])} />
+                {quote && (
+                  <div className="text-xs space-y-0.5">
+                    <p>Down payment ({quote.downPaymentPct}%): <b>{formatCurrency(quote.downPayment)}</b> · Balance: <b>{formatCurrency(quote.balance)}</b></p>
+                    <p>Interest {quote.ratePct}% on the balance only: <b>{formatCurrency(quote.interest)}</b> · Total payable: <b>{formatCurrency(quote.totalPayable)}</b></p>
+                    <p>Monthly EMI: <b>{formatCurrency(quote.monthly[0])}</b> × {quote.months}</p>
+                    <p className="text-muted-foreground">Anything already collected counts towards the down payment.</p>
+                  </div>
+                )}
+              </>
+            )}
+          </div>
+        )}
+        <div className="flex justify-end gap-2">
+          <button onClick={onClose} className="px-4 py-2 text-sm border rounded-lg">Cancel</button>
+          <button onClick={save} disabled={saving} className="px-4 py-2 text-sm rounded-lg bg-blue-600 text-white disabled:opacity-50">{saving ? 'Saving…' : 'Save plan'}</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export function LeadFeesPanel({ leadId, onboarding, canEdit, isAdmin, onChanged }: { leadId: string; onboarding: OnboardingInfo; canEdit: boolean; isAdmin: boolean; onChanged: () => void }) {
   const [data, setData] = useState<FeeData | null>(null);
   const [error, setError] = useState('');
   const [adding, setAdding] = useState(false);
+  const [planning, setPlanning] = useState(false);
   const [collecting, setCollecting] = useState<{ id: string; amount: number; title: string } | null>(null);
   const [busy, setBusy] = useState(false);
   const editFee = async () => {
@@ -391,6 +455,7 @@ export function LeadFeesPanel({ leadId, onboarding, canEdit, isAdmin, onChanged 
         <span><span className="font-medium">{onboarding.courseName}</span> · {LABEL[onboarding.daysType]} · {LABEL[onboarding.timing]} · {LABEL[onboarding.mode]} · {LABEL[onboarding.paymentMethod]}</span>
         <span className="flex items-center gap-2">
           {canEdit && <button onClick={editFee} disabled={busy} className="px-3 py-1.5 text-sm border rounded-lg hover:bg-muted/50">Edit course fee</button>}
+          {canEdit && !data.plans.some((p) => p.planType === 'EMI') && <button onClick={() => setPlanning(true)} className="px-3 py-1.5 text-sm border rounded-lg hover:bg-muted/50">{onboarding.paymentMethod === 'NOT_SET' ? 'Set payment plan' : 'Change payment plan'}</button>}
           {isAdmin && <button onClick={undo} disabled={busy} className="px-3 py-1.5 text-sm border border-red-300 text-red-700 rounded-lg hover:bg-red-50">Undo onboarding</button>}
           {canEdit && <button onClick={() => setAdding(true)} className="px-3 py-1.5 text-sm rounded-lg bg-blue-600 text-white">+ Add payment</button>}
         </span>
@@ -422,6 +487,7 @@ export function LeadFeesPanel({ leadId, onboarding, canEdit, isAdmin, onChanged 
         </table>
       </div>
       <p className="text-xs text-muted-foreground">Add each payment here with its screenshot. Finance approves it, and the lead stage then moves automatically (Registration Done → Partial Payment at 60% → Enrolled when fully paid).</p>
+      {planning && <PlanModal leadId={leadId} fee={data.total} feeKnown={data.totalKnown} current={onboarding.paymentMethod} onClose={() => setPlanning(false)} onDone={() => { setPlanning(false); load(); onChanged(); }} />}
       {collecting && <RecordPaymentModal leadId={leadId} needFee={false} installment={collecting} onClose={() => setCollecting(null)} onDone={() => { setCollecting(null); load(); onChanged(); }} />}
       {adding && <RecordPaymentModal leadId={leadId} needFee={!data.totalKnown} onClose={() => setAdding(false)} onDone={() => { setAdding(false); load(); onChanged(); }} />}
     </div>

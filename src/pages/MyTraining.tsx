@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import api, { BASE_URL } from '@/lib/api';
 import { formatDate, formatDateTime } from '@/lib/utils';
 import { useToast } from '@/components/ui/toaster';
-import { Loader2, Users, CalendarCheck, ClipboardList, MessageSquareText, Save, FileText, Rocket, X, CheckCircle2, XCircle, ArrowLeft, ChevronRight, Lock, Star, NotebookPen, Pencil, Trash2, RotateCcw, RefreshCw, ListChecks, GraduationCap, Plus } from 'lucide-react';
+import { Loader2, Users, CalendarCheck, ClipboardList, MessageSquareText, Save, FileText, Rocket, X, CheckCircle2, XCircle, ArrowLeft, ChevronRight, Lock, Star, NotebookPen, Pencil, Trash2, RotateCcw, RefreshCw, ListChecks, GraduationCap, Plus, BookOpen } from 'lucide-react';
 
 // Files uploaded by the backend (project submissions) come back as relative
 // paths like "/uploads/...". A bare <a href> resolves those against the
@@ -1179,10 +1179,81 @@ interface ReleasableOnlineTest { id: string; title: string; moduleId: string; du
 
 interface ReleasableContent { projects: ReleasableProject[]; feedbackForms: ReleasableFeedbackForm[]; onlineTests: ReleasableOnlineTest[]; }
 
-type ContentSubTab = 'projects' | 'feedback' | 'tests';
+type ContentSubTab = 'days' | 'projects' | 'feedback' | 'tests';
+
+// ── Day-wise study material: the trainer releases each day's files to this batch ──
+interface CurriculumDayRow {
+  id: string; dayNumber: number; title: string; topics: string | null;
+  materials: { id: string; title: string; type: string; url: string }[];
+  released: boolean; releasedAt: string | null;
+}
+
+function DayMaterialPanel({ schedule }: { schedule: ScheduleAssignment['schedule'] }) {
+  const [days, setDays] = useState<CurriculumDayRow[] | null>(null);
+  const [busyId, setBusyId] = useState<string | null>(null);
+  const [error, setError] = useState('');
+  const load = () => api.get(`/api/trainer-portal/schedules/${schedule.id}/curriculum-days`).then((r) => setDays(r.data.data)).catch(() => { setDays([]); setError('Failed to load the day-wise material'); });
+  useEffect(() => { load(); }, [schedule.id]); // eslint-disable-line react-hooks/exhaustive-deps
+  const errText = (e: unknown) => (e as { response?: { data?: { message?: string } } })?.response?.data?.message || 'Something went wrong';
+
+  const release = async (d: CurriculumDayRow) => {
+    if (!window.confirm(`Release Day ${d.dayNumber} · ${d.title} to this batch? Every enrolled student is notified and can open the files.`)) return;
+    setBusyId(d.id); setError('');
+    try { await api.post(`/api/trainer-portal/schedules/${schedule.id}/curriculum-days/${d.id}/release`); await load(); }
+    catch (e) { setError(errText(e)); } finally { setBusyId(null); }
+  };
+  const withdraw = async (d: CurriculumDayRow) => {
+    if (!window.confirm(`Withdraw Day ${d.dayNumber}? Students will no longer see its files.`)) return;
+    setBusyId(d.id); setError('');
+    try { await api.delete(`/api/trainer-portal/schedules/${schedule.id}/curriculum-days/${d.id}/release`); await load(); }
+    catch (e) { setError(errText(e)); } finally { setBusyId(null); }
+  };
+
+  if (!days) return <div className="flex justify-center py-8"><Loader2 className="w-5 h-5 animate-spin text-primary" /></div>;
+  const releasedCount = days.filter((d) => d.released).length;
+  return (
+    <div className="space-y-3">
+      {error && <div className="bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg px-3 py-2">{error}</div>}
+      {days.length === 0 ? (
+        <div className="bg-card rounded-xl border p-8 text-center text-sm text-muted-foreground">No day-wise material has been added for this course yet.</div>
+      ) : (
+        <>
+          <p className="text-xs text-muted-foreground">{releasedCount} of {days.length} days released to this batch. Students only see a day after you release it.</p>
+          {days.map((d) => (
+            <div key={d.id} className="bg-card rounded-xl border p-4 flex items-start justify-between gap-3">
+              <div className="min-w-0 space-y-1">
+                <p className="text-sm font-semibold">Day {d.dayNumber} · {d.title}</p>
+                {d.topics && <p className="text-xs text-muted-foreground whitespace-pre-line line-clamp-3">{d.topics}</p>}
+                {d.materials.length === 0 ? (
+                  <p className="text-xs text-amber-700">No files uploaded for this day yet.</p>
+                ) : (
+                  <div className="flex flex-wrap gap-x-3 gap-y-1">
+                    {d.materials.map((m) => <a key={m.id} href={fileUrl(m.url)} target="_blank" rel="noreferrer" className="text-xs text-blue-600 hover:underline">{m.title}</a>)}
+                  </div>
+                )}
+              </div>
+              <div className="flex items-center gap-2 shrink-0">
+                {d.released ? (
+                  <>
+                    <span className="text-xs px-2 py-0.5 rounded-full font-medium bg-green-100 text-green-700" title={d.releasedAt ? formatDateTime(d.releasedAt) : ''}>Released</span>
+                    <button onClick={() => withdraw(d)} disabled={busyId === d.id} className="px-3 py-1.5 rounded-lg border text-xs font-medium text-red-600 hover:bg-red-50 disabled:opacity-60">Withdraw</button>
+                  </>
+                ) : (
+                  <button onClick={() => release(d)} disabled={busyId === d.id || d.materials.length === 0} className="px-3 py-1.5 rounded-lg bg-blue-600 text-white text-xs font-medium hover:bg-blue-700 disabled:opacity-50 flex items-center gap-1.5">
+                    {busyId === d.id ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Rocket className="w-3.5 h-3.5" />} Release
+                  </button>
+                )}
+              </div>
+            </div>
+          ))}
+        </>
+      )}
+    </div>
+  );
+}
 
 function ContentReleaseTab({ schedule }: { schedule: ScheduleAssignment['schedule'] }) {
-  const [subTab, setSubTab] = useState<ContentSubTab>('projects');
+  const [subTab, setSubTab] = useState<ContentSubTab>('days');
   const [content, setContent] = useState<ReleasableContent | null>(null);
   const [loading, setLoading] = useState(true);
   const [busyId, setBusyId] = useState<string | null>(null);
@@ -1202,6 +1273,7 @@ function ContentReleaseTab({ schedule }: { schedule: ScheduleAssignment['schedul
   useEffect(load, [schedule.id]);
 
   const SUB_TABS: { key: ContentSubTab; label: string; icon: typeof FileText }[] = [
+    { key: 'days', label: 'Study Material', icon: BookOpen },
     { key: 'projects', label: 'Projects', icon: FileText },
     { key: 'feedback', label: 'Feedback Forms', icon: MessageSquareText },
     { key: 'tests', label: 'Online Tests', icon: ClipboardList },
@@ -1297,6 +1369,8 @@ function ContentReleaseTab({ schedule }: { schedule: ScheduleAssignment['schedul
           </button>
         ))}
       </div>
+
+      {subTab === 'days' && <DayMaterialPanel schedule={schedule} />}
 
       {subTab === 'projects' && (
         content.projects.length === 0 ? (
