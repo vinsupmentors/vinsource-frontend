@@ -78,6 +78,8 @@ interface Lead {
   lostReason?: LeadLostReason | null;
   notes?: string | null;
   lastContactAt?: string | null;
+  firstContactedAt?: string | null;
+  assignedAt?: string | null;
   nextFollowUpAt?: string | null;
   dnpCount?: number;
   // Student intake — captured during Log a Call, carried forward onto any
@@ -487,7 +489,7 @@ const leadFilterFields = (emps: EmployeeLite[]): FilterField[] => [
   { key: 'statusKey', label: 'Custom status (May Buy Later, Positive…)', type: 'select', options: CFG.statuses.filter((c) => c.key.startsWith('CUSTOM_')).map((c) => ({ value: c.key, label: c.label })), nullable: true },
   { key: 'assignedToId', label: 'Assigned to', type: 'select', options: empOptions(emps), nullable: true },
   { key: 'scoutKey', label: 'Lead Scout', type: 'select', options: CFG.scouts.map((s) => ({ value: s.key, label: s.label })), nullable: true },
-  { key: 'createdAt', label: 'Created', type: 'date' }, { key: 'lastContactAt', label: 'Last contact', type: 'date', nullable: true },
+  { key: 'createdAt', label: 'Created', type: 'date' }, { key: 'lastContactAt', label: 'Last contact', type: 'date', nullable: true }, { key: 'firstContactedAt', label: 'First contacted', type: 'date', nullable: true }, { key: 'assignedAt', label: 'Assigned time', type: 'date', nullable: true },
   { key: 'nextFollowUpAt', label: 'Follow-up', type: 'date', nullable: true },
   { key: 'demoMode', label: 'Demo mode', type: 'select', options: [{ value: 'ONLINE', label: 'Online' }, { value: 'OFFLINE', label: 'Offline' }] },
   { key: 'demoStatus', label: 'Demo status', type: 'select', options: ['SCHEDULED', 'COMPLETED', 'RESCHEDULED', 'NO_SHOW', 'CANCELLED'].map((s) => ({ value: s, label: s.replace(/_/g, ' ') })) },
@@ -1023,8 +1025,10 @@ export default function SalesPage() {
                   <ColumnHeader label="Source" sortKey="source" sortBy={sortBy} sortDir={sortDir} onSort={onSort}
                     options={[...Array.from(new Set([...cfg.sources.map((x) => x.label), ...sourceOptions])).map((x) => ({ value: x, label: x })), { value: 'Unknown', label: 'Unknown' }]} value={sourceFilter} onChange={setSourceFilter} />
                   <ColumnHeader label="Reminder" sortKey="nextFollowUpAt" sortBy={sortBy} sortDir={sortDir} onSort={onSort} options={REMINDER_OPTIONS} value={followUpFilter} onChange={setFollowUpFilter} />
-                  <ColumnHeader label="Last Contact" sortKey="lastContactAt" sortBy={sortBy} sortDir={sortDir} onSort={onSort} />
                   <ColumnHeader label="Created" sortKey="createdAt" sortBy={sortBy} sortDir={sortDir} onSort={onSort} />
+                  <ColumnHeader label="Assigned Time" sortKey="assignedAt" sortBy={sortBy} sortDir={sortDir} onSort={onSort} />
+                  <ColumnHeader label="First Contacted" sortKey="firstContactedAt" sortBy={sortBy} sortDir={sortDir} onSort={onSort} />
+                  <ColumnHeader label="Last Contact" sortKey="lastContactAt" sortBy={sortBy} sortDir={sortDir} onSort={onSort} />
                   {isAdmin && <th className="px-3 py-3"></th>}
                 </tr>
               </thead>
@@ -1071,10 +1075,12 @@ export default function SalesPage() {
                       <td className={`px-3 py-3 text-xs whitespace-nowrap ${reminderColor(lead.nextFollowUpAt)}`}>
                         {lead.nextFollowUpAt ? formatDateTime(lead.nextFollowUpAt) : (lead.status === 'LOST' || lead.status === 'ENROLLED' ? '—' : <span className="text-red-500">No reminder</span>)}
                       </td>
+                      <td className="px-3 py-3 text-xs text-muted-foreground whitespace-nowrap">{formatDateTime(lead.createdAt)}</td>
+                      <td className="px-3 py-3 text-xs text-muted-foreground whitespace-nowrap">{lead.assignedAt ? formatDateTime(lead.assignedAt) : (lead.assignedTo ? formatDateTime(lead.createdAt) : '—')}</td>
+                      <td className="px-3 py-3 text-xs text-muted-foreground whitespace-nowrap">{lead.firstContactedAt ? formatDateTime(lead.firstContactedAt) : 'Not yet'}</td>
                       <td className="px-3 py-3 text-xs text-muted-foreground whitespace-nowrap">
                         {lead.lastContactAt ? formatDateTime(lead.lastContactAt) : 'Never'}
                       </td>
-                      <td className="px-3 py-3 text-xs text-muted-foreground whitespace-nowrap">{formatDate(lead.createdAt)}</td>
                       {isAdmin && (
                         <td className="px-3 py-3">
                           <button onClick={() => deleteLead(lead)} title="Remove from screen (kept in database)" className="text-xs text-red-600 hover:underline">Remove</button>
@@ -2078,6 +2084,8 @@ function LeadDetailModal({ lead, employees, canEdit, isAdmin, isPresales, presal
             )}
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
               <div><p className="text-muted-foreground">Created</p><p>{formatDateTime(lead.createdAt)}</p></div>
+              <div><p className="text-muted-foreground">Assigned time</p><p>{lead.assignedAt ? formatDateTime(lead.assignedAt) : '—'}</p></div>
+              <div><p className="text-muted-foreground">First contacted</p><p>{lead.firstContactedAt ? formatDateTime(lead.firstContactedAt) : 'Not yet'}</p></div>
               <div><p className="text-muted-foreground">Last contact</p><p>{lead.lastContactAt ? formatDateTime(lead.lastContactAt) : 'Never'}</p></div>
               <div><p className="text-muted-foreground">Lead age</p><p>{leadAgeLabel(lead.createdAt)}</p></div>
               <div><p className="text-muted-foreground">Activities</p><p>{lead._count?.callLogs ?? 0}</p></div>
