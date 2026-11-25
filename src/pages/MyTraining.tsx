@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import api, { BASE_URL } from '@/lib/api';
 import { formatDate, formatDateTime } from '@/lib/utils';
 import { useToast } from '@/components/ui/toaster';
-import TrainerMyKra from '@/components/TrainerMyKra';
+import { CompletedBatches, OtherWorkSection } from '@/components/TrainerMyKra';
 import { Loader2, Users, CalendarCheck, ClipboardList, MessageSquareText, Save, FileText, Rocket, X, CheckCircle2, XCircle, ArrowLeft, ChevronRight, Lock, Star, NotebookPen, Pencil, Trash2, RotateCcw, RefreshCw, ListChecks, GraduationCap, Plus, BookOpen } from 'lucide-react';
 
 // Files uploaded by the backend (project submissions) come back as relative
@@ -45,10 +45,12 @@ interface MySoftskillSession {
   _count?: { attendances: number };
 }
 
-type Tab = 'batches' | 'attendance' | 'marks' | 'feedback' | 'kra' | 'mykra' | 'content' | 'softskill';
+type Tab = 'batches' | 'attendance' | 'marks' | 'feedback' | 'kra' | 'content' | 'softskill';
+type KraMode = 'daily' | 'other' | 'completed';
 
 export default function MyTraining() {
   const [tab, setTab] = useState<Tab>('batches');
+  const [kraMode, setKraMode] = useState<KraMode>('daily');
   const [assignments, setAssignments] = useState<ScheduleAssignment[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedScheduleId, setSelectedScheduleId] = useState<string | null>(null);
@@ -96,9 +98,12 @@ export default function MyTraining() {
       { key: 'kra' as Tab, label: 'Daily KRA', icon: NotebookPen },
       { key: 'content' as Tab, label: 'Projects / Feedback / Tests', icon: FileText },
     ] : []),
-    { key: 'mykra' as Tab, label: 'My KRA', icon: ListChecks },
     { key: 'softskill' as Tab, label: 'Softskill & Aptitude', icon: GraduationCap },
   ];
+
+  // Daily KRA only lists sub-batches that are still running; completed ones move to "Completed batches".
+  const running = assignments.filter((a) => a.schedule.status !== 'COMPLETED');
+  const kraSchedule = (running.find((a) => a.schedule.id === selectedScheduleId) ?? running[0])?.schedule;
 
   return (
     <div className="space-y-6">
@@ -119,7 +124,28 @@ export default function MyTraining() {
         ))}
       </div>
 
-      {tab !== 'batches' && tab !== 'attendance' && tab !== 'softskill' && tab !== 'mykra' && (
+      {tab === 'kra' && (
+        <div className="flex items-center gap-3 flex-wrap">
+          <label className="text-sm font-medium text-muted-foreground">Sub-batch:</label>
+          <select
+            value={kraMode === 'daily' ? (kraSchedule?.id || '') : ''}
+            onChange={(e) => { setSelectedScheduleId(e.target.value); setKraMode('daily'); }}
+            className="px-3 py-2 rounded-lg border bg-background text-sm"
+          >
+            {kraMode !== 'daily' && <option value="">Select a sub-batch…</option>}
+            {running.map((a) => (
+              <option key={a.schedule.id} value={a.schedule.id}>
+                {a.schedule.code ?? a.schedule.batch.code} — {a.schedule.course.name} ({a.schedule.timing})
+              </option>
+            ))}
+          </select>
+          <span className="text-xs text-muted-foreground">or</span>
+          <button onClick={() => setKraMode('other')} className={`px-3 py-2 rounded-lg border text-sm font-medium ${kraMode === 'other' ? 'bg-blue-600 text-white border-blue-600' : 'bg-background hover:bg-muted'}`}>Other work</button>
+          <button onClick={() => setKraMode('completed')} className={`px-3 py-2 rounded-lg border text-sm font-medium ${kraMode === 'completed' ? 'bg-blue-600 text-white border-blue-600' : 'bg-background hover:bg-muted'}`}>Completed batches</button>
+        </div>
+      )}
+
+      {tab !== 'batches' && tab !== 'attendance' && tab !== 'softskill' && tab !== 'kra' && (
         <div className="flex items-center gap-3">
           <label className="text-sm font-medium text-muted-foreground">Sub-batch:</label>
           <select
@@ -154,8 +180,11 @@ export default function MyTraining() {
       )}
       {tab === 'marks' && selected && <MarksTab schedule={selected} />}
       {tab === 'feedback' && selected && <FeedbackTab schedule={selected} />}
-      {tab === 'kra' && selected && <KraTab schedule={selected} />}
-      {tab === 'mykra' && <TrainerMyKra />}
+      {tab === 'kra' && kraMode === 'daily' && (kraSchedule
+        ? <KraTab schedule={kraSchedule} />
+        : <div className="bg-card rounded-xl border p-8 text-center text-sm text-muted-foreground">No running sub-batches. Use "Other work" or "Completed batches".</div>)}
+      {tab === 'kra' && kraMode === 'other' && <OtherWorkSection />}
+      {tab === 'kra' && kraMode === 'completed' && <CompletedBatches />}
       {tab === 'content' && selected && <ContentReleaseTab schedule={selected} />}
       {tab === 'softskill' && <SoftskillSessionsTab sessions={mySessions} loaded={sessionsLoaded} onRefresh={loadMySessions} />}
     </div>

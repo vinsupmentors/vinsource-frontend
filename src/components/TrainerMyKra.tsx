@@ -18,21 +18,7 @@ interface OtherWork { id: string; date: string; category: string; description: s
 const CATEGORIES = ['Interview preparation', 'Content / material creation', 'Student mentoring', 'Doubt clearing', 'Evaluation / project review', 'Meetings / training', 'Demo / counselling support', 'Admin / reports', 'Other'];
 const today = () => new Date().toISOString().slice(0, 10);
 
-export default function TrainerMyKra() {
-  const [section, setSection] = useState<'batch' | 'other'>('batch');
-  return (
-    <div className="space-y-4">
-      <div className="inline-flex rounded-lg border p-0.5 bg-muted/40 text-sm">
-        {([['batch', 'Completed batches'], ['other', 'Other work']] as const).map(([k, l]) => (
-          <button key={k} onClick={() => setSection(k)} className={`px-3 py-1.5 rounded-md font-medium ${section === k ? 'bg-background shadow-sm text-blue-600' : 'text-muted-foreground'}`}>{l}</button>
-        ))}
-      </div>
-      {section === 'batch' ? <CompletedBatches /> : <OtherWorkSection />}
-    </div>
-  );
-}
-
-function CompletedBatches() {
+export function CompletedBatches() {
   const [rows, setRows] = useState<CompletedBatch[]>([]);
   const [loading, setLoading] = useState(true);
   const [openId, setOpenId] = useState<string | null>(null);
@@ -129,7 +115,7 @@ function CompletedBatches() {
   );
 }
 
-function OtherWorkSection() {
+export function OtherWorkSection() {
   const [rows, setRows] = useState<OtherWork[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
