@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import api, { BASE_URL } from '@/lib/api';
 import { formatDate, formatDateTime } from '@/lib/utils';
 import { useToast } from '@/components/ui/toaster';
+import TrainerMyKra from '@/components/TrainerMyKra';
 import { Loader2, Users, CalendarCheck, ClipboardList, MessageSquareText, Save, FileText, Rocket, X, CheckCircle2, XCircle, ArrowLeft, ChevronRight, Lock, Star, NotebookPen, Pencil, Trash2, RotateCcw, RefreshCw, ListChecks, GraduationCap, Plus, BookOpen } from 'lucide-react';
 
 // Files uploaded by the backend (project submissions) come back as relative
@@ -44,7 +45,7 @@ interface MySoftskillSession {
   _count?: { attendances: number };
 }
 
-type Tab = 'batches' | 'attendance' | 'marks' | 'feedback' | 'kra' | 'content' | 'softskill';
+type Tab = 'batches' | 'attendance' | 'marks' | 'feedback' | 'kra' | 'mykra' | 'content' | 'softskill';
 
 export default function MyTraining() {
   const [tab, setTab] = useState<Tab>('batches');
@@ -95,6 +96,7 @@ export default function MyTraining() {
       { key: 'kra' as Tab, label: 'Daily KRA', icon: NotebookPen },
       { key: 'content' as Tab, label: 'Projects / Feedback / Tests', icon: FileText },
     ] : []),
+    { key: 'mykra' as Tab, label: 'My KRA', icon: ListChecks },
     { key: 'softskill' as Tab, label: 'Softskill & Aptitude', icon: GraduationCap },
   ];
 
@@ -117,7 +119,7 @@ export default function MyTraining() {
         ))}
       </div>
 
-      {tab !== 'batches' && tab !== 'attendance' && tab !== 'softskill' && (
+      {tab !== 'batches' && tab !== 'attendance' && tab !== 'softskill' && tab !== 'mykra' && (
         <div className="flex items-center gap-3">
           <label className="text-sm font-medium text-muted-foreground">Sub-batch:</label>
           <select
@@ -153,6 +155,7 @@ export default function MyTraining() {
       {tab === 'marks' && selected && <MarksTab schedule={selected} />}
       {tab === 'feedback' && selected && <FeedbackTab schedule={selected} />}
       {tab === 'kra' && selected && <KraTab schedule={selected} />}
+      {tab === 'mykra' && <TrainerMyKra />}
       {tab === 'content' && selected && <ContentReleaseTab schedule={selected} />}
       {tab === 'softskill' && <SoftskillSessionsTab sessions={mySessions} loaded={sessionsLoaded} onRefresh={loadMySessions} />}
     </div>

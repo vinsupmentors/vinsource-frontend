@@ -1,13 +1,17 @@
 import { useEffect, useState } from 'react';
 import api, { BASE_URL } from '@/lib/api';
+import { useAuth } from '@/hooks/useAuth';
+import SecurePdfViewer from '@/components/SecurePdfViewer';
 import { Loader2, CheckCircle2, Circle, BookOpen, FileText, Link2, PlayCircle, Download, Lock } from 'lucide-react';
 
 interface MaterialRow {
   id: string;
   title: string;
   type: 'FILE' | 'LINK' | 'VIDEO';
-  url: string;
+  url?: string;
   notes?: string | null;
+  /** Day-wise files: opened only in the protected viewer, never as a download link. */
+  protected?: boolean;
 }
 
 interface ModuleRow {
@@ -42,10 +46,22 @@ interface CourseBlock {
   modules: ModuleRow[];
 }
 
-const materialHref = (url: string) => (/^https?:\/\//i.test(url) ? url : `${BASE_URL}${url}`);
+const materialHref = (url = '') => (/^https?:\/\//i.test(url) ? url : `${BASE_URL}${url}`);
 
-function MaterialChip({ m }: { m: MaterialRow }) {
+function MaterialChip({ m, onOpen }: { m: MaterialRow; onOpen?: (m: MaterialRow) => void }) {
   const Icon = m.type === 'VIDEO' ? PlayCircle : m.type === 'LINK' ? Link2 : FileText;
+  if (m.protected && onOpen) {
+    return (
+      <button
+        type="button"
+        onClick={() => onOpen(m)}
+        title={m.notes || m.title}
+        className="inline-flex items-center gap-1.5 text-xs font-medium border rounded-full px-2.5 py-1 transition-colors bg-blue-50 text-blue-700 border-blue-200 hover:bg-blue-100"
+      >
+        <Icon className="w-3.5 h-3.5" /> {m.title}
+      </button>
+    );
+  }
   const color = m.type === 'VIDEO'
     ? 'bg-red-50 text-red-700 border-red-200 hover:bg-red-100'
     : m.type === 'LINK'
@@ -68,6 +84,10 @@ function MaterialChip({ m }: { m: MaterialRow }) {
 export default function StudentCourseContent() {
   const [blocks, setBlocks] = useState<CourseBlock[]>([]);
   const [loading, setLoading] = useState(true);
+  const [viewing, setViewing] = useState<MaterialRow | null>(null);
+  const { user } = useAuth();
+  const stu = user?.student as { firstName?: string; lastName?: string; studentCode?: string } | null | undefined;
+  const watermark = [stu ? `${stu.firstName ?? ''} ${stu.lastName ?? ''}`.trim() : '', stu?.studentCode, user?.email].filter(Boolean).join(' · ');
 
   useEffect(() => {
     api.get('/api/student-portal/course-content').then((r) => setBlocks(r.data.data || [])).finally(() => setLoading(false));
@@ -78,6 +98,15 @@ export default function StudentCourseContent() {
   return (
     <div className="space-y-6">
       <h1 className="text-xl font-bold">Course Content</h1>
+
+      {viewing && (
+        <SecurePdfViewer
+          apiPath={`/api/student-portal/day-material/${viewing.id}/file`}
+          title={viewing.title}
+          watermark={watermark || 'Vinsup Skill Academy'}
+          onClose={() => setViewing(null)}
+        />
+      )}
 
       {blocks.length === 0 && (
         <div className="bg-card rounded-xl border p-8 text-center text-muted-foreground text-sm">
@@ -121,7 +150,7 @@ export default function StudentCourseContent() {
                       {d.topics && <p className="text-xs text-muted-foreground mt-1 whitespace-pre-wrap">{d.topics}</p>}
                       {!!d.materials.length && (
                         <div className="flex flex-wrap gap-2 mt-2">
-                          {d.materials.map((mat) => <MaterialChip key={mat.id} m={mat} />)}
+                          {d.materials.map((mat) => <MaterialChip key={mat.id} m={mat} onOpen={setViewing} />)}
                         </div>
                       )}
                     </div>
