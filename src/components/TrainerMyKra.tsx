@@ -13,9 +13,8 @@ interface CompletedBatch {
   };
   kra: BatchKra | null;
 }
-interface OtherWork { id: string; date: string; category: string; description: string; notes: string | null }
+interface OtherWork { id: string; date: string; description: string; notes: string | null }
 
-const CATEGORIES = ['Interview preparation', 'Content / material creation', 'Student mentoring', 'Doubt clearing', 'Evaluation / project review', 'Meetings / training', 'Demo / counselling support', 'Admin / reports', 'Other'];
 const today = () => new Date().toISOString().slice(0, 10);
 
 export function CompletedBatches() {
@@ -121,7 +120,6 @@ export function OtherWorkSection() {
   const [error, setError] = useState('');
   const [editingId, setEditingId] = useState<string | null>(null);
   const [date, setDate] = useState(today());
-  const [category, setCategory] = useState(CATEGORIES[0]);
   const [description, setDescription] = useState('');
   const [notes, setNotes] = useState('');
   const [saving, setSaving] = useState(false);
@@ -132,13 +130,13 @@ export function OtherWorkSection() {
   };
   useEffect(load, []);
 
-  const reset = () => { setEditingId(null); setDate(today()); setCategory(CATEGORIES[0]); setDescription(''); setNotes(''); };
+  const reset = () => { setEditingId(null); setDate(today()); setDescription(''); setNotes(''); };
 
   const submit = async () => {
-    if (!date || !category || !description.trim()) return;
+    if (!date || !description.trim()) return;
     setSaving(true); setError('');
     try {
-      const body = { date, category, description: description.trim(), notes: notes.trim() };
+      const body = { date, description: description.trim(), notes: notes.trim() };
       if (editingId) await api.put(`/api/trainer-portal/other-work/${editingId}`, body);
       else await api.post('/api/trainer-portal/other-work', body);
       reset(); load();
@@ -146,7 +144,7 @@ export function OtherWorkSection() {
   };
 
   const edit = (w: OtherWork) => {
-    setEditingId(w.id); setDate(w.date.slice(0, 10)); setCategory(w.category); setDescription(w.description); setNotes(w.notes || '');
+    setEditingId(w.id); setDate(w.date.slice(0, 10)); setDescription(w.description); setNotes(w.notes || '');
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
@@ -161,18 +159,9 @@ export function OtherWorkSection() {
       {error && <div className="bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg px-3 py-2">{error}</div>}
 
       <div className="bg-card rounded-xl border p-4 space-y-3">
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-          <div>
-            <label className="block text-xs font-medium mb-1 text-muted-foreground">Date</label>
-            <input type="date" value={date} onChange={(e) => setDate(e.target.value)} className="w-full px-2 py-1.5 rounded-md border bg-background text-sm" />
-          </div>
-          <div>
-            <label className="block text-xs font-medium mb-1 text-muted-foreground">Category</label>
-            <select value={category} onChange={(e) => setCategory(e.target.value)} className="w-full px-2 py-1.5 rounded-md border bg-background text-sm">
-              {CATEGORIES.map((c) => <option key={c} value={c}>{c}</option>)}
-              {!CATEGORIES.includes(category) && <option value={category}>{category}</option>}
-            </select>
-          </div>
+        <div className="sm:w-1/2">
+          <label className="block text-xs font-medium mb-1 text-muted-foreground">Date</label>
+          <input type="date" value={date} onChange={(e) => setDate(e.target.value)} className="w-full px-2 py-1.5 rounded-md border bg-background text-sm" />
         </div>
         <div>
           <label className="block text-xs font-medium mb-1 text-muted-foreground">What did you do? *</label>
@@ -201,7 +190,6 @@ export function OtherWorkSection() {
               <div className="flex items-start justify-between gap-3">
                 <div className="flex items-center gap-2 text-xs text-muted-foreground flex-wrap">
                   <span className="font-medium text-foreground">{formatDate(w.date)}</span>
-                  <span className="px-2 py-0.5 rounded-full bg-muted font-medium">{w.category}</span>
                 </div>
                 <div className="flex items-center gap-1 shrink-0">
                   <button onClick={() => edit(w)} className="p-1.5 rounded-md hover:bg-muted text-muted-foreground"><Pencil className="w-3.5 h-3.5" /></button>
